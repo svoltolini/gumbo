@@ -327,7 +327,7 @@ private struct MacServerStep: View {
                         .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isResolving)
                     if isResolving { ProgressView().controlSize(.small) }
                 }
-                Text("HTTPS is the default. Tailscale addresses work when reachable from this Mac. For a NAS that only supports HTTP, enter its full http:// address and port, then review the connection before signing in.")
+                Text("HTTPS is the default and needs a trusted certificate matching the address. Tailscale provides network access, but its IP or MagicDNS name may not match DSM's certificate. For an HTTP-only NAS on a trusted private connection, enter its full http:// address and port, then review the warning before signing in.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

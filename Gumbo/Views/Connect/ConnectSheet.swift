@@ -26,7 +26,7 @@ struct ConnectSheet: View {
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("Enter a NAS name, IP address, or full HTTPS address. Gumbo uses HTTPS by default for security.\n\nFor remote access, enter your NAS's Tailscale IP (100.x.x.x) or full MagicDNS name (nas.tailnet.ts.net). Tailscale creates a secure connection without opening ports.\n\nHTTP sends credentials in cleartext — only use it on a trusted private network, and you will confirm this choice before signing in.")
+                    Text("Enter a NAS hostname, IP address or full URL. HTTPS is the default and requires a trusted certificate matching that address.\n\nWith Tailscale, use a name covered by DSM's certificate. The Tailscale IP or MagicDNS name may not match it.\n\nTo choose HTTP on a trusted private connection, enter the full http:// address and port (usually 5000). Review the warning before signing in.")
                 }
                 Section {
                     Button {
