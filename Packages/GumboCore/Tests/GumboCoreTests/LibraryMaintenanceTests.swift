@@ -28,7 +28,7 @@ import Testing
     @Test func unknownTagsAndHashFileNamesAreNotGoodSearchInputs() {
         for value in [nil, "", " No Genre ", "unknown genre", "UNKNOWN"] as [String?] { #expect(GenreLookup.isMissing(value)) }
         for value in ["Other", "World", "Alternative", "Unclassified"] { #expect(!GenreLookup.isMissing(value)) }
-        #expect(!GenreLookup.canSearch(album: "f595a65b6cdc837a5349f8bdbd3f4dfe", artist: "Someone"))
+        #expect(!GenreLookup.canSearch(album: "0123456789abcdef0123456789abcdef", artist: "Someone"))
         #expect(!GenreLookup.canSearch(album: "Album", artist: "Unknown Artist"))
     }
 }
@@ -90,7 +90,7 @@ private nonisolated let validAudio: Data = {
     let track = box("trak", box("mdia", handler + box("minf", box("stbl", stsd))))
     return brokenAudio + Data(box("moov", box("mvhd", header) + track))
 }()
-private nonisolated func inspectionTrack(_ path: String = "/music/f595a65b6cdc837a5349f8bdbd3f4dfe.m4a") -> Track {
+private nonisolated func inspectionTrack(_ path: String = "/music/0123456789abcdef0123456789abcdef.m4a") -> Track {
     let entry = RemoteEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: false, size: nil, modified: nil)
     return Catalogue.build(folders: [ScannedFolder(path: "/music", audio: [entry], cover: nil)], rootPath: "/music",
                            serverName: "Fixture", driveID: "inspection-fixture", existing: nil).albums[0].tracks[0]
