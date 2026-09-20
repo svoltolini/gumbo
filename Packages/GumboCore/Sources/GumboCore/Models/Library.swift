@@ -161,8 +161,10 @@ public nonisolated struct Album: Identifiable, Hashable, Codable, Sendable {
     public mutating func refreshFromTags() {
         let enriched = tracks.filter(\.isEnriched)
         title = Self.mostCommon(enriched.compactMap(\.albumTitleTag)) ?? folderTitle
-        let taggedArtists = enriched.compactMap { $0.albumArtistTag ?? $0.artist }
-        artist = Self.mostCommon(taggedArtists) ?? folderArtist
+        artist = ArtistClustering.assign(
+            enriched.map { .init(albumArtist: $0.albumArtistTag, artist: $0.artist) },
+            folderArtist: folderArtist
+        ).first ?? folderArtist
         year = Self.mostCommonInt(enriched.compactMap(\.yearTag)) ?? folderYear ?? 0
         genre = Self.mostCommon(enriched.compactMap(\.genreTag)) ?? "Unknown genre"
     }

@@ -18,10 +18,11 @@ public nonisolated enum ArtistClustering {
             return names
         }
 
-        // 0. Album artist tags are the authority when most songs carry one: "Lil Baby & Lil Durk"
+        // 0. An album artist tag is the authority when most songs share it: "Lil Baby & Lil Durk"
         //    stays the album's artist even though the songs credit each of them alone.
         let tagged = items.compactMap { $0.albumArtist.nonEmpty }
-        if tagged.count * 2 > items.count, let chosen = mostCommon(tagged) {
+        if let chosen = mostCommon(tagged),
+           tagged.filter({ $0.caseInsensitiveCompare(chosen) == .orderedSame }).count * 2 > items.count {
             return [String](repeating: chosen, count: items.count)
         }
         let sets = names.map(participants)
@@ -46,7 +47,7 @@ public nonisolated enum ArtistClustering {
         }
 
         // 3. Nobody dominates by credit. The most frequent name takes the album when it covers at
-        //    least half of the songs; otherwise it is a compilation. The album stays whole either way.
+        //    more than half of the songs; a tied pair is a compilation, not an arbitrary winner.
         var clusters: [(artist: String, members: Int)] = []
         for name in names {
             if let index = clusters.firstIndex(where: { $0.artist.caseInsensitiveCompare(name) == .orderedSame }) {
@@ -55,7 +56,7 @@ public nonisolated enum ArtistClustering {
                 clusters.append((name, 1))
             }
         }
-        if let biggest = clusters.max(by: { $0.members < $1.members }), biggest.members * 2 >= items.count {
+        if let biggest = clusters.max(by: { $0.members < $1.members }), biggest.members * 2 > items.count {
             return [String](repeating: biggest.artist, count: items.count)
         }
         return [String](repeating: "Various Artists", count: items.count)

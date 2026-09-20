@@ -4,7 +4,7 @@ This checklist documents the remaining App Store Connect (ASC) configuration ste
 
 ## Current Gumbo identity — acceptance pending
 
-The September 20 rename created a separate app identity. Source configuration and unsigned builds have been checked, but the new IDs still require Apple registration, provisioning, signed archives, provider checks and fresh TestFlight acceptance. Track those gates in [#118](https://github.com/svoltolini/gumbo/issues/118) and evidence reconciliation in [#119](https://github.com/svoltolini/gumbo/issues/119).
+The September 20 rename created a separate app identity. Source configuration, platform builds and a signed development iPhone build have been checked. The app/widget IDs, app group and CloudKit container are registered, and CarPlay is enabled for Gumbo. Explicit Watch registration, distribution profiles/archives, App Store Connect configuration, production CloudKit and fresh device/TestFlight acceptance remain pending. Track those gates in [#118](https://github.com/svoltolini/gumbo/issues/118) and evidence reconciliation in [#119](https://github.com/svoltolini/gumbo/issues/119).
 
 ## Historical checklist entries — previous app identity
 

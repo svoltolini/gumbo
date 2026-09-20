@@ -264,6 +264,17 @@ public final class LibraryStore {
         let sourceChanged = contentSourceID != derived.sourceID || contentRootPath != derived.rootPath
         let albumsChanged = albums != derived.albums
         if albumsChanged || sourceChanged {
+            // Follow surviving songs when enrichment combines or splits an album. Never transfer
+            // history through matching paths on a different server or music folder.
+            var mappedHistory = false
+            var seen = Set<String>()
+            let recent = recentlyPlayedIDs.flatMap { id -> [String] in
+                if derived.albumsByID[id] != nil { return [id] }
+                guard !sourceChanged, let previous = albumsByID[id] else { return [] }
+                let replacements = previous.tracks.compactMap { derived.tracksByID[$0.id]?.albumID }
+                if !replacements.isEmpty { mappedHistory = true }
+                return replacements
+            }.filter { seen.insert($0).inserted }
             albums = derived.albums
             albumsByID = derived.albumsByID
             tracksByID = derived.tracksByID
@@ -275,7 +286,12 @@ public final class LibraryStore {
             if genres != derived.genres { genres = derived.genres }
             if genreShelves != derived.genreShelves { genreShelves = derived.genreShelves }
             if decades != derived.decades { decades = derived.decades }
-            recentlyPlayedIDs = recentlyPlayedIDs.filter { albumsByID[$0] != nil }
+            recentlyPlayedIDs = Array(recent.prefix(30))
+            if mappedHistory {
+                profiles?.updateLibrary(catalogue.driveID, recordingHistory: .recentAlbums) {
+                    $0.recentAlbums = recentlyPlayedIDs
+                }
+            }
         }
         if coveredAlbumIDs != derived.coveredAlbumIDs { coveredAlbumIDs = derived.coveredAlbumIDs }
         if palettes != derived.palettes { palettes = derived.palettes }

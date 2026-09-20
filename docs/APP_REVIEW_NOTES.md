@@ -59,7 +59,7 @@ The owner can provide temporary demo NAS credentials upon request. Contact infor
 
 ### tvOS
 - Focus-based navigation with Apple TV remote
-- Top Shelf displays recently played albums
+- Top Shelf uses the supplied Gumbo banner artwork
 
 ### watchOS
 - Companion app for the paired iPhone
