@@ -335,7 +335,7 @@ struct SettingsView: View {
     }
 }
 
-/// Neutral native labels reserve blue for actions and selections rather than every icon.
+/// Neutral native labels keep settings consistent with the system appearance.
 private struct NativeSettingsLabel: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

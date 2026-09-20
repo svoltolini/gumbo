@@ -118,7 +118,8 @@ struct PlaylistDetailView: View {
                     Label(state == .none ? "Download" : "Try Again", systemImage: "arrow.down.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.brand)
+                .tint(Palette.accent)
+                .foregroundStyle(Palette.onAccent)
             } else {
                 Text("Open Gumbo on your iPhone to sign the watch in.")
                     .font(.caption2)
@@ -130,7 +131,7 @@ struct PlaylistDetailView: View {
                 Text("Downloading \(done) of \(total)")
                     .font(.caption2)
             }
-            .tint(Palette.brand)
+            .tint(Palette.accent)
             Button("Cancel", role: .cancel) { downloads.cancel(playlist) }
                 .font(.caption)
         case .downloaded:
@@ -141,7 +142,8 @@ struct PlaylistDetailView: View {
                     Label("Play", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.brand)
+                .tint(Palette.accent)
+                .foregroundStyle(Palette.onAccent)
                 Button {
                     Task { await player.play(downloads.files(for: playlist), title: playlist.name, shuffled: true) }
                 } label: {
@@ -176,7 +178,7 @@ struct PlaylistDetailView: View {
                         if player.current?.id == track.id {
                             Image(systemName: "speaker.wave.2.fill")
                                 .font(.caption2)
-                                .foregroundStyle(Palette.brand)
+                                .foregroundStyle(Palette.accent)
                                 .frame(width: 16)
                         } else {
                             Text("\(index + 1)")

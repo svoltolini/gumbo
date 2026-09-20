@@ -62,12 +62,12 @@ struct IndexingView: View {
                 } label: {
                     Text("Try again")
                         .font(.headline)
-                        .foregroundStyle(Palette.onBrand)
+                        .foregroundStyle(Palette.onAccent)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)
-                .tint(Palette.brand)
+                .tint(Palette.accent)
                 Button("Choose another folder") {
                     model.chooseAnotherFolder()
                 }
@@ -81,12 +81,12 @@ struct IndexingView: View {
                 } label: {
                     Text("Open library")
                         .font(.headline)
-                        .foregroundStyle(model.isIndexed ? Palette.onBrand : .secondary)
+                        .foregroundStyle(model.isIndexed ? Palette.onAccent : .secondary)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)
-                .tint(model.isIndexed ? Palette.brand : Color.secondary.opacity(0.25))
+                .tint(model.isIndexed ? Palette.accent : Color.secondary.opacity(0.25))
                 .disabled(!model.isIndexed)
                 .animation(.easeInOut(duration: 0.4), value: model.isIndexed)
             }

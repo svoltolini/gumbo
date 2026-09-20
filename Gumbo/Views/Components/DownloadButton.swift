@@ -39,7 +39,7 @@ struct DownloadButton: View {
                 case .downloaded:
                     Image(systemName: "checkmark")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(Palette.onBrand)
+                        .foregroundStyle(Palette.onAccent)
                         .symbolEffect(.bounce, options: .speed(1.1), value: celebration)
                         .transition(reduceMotion ? .opacity : .scale(scale: 0.3).combined(with: .opacity))
                 }
@@ -47,7 +47,7 @@ struct DownloadButton: View {
             .frame(width: 50, height: 50)
             .background {
                 Circle()
-                    .fill(Palette.brand)
+                    .fill(Palette.accent)
                     .opacity(phase == .downloaded ? 1 : 0)
                     .scaleEffect(phase == .downloaded || reduceMotion ? 1 : 0.3)
             }
@@ -131,7 +131,7 @@ private struct Burst: View {
                 ForEach(0..<8, id: \.self) { index in
                     let angle = Double(index) / 8 * 2 * .pi
                     Circle()
-                        .fill(Palette.brand)
+                        .fill(Palette.accent)
                         .frame(width: 5, height: 5)
                         .scaleEffect(1 - t * 0.6)
                         .opacity(trigger == 0 ? 0 : max(0, 1 - t * 1.15))

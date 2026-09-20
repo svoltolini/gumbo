@@ -51,9 +51,9 @@ struct FolderPickerView: View {
                         HStack(spacing: 14) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.title3)
-                                .foregroundStyle(Palette.onBrand)
+                                .foregroundStyle(Palette.onAccent)
                                 .frame(width: 38, height: 38)
-                                .background(Palette.brand, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .background(Palette.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Use “\(parent.name)”")
                                     .font(.body.weight(.medium))

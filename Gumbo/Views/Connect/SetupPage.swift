@@ -123,7 +123,7 @@ private struct SetupStory: View {
             ZStack {
                 Palette.paper.mix(with: Palette.neutralTint, by: colorScheme == .dark ? 0.32 : 0.24)
                 RadialGradient(
-                    colors: [Palette.brand.opacity(colorScheme == .dark ? 0.26 : 0.2), .clear],
+                    colors: [Palette.ink.opacity(colorScheme == .dark ? 0.08 : 0.06), .clear],
                     center: UnitPoint(x: 0.3, y: 0.45),
                     startRadius: 0,
                     endRadius: 440

@@ -21,6 +21,9 @@ private final class CloudFixture {
     var pages: [CloudChangePage] = []
     var requests: [(CloudScope, Data?)] = []
     var modifications: [(CloudScope, [String], [String])] = []
+    var savedRecordBatches: [[CKRecord]] = []
+    var saveOutcomes: (([CKRecord]) throws -> [CKRecord.ID: Result<CKRecord, any Error>])?
+    var duringChanges: (() -> Void)?
     var subscriptions = 0
     var failZoneDiscovery = false
     var pageError: CKError?
@@ -62,6 +65,7 @@ private final class CloudFixture {
             subscribe: { self.subscriptions += 1 },
             changes: { scope, token in
                 self.requests.append((scope, token))
+                self.duringChanges?()
                 if let error = self.pageError { throw error }
                 if self.shouldHoldPage {
                     return try await withCheckedThrowingContinuation { continuation in
@@ -74,7 +78,8 @@ private final class CloudFixture {
             },
             modify: { scope, records, ids in
                 self.modifications.append((scope, records.map(\.recordID.recordName), ids.map(\.recordName)))
-                let result = CloudModifyResult(saved: Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .success($0)) }),
+                self.savedRecordBatches.append(records)
+                let result = CloudModifyResult(saved: try self.saveOutcomes?(records) ?? Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .success($0)) }),
                                                deleted: Dictionary(uniqueKeysWithValues: ids.map { ($0, self.deletionResults[$0.recordName] ?? .success(())) }))
                 if self.shouldHoldSave, !records.isEmpty {
                     return try await withCheckedThrowingContinuation { continuation in
@@ -832,4 +837,206 @@ private final class CloudFixture {
             f.cleanUp()
         }
     }
+}
+
+/// Reproduce an installed app retaining a cloud revision after its server record is gone.
+@MainActor
+private func seededMissingRecordFixture() async throws -> (CloudFixture, String) {
+    let fixture = try CloudFixture()
+    fixture.profiles.sync = nil // Explicit refreshes keep debounce uploads out of these scenarios.
+    let owner = try #require(fixture.profiles.owner)
+    #expect(fixture.profiles.activate(owner))
+    fixture.profiles.updateLibrary("nas") { $0.favourites = ["saved-song"] }
+    await fixture.sync.refresh(reason: "previous cloud record")
+    var edited = try #require(fixture.profiles.profiles.first { $0.id == owner.id })
+    edited.name = "Samuel"
+    #expect(fixture.profiles.update(edited))
+    fixture.modifications = []
+    fixture.savedRecordBatches = []
+    fixture.requests = []
+    return (fixture, owner.id)
+}
+
+@Test @MainActor func cloudMissingRecordRecoversLatestProfileAndPreviouslyAcknowledgedDocument() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var rejected = false
+    fixture.saveOutcomes = { records in
+        var results: [CKRecord.ID: Result<CKRecord, any Error>] = [:]
+        for record in records {
+            if record.recordID.recordName == id, !rejected {
+                rejected = true
+                var latest = try #require(fixture.profiles.profiles.first { $0.id == id })
+                latest.name = "Samuel Updated"
+                #expect(fixture.profiles.update(latest))
+                fixture.profiles.updateLibrary("nas") { $0.favourites.append("new-song") }
+                results[record.recordID] = .failure(CKError(.unknownItem))
+            } else {
+                if record.recordID.recordName == id {
+                    let persisted = try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+                    #expect(persisted.zones[CKCurrentUserDefaultName]?.systemFields[id] == nil)
+                    #expect(persisted.zones[CKCurrentUserDefaultName]?.remoteStamps[id] == nil)
+                }
+                results[record.recordID] = .success(record)
+            }
+        }
+        return results
+    }
+    await fixture.sync.refresh(reason: "missing server record")
+    if case .synced = fixture.sync.status {} else { Issue.record("Missing record should recover in the same refresh: \(fixture.sync.status)") }
+    #expect(fixture.requests.count == 2) // Initial pull, then deletion/conflict reconciliation.
+    let retry = try #require(fixture.savedRecordBatches.last)
+    #expect(retry.first { $0.recordID.recordName == id }?["name"] as? String == "Samuel Updated")
+    let data = try #require(retry.first { $0.recordType == "ProfileState" }?["document"] as? Data)
+    #expect(try ProfileCloudDocument.decode(data).libraries["nas"]?.favourites == ["saved-song", "new-song"])
+    #expect(fixture.profiles.profiles.contains { $0.id == id })
+}
+
+@Test @MainActor func cloudMissingRecordRepairSurvivesFailedRetryAndRelaunch() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var attempts = 0
+    fixture.saveOutcomes = { records in
+        attempts += 1
+        if attempts > 1 { throw CKError(.networkFailure) }
+        return Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.unknownItem))) })
+    }
+    await fixture.sync.refresh(reason: "repair then go offline")
+    #expect(attempts == 2)
+    let persisted = try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(persisted.zones[CKCurrentUserDefaultName]?.systemFields[id] == nil)
+    #expect(persisted.zones[CKCurrentUserDefaultName]?.remoteStateDigests?["state-\(id)"] == nil)
+    #expect(persisted.profileIDs.contains(id))
+    fixture.saveOutcomes = nil
+    fixture.relaunch(restoreProfiles: true)
+    fixture.profiles.sync = nil
+    await fixture.sync.refresh(reason: "retry after relaunch")
+    if case .synced = fixture.sync.status {} else { Issue.record("The repaired metadata should survive relaunch") }
+    #expect(fixture.savedRecordBatches.last?.contains { $0.recordID.recordName == id } == true)
+    #expect(fixture.savedRecordBatches.last?.contains { $0.recordID.recordName == "state-\(id)" } == true)
+    #expect(fixture.profiles.storedState(id: id).libraries["nas"]?.favourites == ["saved-song"])
+}
+
+@Test @MainActor func cloudMissingRecordRecoveryDoesNotResurrectARemotelyDeletedProfile() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    fixture.saveOutcomes = { records in
+        fixture.pages = [.init(records: [], deletions: [.init(id: .init(recordName: id, zoneID: .init(zoneName: "Family", ownerName: CKCurrentUserDefaultName)), type: "Profile")])]
+        return Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.unknownItem))) })
+    }
+    await fixture.sync.refresh(reason: "another device deleted the profile")
+    #expect(!fixture.profiles.profiles.contains { $0.id == id })
+    #expect(fixture.savedRecordBatches.count == 1)
+    #expect(try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName).zones[CKCurrentUserDefaultName]?.deletions[id] != nil)
+}
+
+@Test @MainActor func cloudMissingRecordRecoveryStopsWhenAccountChangesDuringPull() async throws {
+    let (fixture, _) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    fixture.saveOutcomes = { records in
+        fixture.duringChanges = {
+            fixture.account = "B"
+            fixture.sync.accountChanged()
+            fixture.duringChanges = nil
+        }
+        return Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.unknownItem))) })
+    }
+    await fixture.sync.refresh(reason: "account changes during repair")
+    #expect(fixture.savedRecordBatches.count == 1)
+    #expect(fixture.sync.currentUserRecordName == nil)
+    #expect(fixture.profiles.isLocked)
+    #expect(!fixture.persistence.hasSnapshot(account: "B"))
+}
+
+@Test @MainActor func cloudMissingRecordRetryIsBoundedAndUsesFriendlyError() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    fixture.saveOutcomes = { records in
+        Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.unknownItem, userInfo: [NSLocalizedDescriptionKey: "recordChangeTag specified, but record not found"]))) })
+    }
+    await fixture.sync.refresh(reason: "persistent missing record")
+    #expect(fixture.savedRecordBatches.count == 3) // Profile and document each have one repair attempt.
+    #expect(fixture.savedRecordBatches.flatMap { $0 }.filter { $0.recordID.recordName == id }.count == 2)
+    if case .failed(let text) = fixture.sync.status {
+        #expect(text.contains("still saved on this device"))
+        #expect(!text.contains("recordChangeTag"))
+    } else { Issue.record("An unrecoverable save must stay visible") }
+    #expect(fixture.profiles.profiles.contains { $0.id == id })
+}
+
+@Test @MainActor func cloudNetworkSaveFailureDoesNotDiscardValidMetadata() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    let before = try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    fixture.saveOutcomes = { records in
+        Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.networkFailure))) })
+    }
+    await fixture.sync.refresh(reason: "ordinary connection loss")
+    let after = try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(after.zones[CKCurrentUserDefaultName]?.systemFields[id] == before.zones[CKCurrentUserDefaultName]?.systemFields[id])
+    #expect(fixture.requests.count == 1)
+    #expect(fixture.savedRecordBatches.count == 1)
+}
+
+@Test @MainActor func cloudMissingRecordRecoveryUsesNewerProfileReturnedByThePull() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var rejected = false
+    fixture.saveOutcomes = { records in
+        if rejected { return Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .success($0)) }) }
+        rejected = true
+        let remote = fixture.profileRecord(id, name: "Newer cloud name")
+        remote["updatedAt"] = Date.now.addingTimeInterval(100)
+        remote["role"] = Profile.Role.owner.rawValue
+        remote["userRecordName"] = "A"
+        fixture.pages = [.init(records: [.success(remote)])]
+        return Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .failure(CKError(.unknownItem))) })
+    }
+    await fixture.sync.refresh(reason: "record returned during recovery")
+    #expect(fixture.savedRecordBatches.last?.first { $0.recordID.recordName == id }?["name"] as? String == "Newer cloud name")
+    #expect(fixture.profiles.profiles.first { $0.id == id }?.name == "Newer cloud name")
+}
+
+@Test @MainActor func cloudProfileRevisionConflictsHaveABoundedRetryBudget() async throws {
+    let (fixture, id) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    fixture.saveOutcomes = { records in
+        Dictionary(uniqueKeysWithValues: records.map { record in
+            let server = fixture.profileRecord(id)
+            return (record.recordID, .failure(CKError(.serverRecordChanged, userInfo: [CKRecordChangedErrorServerRecordKey: server])))
+        })
+    }
+    await fixture.sync.refresh(reason: "persistent profile conflicts")
+    #expect(fixture.savedRecordBatches.count == 4)
+    if case .failed = fixture.sync.status {} else { Issue.record("Repeated profile conflicts should remain visible") }
+    #expect(fixture.profiles.profiles.first { $0.id == id }?.name == "Samuel")
+}
+
+@Test @MainActor func cloudFamilyRetryPreservesEncryptedAndClearedFields() async throws {
+    let (fixture, _) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var info = FamilyInfo(name: "Family", serverName: "nas.example", serverAccount: "owner", musicPath: nil, updatedAt: .now)
+    info.familyAccount = "listener"
+    info.familyPassword = "new-test-password"
+    fixture.sync.familyInfoProvider = { info }
+    var rejected = false
+    fixture.saveOutcomes = { records in
+        var results: [CKRecord.ID: Result<CKRecord, any Error>] = [:]
+        for record in records {
+            if record.recordType == "Family", !rejected {
+                rejected = true
+                let server = CKRecord(recordType: "Family", recordID: record.recordID)
+                server["updatedAt"] = Date.distantPast
+                server["musicPath"] = "/old-path"
+                server.encryptedValues["familyPassword"] = "old-test-password"
+                results[record.recordID] = .failure(CKError(.serverRecordChanged, userInfo: [CKRecordChangedErrorServerRecordKey: server]))
+            } else { results[record.recordID] = .success(record) }
+        }
+        return results
+    }
+    await fixture.sync.refresh(reason: "family field conflict")
+    let record = try #require(fixture.savedRecordBatches.last?.first { $0.recordType == "Family" })
+    #expect(record.encryptedValues["familyPassword"] as? String == "new-test-password")
+    #expect(record["musicPath"] == nil)
+    if case .synced = fixture.sync.status {} else { Issue.record("The family record should reconcile") }
 }

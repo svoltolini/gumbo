@@ -99,16 +99,16 @@ private struct SetupRail: View {
         return HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(isCurrent || isDone ? Palette.brand : Palette.ink.opacity(0.1))
+                    .fill(isCurrent || isDone ? Palette.accent : Palette.ink.opacity(0.1))
                     .frame(width: 22, height: 22)
                 if isDone {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Palette.onBrand)
+                        .foregroundStyle(Palette.onAccent)
                 } else {
                     Text("\(step.rawValue + 1)")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isCurrent ? Palette.onBrand : .secondary)
+                        .foregroundStyle(isCurrent ? Palette.onAccent : .secondary)
                 }
             }
             Text(step.title)
@@ -194,7 +194,7 @@ private struct MacWelcomeStep: View {
                         HStack(alignment: .top, spacing: 14) {
                             Image(systemName: symbol(for: page.id))
                                 .font(.title3.weight(.medium))
-                                .foregroundStyle(Palette.brand)
+                                .foregroundStyle(Palette.accent)
                                 .frame(width: 26)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(page.title.replacingOccurrences(of: "\n", with: " "))
@@ -232,22 +232,22 @@ private struct MacWelcomeStep: View {
                     if model.signInError != nil, !model.isJoiningFamily {
                         Button("Try Again") { Task { await model.connectWithFamilyAccess(family) } }
                             .buttonStyle(.borderedProminent)
-                            .tint(Palette.brand)
-                            .foregroundStyle(Palette.onBrand)
+                            .tint(Palette.accent)
+                            .foregroundStyle(Palette.onAccent)
                             .keyboardShortcut(.defaultAction)
                     }
                 } else {
                     Button("Join \(family.serverName)") { Task { await model.joinFamilyServer(family) } }
                         .buttonStyle(.borderedProminent)
-                        .tint(Palette.brand)
-                        .foregroundStyle(Palette.onBrand)
+                        .tint(Palette.accent)
+                        .foregroundStyle(Palette.onAccent)
                         .keyboardShortcut(.defaultAction)
                 }
             } else {
                 Button("Continue") { model.findServers() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.brand)
-                    .foregroundStyle(Palette.onBrand)
+                    .tint(Palette.accent)
+                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -356,8 +356,8 @@ private struct MacServerStep: View {
                 if let server = servers.first(where: { $0.id == selection }) { model.select(server) }
             }
             .buttonStyle(.borderedProminent)
-            .tint(Palette.brand)
-            .foregroundStyle(Palette.onBrand)
+            .tint(Palette.accent)
+            .foregroundStyle(Palette.onAccent)
             .keyboardShortcut(.defaultAction)
             .disabled(selection == nil)
         }
@@ -466,8 +466,8 @@ private struct MacSignInStep: View {
             }
             Button("Sign In", action: submit)
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.brand)
-                .foregroundStyle(Palette.onBrand)
+                .tint(Palette.accent)
+                .foregroundStyle(Palette.onAccent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(account.isEmpty || password.isEmpty || model.isSigningIn || !transportAllowed)
         }
@@ -578,8 +578,8 @@ private struct MacFolderStep: View {
                 if let current = trail.last { model.chooseMusicFolder(path: current.path, showsProgress: true) }
             }
             .buttonStyle(.borderedProminent)
-            .tint(Palette.brand)
-            .foregroundStyle(Palette.onBrand)
+            .tint(Palette.accent)
+            .foregroundStyle(Palette.onAccent)
             .keyboardShortcut(.defaultAction)
             .disabled(trail.isEmpty)
         }
@@ -665,15 +665,15 @@ private struct MacLibraryStep: View {
                 Spacer()
                 Button("Try Again") { model.retryIndexing() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.brand)
-                    .foregroundStyle(Palette.onBrand)
+                    .tint(Palette.accent)
+                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
             } else {
                 Spacer()
                 Button("Open Library") { model.openLibrary() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.brand)
-                    .foregroundStyle(Palette.onBrand)
+                    .tint(Palette.accent)
+                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.isIndexed)
             }

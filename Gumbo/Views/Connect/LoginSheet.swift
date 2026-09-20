@@ -135,8 +135,8 @@ struct NASTransportChoice: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Use HTTPS Instead", action: useHTTPS)
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.brand)
-                    .foregroundStyle(Palette.onBrand)
+                    .tint(Palette.accent)
+                    .foregroundStyle(Palette.onAccent)
                     .controlSize(.small)
                 Toggle("I understand the risk — allow HTTP for this address", isOn: Binding(
                     get: { httpAllowed },
