@@ -22,6 +22,8 @@ From this folder, run `python3 -m http.server 8000`, then open `http://localhost
 
 Use **Gumbo** and **Gumbo Music** with this exact casing in visible branding. Domain names and technical identifiers stay lowercase. The current beta supports Synology DSM/File Station only; general NAS wording must keep that requirement clear.
 
+The hero and **Devices** section highlight iPhone, iPad, Mac, Apple TV, the Apple Watch companion, CarPlay and AirPlay. Keep native apps distinct from companion/integration features: Watch needs a paired iPhone for setup and playlist sync, CarPlay uses the connected iPhone, and Apple TV streams rather than retaining offline downloads. Do not promise playback handoff or a shared live queue. Minimum versions in the beta section match `project.yml`: iOS/iPadOS 26.1, macOS/tvOS/watchOS 26.0. Recheck these when platform support changes.
+
 The beta's limited-first-batch/free-year-at-launch offer is supplied by the owner. Keep privacy wording precise: no separate Gumbo account or music upload to a Gumbo cloud library; audio streams/downloads to devices, while iCloud syncs profiles and listening data. Remote streaming needs configured NAS access. This page does not replace the final app privacy policy.
 
 ## Vercel (current host)
