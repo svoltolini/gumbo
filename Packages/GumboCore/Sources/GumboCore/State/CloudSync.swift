@@ -789,6 +789,11 @@ public final class CloudSync {
         let expected = generation
         let activeScope = try scope(expected)
         guard records.allSatisfy({ $0.recordID.zoneID == activeScope.zoneID }) else { throw CancellationError() }
+        let records = records.filter { record in
+            let id = record.recordType == "Profile" ? record.recordID.recordName : record["profileID"] as? String
+            return id.map { containsProfileInCurrentAccount($0) } ?? true
+        }
+        guard !records.isEmpty else { return }
         let result = try await services.modify(activeScope, records, [])
         guard generation == expected else { throw CancellationError() }
         var acknowledgedDigests: [CKRecord.ID: String] = [:]
@@ -813,6 +818,7 @@ public final class CloudSync {
         try check(expected)
         var retry: [CKRecord] = []
         var heldBack: [CKRecord] = []
+        var missing: [CKRecord] = []
         var problem: (any Error)?
         for record in records {
             try check(expected)
@@ -853,11 +859,21 @@ public final class CloudSync {
                     let serverStamp = server["updatedAt"] as? Date ?? .distantPast
                     let ourStamp = ours["updatedAt"] as? Date ?? .distantPast
                     if ourStamp > serverStamp {
-                        for key in ours.allKeys() { server[key] = ours[key] }
-                        retry.append(server)
+                        if conflictAttempt >= 3 {
+                            problem = SyncFailure.message("iCloud changes are still arriving. Saved changes will be reconciled on the next sync.")
+                        } else {
+                            // Include cleared fields and encrypted values, not just non-nil public fields.
+                            let encryptedKeys = Set(ours.encryptedValues.changedKeys())
+                            for key in ours.changedKeys() where !encryptedKeys.contains(key) { server[key] = ours[key] }
+                            for key in encryptedKeys { server.encryptedValues[key] = ours.encryptedValues[key] }
+                            retry.append(server)
+                        }
                     } else {
                         try await apply(server)
                     }
+                } else if ckError?.code == .unknownItem, conflictAttempt < 3,
+                          systemFields[id.recordName] != nil || ours.recordChangeTag != nil {
+                    missing.append(ours)
                 } else if ckError?.code == .batchRequestFailed, records.count > 1 {
                     heldBack.append(ours)
                 } else {
@@ -867,10 +883,76 @@ public final class CloudSync {
             }
         }
         try persistState()
+        if !missing.isEmpty {
+            let recovered = try await recoverMissingRecords(missing, expected: expected)
+            // A recovery pull can observe a deletion of another record in this batch too.
+            retry.removeAll { record in
+                let id = record.recordType == "Profile" ? record.recordID.recordName : record["profileID"] as? String
+                return id.map { !containsProfileInCurrentAccount($0) } ?? false
+            }
+            let recoveredIDs = Set(recovered.map(\.recordID))
+            retry.removeAll { recoveredIDs.contains($0.recordID) }
+            retry.append(contentsOf: recovered)
+        }
         if !retry.isEmpty { try await save(retry, conflictAttempt: conflictAttempt + 1) }
         if let problem { throw problem }
         // Only side effects came back: the record that caused them is found by saving each alone.
-        for record in heldBack { try await save([record]) }
+        for record in heldBack { try await save([record], conflictAttempt: conflictAttempt) }
+    }
+
+    /// Cached revisions can outlive their records (for example when a development installation is
+    /// replaced by TestFlight). Pull first so deletions and newer server edits win before rebuilding
+    /// a rejected write. Never clear profiles, account ownership, or deletion tombstones to recover.
+    private func recoverMissingRecords(_ missing: [CKRecord], expected: UUID) async throws -> [CKRecord] {
+        let rejectedFields = systemFields
+        try await fetchChanges()
+        try check(expected)
+        for record in missing {
+            let name = record.recordID.recordName
+            // A record returned by the pull has fresh metadata; retain it for conflict-safe saving.
+            if systemFields[name] == rejectedFields[name] {
+                systemFields[name] = nil
+                remoteStamps[name] = nil
+                remoteStateDigests[name] = nil
+            }
+            if record.recordType == "Profile" {
+                // The document must remain pending even if the recovery save fails or the app exits.
+                remoteStateDigests["state-\(name)"] = nil
+            }
+        }
+        // Make the repair survive an offline retry or process termination before the next save.
+        try persistState()
+        var rebuilt: [CKRecord.ID: CKRecord] = [:]
+        for missingRecord in missing {
+            try check(expected)
+            let name = missingRecord.recordID.recordName
+            switch missingRecord.recordType {
+            case "Profile", "ProfileState":
+                let id = missingRecord.recordType == "Profile" ? name : missingRecord["profileID"] as? String
+                guard let id, containsProfileInCurrentAccount(id), let profiles,
+                      let latest = profiles.profiles.first(where: { $0.id == id }) else { continue }
+                let state = profiles.storedState(id: id)
+                let prepared = try await ProfileCloudPreparation.prepare(state, acknowledgedDigest: nil)
+                try check(expected)
+                guard containsProfileInCurrentAccount(id), let current = profiles.profiles.first(where: { $0.id == latest.id }) else { continue }
+                if missingRecord.recordType == "Profile" {
+                    let record = record(for: current)
+                    rebuilt[record.recordID] = record
+                }
+                // A missing Profile may also have an unuploaded document whose old digest made
+                // pushLocal skip it. Send it through the same revision/merge checks as ordinary saves.
+                if let record = record(for: prepared, profileID: id) { rebuilt[record.recordID] = record }
+            case "Family":
+                guard isOwner, let profiles, let active = profiles.active,
+                      containsProfileInCurrentAccount(active.id), var info = familyInfoProvider?() else { continue }
+                info.updatedAt = .now
+                let record = record(for: info)
+                rebuilt[record.recordID] = record
+            default:
+                throw SaveFailure(record: missingRecord, underlying: CKError(.unknownItem))
+            }
+        }
+        return rebuilt.values.sorted { $0.recordID.recordName < $1.recordID.recordName }
     }
 
     /// A record CloudKit would not take, named so the message says what was lost.
@@ -1198,6 +1280,7 @@ public final class CloudSync {
             case .notAuthenticated: return "Not signed in to iCloud."
             case .quotaExceeded: return "iCloud storage is full."
             case .permissionFailure: return "iCloud refused the change."
+            case .unknownItem: return "This item changed in iCloud. Your changes are still saved on this device. Try syncing again."
             case .batchRequestFailed: return "iCloud turned down a related change."
             case .zoneBusy, .requestRateLimited, .serviceUnavailable: return "iCloud is busy. It will try again."
             case .serverRejectedRequest, .invalidArguments: return "iCloud rejected the record. \(ckError.localizedDescription)"
