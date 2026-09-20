@@ -1,22 +1,25 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import GumboCore
 
 private actor IndexingTestGate {
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var continuations: [CheckedContinuation<Void, Never>] = []
     private(set) var entered = false
+    private(set) var arrivals = 0
     private var released = false
 
     func wait() async {
         entered = true
+        arrivals += 1
         guard !released else { return }
-        await withCheckedContinuation { continuation = $0 }
+        await withCheckedContinuation { continuations.append($0) }
     }
 
     func release() {
         released = true
-        continuation?.resume()
-        continuation = nil
+        for continuation in continuations { continuation.resume() }
+        continuations = []
     }
 }
 
@@ -28,15 +31,17 @@ private nonisolated final class ReliabilityDrive: RemoteDrive {
     let failure: URLError.Code
     let listingGate: IndexingTestGate?
     let readGate: IndexingTestGate?
+    let artwork: Data?
 
     init(id: String = "indexing-test", tree: [String: [RemoteEntry]], failingPath: String? = nil,
-         failure: URLError.Code = .timedOut, listingGate: IndexingTestGate? = nil, readGate: IndexingTestGate? = nil) {
+         failure: URLError.Code = .timedOut, listingGate: IndexingTestGate? = nil, readGate: IndexingTestGate? = nil, artwork: Data? = nil) {
         self.id = id
         self.tree = tree
         self.failingPath = failingPath
         self.failure = failure
         self.listingGate = listingGate
         self.readGate = readGate
+        self.artwork = artwork
     }
 
     func roots() async throws -> [RemoteEntry] { [] }
@@ -53,7 +58,10 @@ private nonisolated final class ReliabilityDrive: RemoteDrive {
         return Data()
     }
 
-    func download(_ path: String, maxBytes: Int64) async throws -> Data { throw URLError(.fileDoesNotExist) }
+    func download(_ path: String, maxBytes: Int64) async throws -> Data {
+        if let artwork, path.hasSuffix("cover.png") { return artwork }
+        throw URLError(.fileDoesNotExist)
+    }
     func streamURL(for path: String) -> URL? { nil }
 }
 
@@ -77,6 +85,67 @@ private nonisolated func scanEntry(_ path: String, directory: Bool = false) -> R
 }
 
 @Suite(.serialized) @MainActor struct IndexingReliabilityTests {
+    @Test(arguments: [false, true])
+    func scanProcessingAndArtworkStayOffTheUIThread(cachedTags: Bool) async throws {
+        try await withArtworkDirectory {
+            let stages = Mutex(Set<String>())
+            let indexer = LibraryIndexer(recordDiagnostics: { message in
+                for stage in ["Listed ", "Reading tags for ", "Regrouped by tags:", "Cover for "] where message.hasPrefix(stage) {
+                    #expect(!Thread.isMainThread, "Scan processing must not block the UI: \(stage)")
+                    stages.withLock { $0.insert(stage) }
+                }
+            })
+            let art = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a+V8AAAAASUVORK5CYII="))
+            let drive = ReliabilityDrive(tree: ["/music": [scanEntry("/music/Song.flac"), scanEntry("/music/cover.png")]], artwork: art)
+            var previous = Catalogue.build(folders: [ScannedFolder(path: "/music", audio: [scanEntry("/music/Song.flac")], cover: scanEntry("/music/cover.png"))], rootPath: "/music", serverName: "NAS", driveID: drive.id, existing: nil)
+            previous.albums[0].tracks[0].isEnriched = true
+            previous.albums[0].tracks[0].tagVersion = Track.currentTagVersion
+            var latest = Catalogue.empty
+            indexer.start(drive: drive, rootPath: "/music", serverName: "NAS", existing: cachedTags ? previous : nil) {
+                #expect(Thread.isMainThread, "Only publishing belongs on the UI thread")
+                latest = $0
+            }
+            try await waitForIndexing { !indexer.isRunning }
+            #expect(indexer.phase == .done)
+            let required = ["Listed ", "Regrouped by tags:", cachedTags ? "Cover for " : "Reading tags for "]
+            #expect(stages.withLock { $0.isSuperset(of: required) })
+            let album = try #require(latest.albums.first)
+            #expect(CoverStore.hasCover(for: album.id))
+            #expect(try Data(contentsOf: CoverStore.fileURL(for: album.id)) == art)
+            #expect(!CoverStore.hasTrackCover(for: album.tracks[0].id), "Temporary artwork is cleaned up after grouping")
+        }
+    }
+
+    @Test func repeatedManualRefreshDoesNotRestartAnActiveScan() async throws {
+        try await withArtworkDirectory {
+            let suite = "GumboRefreshTests.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            var services = ConnectionServices()
+            services.login = { url, _, _, _ in DSMSession(baseURL: url, sid: "fixture", apis: [:]) }
+            services.info = { _ in nil }
+            services.deletePassword = { _ in }
+            services.log = { _ in }
+            let library = LibraryStore()
+            let model = AppModel(library: library, defaults: defaults, services: services, restoresSession: false)
+            #expect(model.enterAddress("https://nas.example:5001"))
+            await model.signIn(account: "fixture", password: "fixture", otpCode: "", remember: false)
+            let gate = IndexingTestGate()
+            library.drive = ReliabilityDrive(tree: ["/music": []], listingGate: gate)
+            model.chooseMusicFolder(path: "/music", showsProgress: false)
+            try await waitForIndexing { await gate.entered }
+            for _ in 0..<3 {
+                model.rescan()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(await gate.arrivals == 1, "Repeated pulls must not start duplicate NAS listings")
+            #expect(model.isScanning)
+            await gate.release()
+            try await waitForIndexing { !model.isScanning }
+            #expect(model.indexer.phase == .failed(.noMusic(path: "/music")))
+        }
+    }
+
     @Test(arguments: [URLError.Code.timedOut, .userAuthenticationRequired, .noPermissionsToReadFile])
     func incompleteRefreshKeepsPreviousCatalogue(failure: URLError.Code) async throws {
         try await withArtworkDirectory {

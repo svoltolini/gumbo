@@ -151,10 +151,10 @@ struct SmartPlaylistCover: View {
 
     private var colors: [Color] {
         switch kind {
-        case .favourites: [Color(red: 0.86, green: 0.20, blue: 0.38), Color(red: 0.35, green: 0.09, blue: 0.30), Color(red: 0.98, green: 0.58, blue: 0.43)]
-        case .mix: [Color(red: 0.50, green: 0.26, blue: 0.75), Color(red: 0.18, green: 0.10, blue: 0.39), Color(red: 0.95, green: 0.50, blue: 0.34)]
-        case .recentlyPlayed: [Color(red: 0.10, green: 0.49, blue: 0.48), Color(red: 0.06, green: 0.23, blue: 0.34), Color(red: 0.51, green: 0.74, blue: 0.66)]
-        case .shuffle: [Color(red: 0.80, green: 0.42, blue: 0.12), Color(red: 0.31, green: 0.23, blue: 0.13), Color(red: 0.92, green: 0.71, blue: 0.36)]
+        case .favourites: [Color(red: 0.60, green: 0.35, blue: 0.43), Color(red: 0.43, green: 0.25, blue: 0.33)]
+        case .mix: [Color(red: 0.49, green: 0.42, blue: 0.62), Color(red: 0.34, green: 0.29, blue: 0.46)]
+        case .recentlyPlayed: [Color(red: 0.34, green: 0.50, blue: 0.47), Color(red: 0.22, green: 0.36, blue: 0.35)]
+        case .shuffle: [Color(red: 0.61, green: 0.49, blue: 0.33), Color(red: 0.45, green: 0.35, blue: 0.24)]
         }
     }
 
@@ -172,13 +172,6 @@ struct SmartPlaylistCover: View {
             let side = min(geometry.size.width, geometry.size.height)
             ZStack {
                 DriftingLightTile(colors: colors.map { PlatformColor($0) }, cornerRadius: cornerRadius)
-                // Quiet concentric grooves give each tile depth without competing with its symbol.
-                ForEach(0..<5) { ring in
-                    Circle()
-                        .stroke(.white.opacity(0.07), lineWidth: max(1, side * 0.005))
-                        .frame(width: side * (0.48 + Double(ring) * 0.19))
-                        .offset(x: side * 0.18, y: side * 0.13)
-                }
                 symbol(size: side)
             }
         }
@@ -192,7 +185,7 @@ struct SmartPlaylistCover: View {
         Image(systemName: symbolName)
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(.white)
-            .shadow(color: .black.opacity(0.22), radius: size * 0.03, y: size * 0.015)
+            .shadow(color: .black.opacity(0.10), radius: size * 0.02, y: size * 0.01)
     }
 }
 
@@ -265,7 +258,7 @@ final class DriftingLightView: PlatformView {
         base.startPoint = CGPoint(x: 0, y: 0)
         base.endPoint = CGPoint(x: 1, y: 1)
         light.type = .radial
-        light.colors = [PlatformColor.white.withAlphaComponent(0.38).cgColor, PlatformColor.white.withAlphaComponent(0).cgColor]
+        light.colors = [PlatformColor.white.withAlphaComponent(0.14).cgColor, PlatformColor.white.withAlphaComponent(0).cgColor]
         light.startPoint = CGPoint(x: 0.5, y: 0.5)
         light.endPoint = CGPoint(x: 1, y: 1)
         hostLayer.addSublayer(base)

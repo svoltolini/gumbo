@@ -51,7 +51,7 @@ public final class LibraryIndexer {
     public private(set) var coversTotal = 0
     private var task: Task<Void, Never>?
     private var currentRun: IndexingRun?
-    private let recordDiagnostics: @Sendable (String) -> Void
+    nonisolated private let recordDiagnostics: @Sendable (String) -> Void
 
     public init() {
         recordDiagnostics = { diagnostics($0) }
@@ -88,6 +88,18 @@ public final class LibraryIndexer {
     private func checkActive(_ run: IndexingRun) throws {
         try Task.checkCancellation()
         guard currentRun === run, run.isActive else { throw CancellationError() }
+    }
+
+    /// Check ownership on the UI actor immediately before publishing a worker's result.
+    private func publish(_ catalogue: Catalogue, run: IndexingRun, to onCatalogue: @MainActor (Catalogue) -> Void) throws {
+        try checkActive(run)
+        onCatalogue(catalogue)
+        try checkActive(run)
+    }
+
+    private func publishProgress(run: IndexingRun, enriched: Int? = nil, covers: Int? = nil, force: Bool = false) throws {
+        try checkActive(run)
+        noteEnrichProgress(enriched: enriched, covers: covers, force: force)
     }
 
     /// Progress reaches the screen at most twice a second. Every published change re-evaluates the
@@ -243,11 +255,12 @@ public final class LibraryIndexer {
     }
 
     /// Breadth-first walk with a few listings in flight; unreadable folders are counted and skipped.
-    nonisolated private static func scan(drive: any RemoteDrive, root: String, recordDiagnostics: @escaping @Sendable (String) -> Void, progress: @escaping @Sendable (Int, Int) -> Void) async throws -> ScanResult {
+    @concurrent nonisolated private static func scan(drive: any RemoteDrive, root: String, recordDiagnostics: @escaping @Sendable (String) -> Void, progress: @escaping @Sendable (Int, Int) -> Void) async throws -> ScanResult {
         var result = ScanResult()
         var queue = [root]
         var found = 0
         var isFirst = true
+        var lastProgress = ContinuousClock.now
         while !queue.isEmpty {
             try Task.checkCancellation()
             let batch = Array(queue.prefix(parallelism))
@@ -282,7 +295,11 @@ public final class LibraryIndexer {
                     found += audio.count
                 }
                 result.foldersListed += 1
-                progress(result.foldersListed, found)
+                // Throttle before enqueuing UI work, not just after a main-actor task is created.
+                if lastProgress.duration(to: .now) >= .milliseconds(500) {
+                    progress(result.foldersListed, found)
+                    lastProgress = .now
+                }
             }
         }
         return result
@@ -297,13 +314,15 @@ public final class LibraryIndexer {
         let source: String?
     }
 
-    private struct EnrichmentResult: Sendable {
+    nonisolated private struct EnrichmentResult: Sendable {
         let track: Track
         let cover: Data?
     }
 
-    private func runEnrichment(catalogue: Catalogue, drive: any RemoteDrive, run: IndexingRun, onCatalogue: @escaping @MainActor (Catalogue) -> Void) async throws {
-        try checkActive(run)
+    // `nonisolated` alone inherits the caller's executor with NonisolatedNonsendingByDefault.
+    // Keep tag processing, artwork decoding and filesystem work on a concurrent executor.
+    @concurrent nonisolated private func runEnrichment(catalogue: Catalogue, drive: any RemoteDrive, run: IndexingRun, onCatalogue: @escaping @MainActor (Catalogue) -> Void) async throws {
+        try await checkActive(run)
         var working = catalogue
         // Album ids that already asked one of their songs for embedded art; ids change as albums regroup,
         // which at worst costs one extra request per album.
@@ -326,13 +345,16 @@ public final class LibraryIndexer {
         if rereads > 0 { recordDiagnostics("Reading tags again for \(rereads) previously indexed tracks") }
         if restingCount > 0 { recordDiagnostics("Leaving \(restingCount) songs that could not be read three times; they are tried again after a week") }
         if !pending.isEmpty { recordDiagnostics("Reading tags for \(pending.count) songs") }
-        enrichTotal = pending.count
-        enrichedCount = 0
+        try await MainActor.run {
+            try checkActive(run)
+            enrichTotal = pending.count
+            enrichedCount = 0
+        }
         var enrichedSoFar = 0
         var lastPublish = Date.now
 
         for start in stride(from: 0, to: pending.count, by: Self.parallelism) {
-            try checkActive(run)
+            try await checkActive(run)
             let chunk = pending[start..<min(start + Self.parallelism, pending.count)]
             // Decide who should bring back a picture using the albums as they are grouped right now.
             var requests: [(track: Track, coverPath: String?, wantsArt: Bool, albumID: String)] = []
@@ -346,7 +368,7 @@ public final class LibraryIndexer {
             let results = await parallelResults(requests) { request in
                 await Self.enrich(track: request.track, coverPath: request.coverPath, wantsEmbeddedArt: request.wantsArt, drive: drive)
             }
-            try checkActive(run)
+            try await checkActive(run)
             for result in results {
                 var track = result.track
                 if !track.isEnriched || track.tagVersion != Track.currentTagVersion {
@@ -368,34 +390,30 @@ public final class LibraryIndexer {
                 }
                 enrichedSoFar += 1
             }
-            noteEnrichProgress(enriched: enrichedSoFar)
+            try await publishProgress(run: run, enriched: enrichedSoFar)
             if Date.now.timeIntervalSince(lastPublish) > 6 {
                 // Show albums as their tags settle instead of the folder grouping until the very end.
                 working = await regroupInBackground(working, run: run)
-                try checkActive(run)
-                onCatalogue(working)
-                try checkActive(run)
+                try await publish(working, run: run, to: onCatalogue)
                 lastPublish = .now
             }
         }
-        noteEnrichProgress(enriched: enrichedSoFar, force: true)
+        try await publishProgress(run: run, enriched: enrichedSoFar, force: true)
         working.indexedAt = .now
         working = await regroupInBackground(working, run: run)
-        try checkActive(run)
+        try await checkActive(run)
         let multiDisc = working.albums.filter(\.hasMultipleDiscs)
         recordDiagnostics("Regrouped by tags: \(working.albums.count) albums, \(multiDisc.count) with more than one disc" + (multiDisc.isEmpty ? "" : ": " + multiDisc.prefix(6).map { "“\($0.title)” (\($0.discs.count))" }.joined(separator: ", ")))
-        onCatalogue(working)
-        try checkActive(run)
-        try await runCoverPass(catalogue: working, drive: drive, run: run)
-        try checkActive(run)
-        noteEnrichProgress(covers: coversTotal, force: true)
+        try await publish(working, run: run, to: onCatalogue)
+        let total = try await runCoverPass(catalogue: working, drive: drive, run: run)
+        try await publishProgress(run: run, covers: total, force: true)
         CoverStore.clearTrackCovers()
-        onCatalogue(working)
+        try await publish(working, run: run, to: onCatalogue)
     }
 
     /// Partial updates need the same background work and cancellation boundary as the final result.
     /// Grouping thousands of songs on the main actor interrupts scrolling and transport controls.
-    private func regroupInBackground(_ catalogue: Catalogue, run: IndexingRun) async -> Catalogue {
+    nonisolated private func regroupInBackground(_ catalogue: Catalogue, run: IndexingRun) async -> Catalogue {
         let coverDirectory = CoverStore.directory
         return await Task.detached(priority: .userInitiated) {
             CoverStore.$directoryOverride.withValue(coverDirectory) {
@@ -409,8 +427,8 @@ public final class LibraryIndexer {
     }
 
     /// Fetches a cover for every album that still lacks one, from its folder image or its own tracks.
-    private func runCoverPass(catalogue: Catalogue, drive: any RemoteDrive, run: IndexingRun) async throws {
-        try checkActive(run)
+    @concurrent nonisolated private func runCoverPass(catalogue: Catalogue, drive: any RemoteDrive, run: IndexingRun) async throws -> Int {
+        try await checkActive(run)
         // Albums that had no cover anywhere last time are looked at again after a week, not on every refresh.
         let now = Date.now
         var resting = 0
@@ -422,20 +440,23 @@ public final class LibraryIndexer {
             }
             return true
         }
-        coversTotal = missing.count
-        coversDone = 0
+        try await MainActor.run {
+            try checkActive(run)
+            coversTotal = missing.count
+            coversDone = 0
+        }
         var coversSoFar = 0
         if resting > 0 { recordDiagnostics("Cover pass: \(resting) albums without any cover are left until next week") }
-        guard !missing.isEmpty else { return }
+        guard !missing.isEmpty else { return 0 }
         recordDiagnostics("Cover pass: \(missing.count) albums without covers")
         for start in stride(from: 0, to: missing.count, by: Self.parallelism) {
-            try checkActive(run)
+            try await checkActive(run)
             let chunk = missing[start..<min(start + Self.parallelism, missing.count)]
             let results: [CoverFetch] = await parallelResults(Array(chunk)) { album in
                 let found = await Self.fetchCover(for: album, drive: drive)
                 return CoverFetch(album: album, data: found?.0, source: found?.1)
             }
-            try checkActive(run)
+            try await checkActive(run)
             for fetch in results {
                 let album = fetch.album
                 let found: (Data, String)? = fetch.data.flatMap { data in fetch.source.map { (data, $0) } }
@@ -447,10 +468,11 @@ public final class LibraryIndexer {
                     recordDiagnostics("No cover found for “\(album.title)” by \(album.artist)")
                 }
                 coversSoFar += 1
-                noteEnrichProgress(covers: coversSoFar)
             }
+            try await publishProgress(run: run, covers: coversSoFar)
         }
         recordDiagnostics("Cover pass finished: \(missing.filter { CoverStore.hasCover(for: $0.id) }.count) covers found")
+        return missing.count
     }
 
     /// The cover image and a description of where it came from.
