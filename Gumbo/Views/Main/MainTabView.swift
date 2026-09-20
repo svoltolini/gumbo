@@ -43,8 +43,7 @@ struct MainTabView: View {
         }
         // A plain sheet on purpose: a zoom out of the mini player crashes, because the tab bar
         // accessory is not always in the view hierarchy when the sheet comes back down.
-        // The model owns whether it is up, so a Live Activity or widget link and a return to the
-        // foreground while music plays can bring it up from outside the tabs.
+        // The model also accepts explicit Now Playing links from a Live Activity or widget.
         .sheet(isPresented: $model.isNowPlayingPresented) {
             NowPlayingView()
                 .nowPlayingSheetSize()

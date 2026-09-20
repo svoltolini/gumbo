@@ -338,7 +338,7 @@ struct GumboApp: App {
                 .tint(Palette.accent)
                 .preferredColorScheme(model.appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
-                    model.scenePhaseChanged(phase, isPlaying: player.isPlaying)
+                    model.scenePhaseChanged(phase)
                     if phase == .active || phase == .background { watchBridge.sync() }
                     if phase == .active, !Self.isLayoutFixture { Task { await cloud.refresh(reason: "foreground") } }
                     if phase == .background {
