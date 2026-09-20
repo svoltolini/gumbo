@@ -197,7 +197,7 @@ struct FacetPicker: View {
             Text(facet.rawValue)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(isSelected ? Palette.onBrand : .primary)
+                .foregroundStyle(isSelected ? Palette.onAccent : .primary)
                 // Flip the label colour in a short window centred on the moment the ink is half way,
                 // so it is never light-on-light or dark-on-dark.
                 .animation(.easeInOut(duration: 0.05).delay(0.055), value: isSelected)
@@ -205,7 +205,7 @@ struct FacetPicker: View {
                 .padding(.vertical, 8)
                 .background {
                     Capsule()
-                        .fill(Palette.brand)
+                        .fill(Palette.accent)
                         .opacity(isSelected ? 1 : 0)
                         .animation(.easeInOut(duration: 0.22), value: isSelected)
                 }

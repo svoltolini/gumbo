@@ -43,8 +43,9 @@ public enum Palette {
     public static let onInk = Color(light: silver, dark: black)
     public static let paper = Color(light: silver, dark: black)
     public static let neutralTint = silver
-    /// Blue text is readable on silver; silver keeps unfilled controls legible on black.
-    public static let accent = Color(light: brand, dark: silver)
-    /// Primary actions use the exact brand blue in both appearances.
-    public static let onBrand = silver
+    public static let offWhite = Color(hex: "#F4F4F2")
+    /// Neutral controls leave colour to the logo and music artwork.
+    public static let accent = Color(light: black, dark: offWhite)
+    /// Text and symbols on a filled primary control need the opposite appearance.
+    public static let onAccent = Color(light: offWhite, dark: black)
 }

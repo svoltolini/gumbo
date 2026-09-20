@@ -6,7 +6,7 @@ import WidgetKit
 // Building blocks shared by every Gumbo widget.
 
 enum WidgetPalette {
-    static let blue = Color(red: 8 / 255, green: 38 / 255, blue: 1)
+    static let charcoal = Color(white: 0.20)
     static let silver = Color(red: 212 / 255, green: 213 / 255, blue: 214 / 255)
 }
 
@@ -405,7 +405,7 @@ struct EmptyFace: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .foregroundStyle(.white)
         .containerBackground(for: .widget) {
-            LinearGradient(colors: [WidgetPalette.blue, .black], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [WidgetPalette.charcoal, .black], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 }

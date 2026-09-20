@@ -1,7 +1,7 @@
 import GumboCore
 import SwiftUI
 
-/// Stable neutral canvas keeps artwork and blue actions distinct while the library scrolls.
+/// Stable neutral canvas keeps artwork and neutral controls distinct while the library scrolls.
 struct TintedBackground: View {
     var tint: Color
 

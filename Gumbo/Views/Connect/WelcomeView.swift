@@ -127,12 +127,12 @@ private struct WelcomeContent: View {
                         } label: {
                             Text("Try again")
                                 .font(.headline)
-                                .foregroundStyle(Palette.onBrand)
+                                .foregroundStyle(Palette.onAccent)
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.extraLarge)
-                        .tint(Palette.brand)
+                        .tint(Palette.accent)
                         .padding(.bottom, 14)
                     }
                 } else {
@@ -141,12 +141,12 @@ private struct WelcomeContent: View {
                     } label: {
                         Text("Join \(family.serverName)")
                             .font(.headline)
-                            .foregroundStyle(Palette.onBrand)
+                            .foregroundStyle(Palette.onAccent)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
                     .controlSize(.extraLarge)
-                    .tint(Palette.brand)
+                    .tint(Palette.accent)
                     Text("Your family's server, shared with you through iCloud.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -165,12 +165,12 @@ private struct WelcomeContent: View {
                 Button(action: findServers) {
                     Text(findServersTitle)
                         .font(.headline)
-                        .foregroundStyle(Palette.onBrand)
+                        .foregroundStyle(Palette.onAccent)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)
-                .tint(Palette.brand)
+                .tint(Palette.accent)
             } else {
                 Button(action: findServers) {
                     Text(findServersTitle)

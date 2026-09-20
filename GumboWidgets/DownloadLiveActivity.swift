@@ -64,7 +64,7 @@ struct DownloadLiveActivity: Widget {
             } minimal: {
                 DownloadRing(state: context.state, size: 18, lineWidth: 2.5)
             }
-            .keylineTint(WidgetPalette.blue)
+            .keylineTint(WidgetPalette.silver)
             // The one link for the compact, minimal and expanded island alike.
             .widgetURL(context.attributes.openURL)
         }

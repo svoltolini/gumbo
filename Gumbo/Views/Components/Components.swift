@@ -437,12 +437,12 @@ struct PlayActions: View {
             Button(action: play) {
                 Label("Play", systemImage: "play.fill")
                     .font(.headline)
-                    .foregroundStyle(Palette.onBrand)
+                    .foregroundStyle(Palette.onAccent)
                     .frame(maxWidth: stretches ? .infinity : nil)
                     .padding(.horizontal, stretches ? 0 : 12)
             }
             .buttonStyle(.glassProminent)
-            .tint(Palette.brand)
+            .tint(Palette.accent)
 
             Button(action: shuffle) {
                 Label("Shuffle", systemImage: "shuffle")

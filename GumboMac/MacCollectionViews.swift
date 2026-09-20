@@ -389,7 +389,7 @@ private struct MacMissingSongsRow: View {
         HStack(spacing: 16) {
             Image(systemName: "icloud.and.arrow.down")
                 .font(.title2)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Palette.accent)
                 .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
                 Text(missing.count == 1 ? "1 download is missing songs" : "\(missing.count) downloads are missing songs")
