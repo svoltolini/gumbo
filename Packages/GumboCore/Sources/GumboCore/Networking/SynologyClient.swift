@@ -267,7 +267,7 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
         case .decoding(let detail):
             "Unexpected reply from the server. \(detail)"
         case .untrustedCertificate(let host):
-            "\(host) answered, but its certificate isn't trusted, so the connection was refused. In DSM, get a Let's Encrypt certificate for this name under Control Panel › Security › Certificate."
+            "HTTPS reached \(host), but its certificate could not be verified for this address. Use a hostname covered by a valid, trusted NAS certificate. Check the certificate assigned to DSM under Control Panel › Security › Certificate. A Tailscale IP or name may not match that certificate."
         case .noAnswer(let host):
             "Nothing answered at \(host) on DSM's usual ports. Check that your router forwards TCP port 5001 to the NAS (DSM: Control Panel › External Access › Router Configuration) and that the DSM firewall allows it. At home, the NAS's local address works without any of that."
         }

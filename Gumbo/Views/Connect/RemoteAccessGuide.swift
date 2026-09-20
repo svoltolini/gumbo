@@ -14,14 +14,15 @@ struct RemoteAccessGuide: View {
                     Text("Tailscale is an optional service that connects your devices to your NAS without setting up public port forwarding.")
                     instruction("1. Set up the NAS", "In Synology Package Center, install Tailscale, open it and sign in. Follow the official guide for your DSM version.")
                     instruction("2. Connect this device", "Install and turn on Tailscale on each supported device you want to use with Gumbo. Sign in to the same Tailscale network, or accept a share for the NAS.")
-                    instruction("3. Find the NAS address", "Copy its Tailscale IP address or full MagicDNS name from Tailscale. A shared NAS needs its full name, including the .ts.net ending.")
+                    instruction("3. Choose the address", "Check the certificate assigned to DSM under Control Panel › Security › Certificate. For HTTPS, use a hostname covered by that certificate and make sure it reaches your NAS. A Tailscale IP or MagicDNS name is not automatically covered.")
                     documentationLink("Tailscale's Synology setup guide", url: "https://tailscale.com/docs/integrations/synology")
+                    documentationLink("Tailscale's HTTPS certificate guide", url: "https://tailscale.com/docs/how-to/set-up-https-certificates")
                 } header: {
                     Text("Remote access with Tailscale")
                 }
                 Section {
-                    Text("Return to Gumbo and enter the address and DSM port. Gumbo tries HTTPS by default. The NAS must present a valid certificate for the name you enter; Tailscale's private connection does not automatically configure DSM's HTTPS certificate.")
-                    Text("If your NAS only provides HTTP, enter its complete http:// address and port, then review Gumbo's connection warning. Gumbo cannot verify that a VPN is active. Keep Tailscale connected while using that route.")
+                    Text("Enter the full HTTPS address and DSM port, usually https://your-nas-name:5001. If you want to use the full MagicDNS name, including .ts.net, DSM must serve a valid certificate for that name. Tailscale's private connection does not configure this automatically.")
+                    Text("For an HTTP-only NAS on a trusted private connection, explicitly enter http:// followed by its address and port, usually 5000. Review Gumbo's warning before signing in. If you rely on Tailscale to protect this route, keep it connected on both devices; Gumbo cannot verify that it is active.")
                     Text("Sign in with your DSM username, password and verification code if requested. Tailscale access does not replace your NAS account.")
                 } header: {
                     Text("Connect in Gumbo")
@@ -41,7 +42,7 @@ struct RemoteAccessGuide: View {
                     Text("An existing HTTPS address")
                 }
                 Section {
-                    Text("If the server cannot be reached, check that the NAS is online, Tailscale is connected on both devices, and your account has access. Check the full hostname and DSM port. Certificate errors need a certificate or hostname correction on the server.")
+                    Text("If the server cannot be reached, check that the NAS is online, Tailscale is connected on both devices, and your account has access. Check the full hostname and DSM port. If HTTPS answers with a certificate error, first try the hostname already covered by the NAS's trusted certificate. If that certificate is expired or untrusted, correct it in DSM.")
                     Text("Test your chosen route away from home before relying on it. If you change the address in Gumbo, sign in again and verify family access for that connection.")
                 } header: {
                     Text("If the connection fails")
