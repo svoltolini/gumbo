@@ -14,16 +14,20 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
         return app
     }
 
-    @MainActor private func tapSettingsRow(_ row: XCUIElement, in app: XCUIApplication) {
+    @MainActor private func revealSettingsRow(_ row: XCUIElement, in app: XCUIApplication) {
         // Native Forms create offscreen rows lazily, especially with accessibility text sizes.
         for _ in 0..<8 {
             if row.exists && row.isHittable {
-                row.tap()
                 return
             }
             app.swipeUp()
         }
         XCTFail("Settings row could not be reached by scrolling: \(row)")
+    }
+
+    @MainActor private func tapSettingsRow(_ row: XCUIElement, in app: XCUIApplication) {
+        revealSettingsRow(row, in: app)
+        row.tap()
     }
 
     @MainActor private func capture(_ app: XCUIApplication, name: String) {
@@ -35,15 +39,16 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
 
     @MainActor func testSettingsKeepsMaintenanceUnderAdvanced() {
         let app = launch()
-        XCTAssertFalse(app.buttons["Diagnostics"].exists)
-        XCTAssertFalse(app.buttons["Refresh Song Information"].exists)
+        XCTAssertFalse(app.buttons["settings.diagnostics"].exists)
+        XCTAssertFalse(app.buttons["settings.refreshTags"].exists)
         capture(app, name: "Settings overview")
         tapSettingsRow(app.buttons["settings.advanced"], in: app)
         XCTAssertTrue(app.navigationBars["Advanced Settings"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Refresh Song Information"].exists)
-        XCTAssertFalse(app.buttons["Refresh Song Information"].isEnabled, "Sample data must not trigger a NAS refresh")
         capture(app, name: "Advanced Settings")
-        tapSettingsRow(app.buttons["Diagnostics"], in: app)
+        revealSettingsRow(app.buttons["settings.refreshTags"], in: app)
+        XCTAssertTrue(app.buttons["settings.refreshTags"].exists)
+        XCTAssertFalse(app.buttons["settings.refreshTags"].isEnabled, "Sample data must not trigger a NAS refresh")
+        tapSettingsRow(app.buttons["settings.diagnostics"], in: app)
         XCTAssertTrue(app.navigationBars["Diagnostics"].waitForExistence(timeout: 5))
     }
 
@@ -145,6 +150,70 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
 
 
 extension ReleaseSmokeTests {
+    @MainActor func testProfileHeaderOpensEditorAndNativePhotoPicker() {
+        let app = launch()
+        tapSettingsRow(app.buttons["settings.profiles"], in: app)
+        XCTAssertTrue(app.navigationBars["Profiles & Family"].waitForExistence(timeout: 5))
+        capture(app, name: "Centred profile overview")
+        tapSettingsRow(app.buttons["profile.edit"], in: app)
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["profile.name"].exists)
+        capture(app, name: "Centred profile editor")
+        app.buttons["profile.photo"].tap()
+        XCTAssertTrue(app.buttons["Choose Photo"].waitForExistence(timeout: 5))
+        app.buttons["Choose Photo"].tap()
+        let picker = app.navigationBars["Photos"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        capture(app, name: "Native profile photo picker")
+        // Cancel only the system picker, then the editor. No profile change is saved.
+        // iPad places this action in the picker's sidebar navigation bar.
+        let pickerCancel = picker.buttons["Cancel"]
+        if pickerCancel.exists {
+            pickerCancel.tap()
+        } else {
+            app.navigationBars["PUSidebarView"].buttons["Cancel"].tap()
+        }
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        app.navigationBars["Edit Profile"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Profiles & Family"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["profile.edit"].isHittable)
+    }
+
+    @MainActor func testProfilePhotoSavesAndCanBeRemoved() {
+        let app = launch()
+        tapSettingsRow(app.buttons["settings.profiles"], in: app)
+        tapSettingsRow(app.buttons["profile.edit"], in: app)
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        app.buttons["profile.photo"].tap()
+        app.buttons["Choose Photo"].tap()
+        let picker = app.navigationBars["Photos"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        // A disposable simulator has sample photos; no user's device photo library is used.
+        let photo = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        photo.tap()
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+        let loaded = NSPredicate { _, _ in
+            app.buttons["profile.photo"].label == "Edit Profile Photo" && app.buttons["profile.save"].isEnabled
+        }
+        expectation(for: loaded, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        app.buttons["profile.save"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForNonExistence(timeout: 5))
+        tapSettingsRow(app.buttons["profile.edit"], in: app)
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["profile.photo"].label, "Edit Profile Photo")
+        app.buttons["profile.photo"].tap()
+        app.buttons["Remove Photo"].tap()
+        app.buttons["profile.save"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForNonExistence(timeout: 5))
+        tapSettingsRow(app.buttons["profile.edit"], in: app)
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["profile.photo"].label, "Add Profile Photo")
+        app.navigationBars["Edit Profile"].buttons["Cancel"].tap()
+    }
+
     @MainActor func testLibraryPullSettlesAndScrollingWorksDuringSlowScan() {
         let app = launch(tab: "library", slowScan: true)
         let header = app.staticTexts["Recently added"].firstMatch
@@ -182,14 +251,14 @@ extension ReleaseSmokeTests {
     @MainActor func testMaintenanceScreensRequireARealLibraryBeforeChangingFiles() {
         let app = launch()
         tapSettingsRow(app.buttons["settings.advanced"], in: app)
-        tapSettingsRow(app.buttons["Find Missing Genres"], in: app)
+        tapSettingsRow(app.buttons["settings.missingGenres"], in: app)
         XCTAssertTrue(app.navigationBars["Find Missing Genres"].waitForExistence(timeout: 5))
         for _ in 0..<8 where !app.buttons["Find Suggestions"].exists { app.swipeUp() }
         XCTAssertTrue(app.buttons["Find Suggestions"].exists)
         XCTAssertFalse(app.buttons["Find Suggestions"].isEnabled)
         capture(app, name: "Missing genres review")
         app.navigationBars.buttons.firstMatch.tap()
-        tapSettingsRow(app.buttons["Problem Files"], in: app)
+        tapSettingsRow(app.buttons["settings.problemFiles"], in: app)
         XCTAssertTrue(app.navigationBars["Problem Files"].waitForExistence(timeout: 5))
         for _ in 0..<8 where !app.buttons["Check Files"].exists { app.swipeUp() }
         XCTAssertTrue(app.buttons["Check Files"].exists)
