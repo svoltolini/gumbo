@@ -75,6 +75,8 @@ struct SettingsView: View {
             if shows(.server), permissions.canLeave { signOutSection }
         }
         .groupedForm()
+        .hiddenScrollBackground()
+        .gumboBackground(Palette.neutralTint)
         .navigationTitle(category?.rawValue ?? "Settings")
         .largeTitle()
         .navigationDestination(isPresented: $isShowingDiagnostics) { DiagnosticsView() }
@@ -115,7 +117,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        NativeSettingsLabel("Manage Profiles", symbol: "person.crop.circle.fill", tint: .blue)
+                        NativeSettingsLabel("Manage Profiles", symbol: "person.crop.circle.fill", tint: Palette.brand)
                     }
                 }
                 .padding(.vertical, 4)
@@ -124,7 +126,7 @@ struct SettingsView: View {
             Button {
                 profiles.lock()
             } label: {
-                NativeSettingsLabel("Switch Profile", symbol: "rectangle.stack.person.crop.fill", tint: .cyan)
+                NativeSettingsLabel("Switch Profile", symbol: "rectangle.stack.person.crop.fill", tint: Palette.brand)
             }
         } header: {
             Text("Profile")
@@ -139,14 +141,14 @@ struct SettingsView: View {
                 LabeledContent {
                     Text(cloud.status.text).foregroundStyle(.secondary)
                 } label: {
-                    NativeSettingsLabel("Family", symbol: "person.2.fill", tint: .blue)
+                    NativeSettingsLabel("Family", symbol: "person.2.fill", tint: Palette.brand)
                 }
             }
             if cloud.isActive, !cloud.participants.isEmpty {
                 LabeledContent {
                     Text(cloud.participants.count.formatted()).foregroundStyle(.secondary)
                 } label: {
-                    NativeSettingsLabel("Participants", symbol: "person.3.fill", tint: .blue)
+                    NativeSettingsLabel("Participants", symbol: "person.3.fill", tint: Palette.brand)
                 }
             }
         }
@@ -157,12 +159,12 @@ struct SettingsView: View {
             LabeledContent {
                 Text(model.isConnected ? "Connected" : "Offline").foregroundStyle(.secondary)
             } label: {
-                NativeSettingsLabel(model.serverTitle, symbol: library.isDemo ? "shippingbox.fill" : "externaldrive.fill", tint: .indigo)
+                NativeSettingsLabel(model.serverTitle, symbol: library.isDemo ? "shippingbox.fill" : "externaldrive.fill", tint: Palette.brand)
             }
             Button {
                 isShowingRemoteAccessHelp = true
             } label: {
-                NativeSettingsLabel("Remote Access Help", symbol: "network", tint: .teal)
+                NativeSettingsLabel("Remote Access Help", symbol: "network", tint: Palette.brand)
             }
             if model.connection != nil, permissions.canManageServer {
                 NavigationLink {
@@ -171,13 +173,13 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(model.musicFolderLabel).foregroundStyle(.secondary)
                     } label: {
-                        NativeSettingsLabel("Music folder", symbol: "folder.fill", tint: .orange)
+                        NativeSettingsLabel("Music folder", symbol: "folder.fill", tint: Palette.brand)
                     }
                 }
                 Button {
                     Task { await model.reconnect() }
                 } label: {
-                    NativeSettingsLabel(model.isReconnecting ? "Reconnecting…" : "Reconnect", symbol: "arrow.clockwise", tint: .mint)
+                    NativeSettingsLabel(model.isReconnecting ? "Reconnecting…" : "Reconnect", symbol: "arrow.clockwise", tint: Palette.brand)
                 }
                 .disabled(model.isReconnecting)
                 if let error = model.signInError, !model.isReconnecting {
@@ -194,7 +196,7 @@ struct SettingsView: View {
                 Button {
                     isRecoveringLegacyLibrary = true
                 } label: {
-                    NativeSettingsLabel("Recover saved library", symbol: "clock.arrow.circlepath", tint: .blue)
+                    NativeSettingsLabel("Recover saved library", symbol: "clock.arrow.circlepath", tint: Palette.brand)
                 }
             } header: {
                 Text("Saved library")
@@ -217,33 +219,33 @@ struct SettingsView: View {
                 LabeledContent {
                     Text(library.catalogue.summary).foregroundStyle(.secondary)
                 } label: {
-                    NativeSettingsLabel("Library", symbol: "music.note.list", tint: .pink)
+                    NativeSettingsLabel("Library", symbol: "music.note.list", tint: Palette.brand)
                 }
                 if model.indexer.isEnriching {
                     LabeledContent {
                         Text("\(model.indexer.enrichedCount.formatted()) of \(model.indexer.enrichTotal.formatted())").foregroundStyle(.secondary)
                     } label: {
-                        NativeSettingsLabel("Album details", symbol: "text.magnifyingglass", tint: .purple)
+                        NativeSettingsLabel("Album details", symbol: "text.magnifyingglass", tint: Palette.brand)
                     }
                 }
                 Toggle(isOn: $model.watchFolder) {
-                    NativeSettingsLabel("Watch for changes", symbol: "eye.fill", tint: .green)
+                    NativeSettingsLabel("Watch for changes", symbol: "eye.fill", tint: Palette.brand)
                 }
                 #if os(iOS)
                 Toggle(isOn: $model.keepsScreenOnWhileScanning) {
-                    NativeSettingsLabel("Stay awake to scan", symbol: "sun.max.fill", tint: .yellow)
+                    NativeSettingsLabel("Stay awake to scan", symbol: "sun.max.fill", tint: Palette.brand)
                 }
                 #endif
                 Button {
                     model.rescan()
                 } label: {
-                    NativeSettingsLabel(model.isScanning ? "Scanning…" : "Scan now", symbol: "arrow.triangle.2.circlepath", tint: .blue)
+                    NativeSettingsLabel(model.isScanning ? "Scanning…" : "Scan now", symbol: "arrow.triangle.2.circlepath", tint: Palette.brand)
                 }
                 .disabled(model.isScanning)
                 Button {
                     isConfirmingTagRead = true
                 } label: {
-                    NativeSettingsLabel("Read Song Tags Again", symbol: "arrow.clockwise", tint: .blue)
+                    NativeSettingsLabel("Read Song Tags Again", symbol: "arrow.clockwise", tint: Palette.brand)
                 }
                 .disabled(model.isScanning || !model.isConnected || model.isDemo)
             } header: {
@@ -256,7 +258,7 @@ struct SettingsView: View {
             }
             Section("Names") {
                 Toggle(isOn: $library.hidesBracketedTitleParts) {
-                    NativeSettingsLabel("Clean album names", symbol: "textformat.abc", tint: .brown)
+                    NativeSettingsLabel("Clean album names", symbol: "textformat.abc", tint: Palette.brand)
                 }
                 NavigationLink {
                     GenreNamesView()
@@ -264,7 +266,7 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(library.genreRenames.isEmpty ? "None" : library.genreRenames.count.formatted()).foregroundStyle(.secondary)
                     } label: {
-                        NativeSettingsLabel("Genre names", symbol: "tag.fill", tint: .pink)
+                        NativeSettingsLabel("Genre names", symbol: "tag.fill", tint: Palette.brand)
                     }
                 }
             }
@@ -273,7 +275,7 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(ByteText.format(downloads.totalBytes)).foregroundStyle(.secondary)
                     } label: {
-                        NativeSettingsLabel("On this \(Device.noun)", symbol: "arrow.down.circle.fill", tint: .green)
+                        NativeSettingsLabel("On this \(Device.noun)", symbol: "arrow.down.circle.fill", tint: Palette.brand)
                     }
                 }
             }
@@ -283,7 +285,7 @@ struct SettingsView: View {
     private var privacySection: some View {
         Section {
             NavigationLink { PrivacyDetailsView() } label: {
-                NativeSettingsLabel("Privacy Details", symbol: "hand.raised.fill", tint: .blue)
+                NativeSettingsLabel("Privacy Details", symbol: "hand.raised.fill", tint: Palette.brand)
             }
         } header: {
             Text("Privacy")
@@ -309,7 +311,7 @@ struct SettingsView: View {
                 LabeledContent {
                     if hasUnseenNotes { Text("New").foregroundStyle(.secondary) }
                 } label: {
-                    NativeSettingsLabel("What's New", symbol: "sparkles", tint: .purple)
+                    NativeSettingsLabel("What's New", symbol: "sparkles", tint: Palette.brand)
                 }
             }
             LabeledContent {
@@ -474,7 +476,7 @@ struct SettingsView: View {
                     NavigationLink {
                         FamilyView()
                     } label: {
-                        SettingsRow(symbol: "person.2.fill", tint: .blue, title: "Family", subtitle: cloud.status.text) {
+                        SettingsRow(symbol: "person.2.fill", tint: Palette.brand, title: "Family", subtitle: cloud.status.text) {
                             if cloud.isActive, !cloud.participants.isEmpty {
                                 SettingsValue("\(cloud.participants.count)")
                             }
@@ -485,24 +487,24 @@ struct SettingsView: View {
                 }
 
                 SettingsGroup(title: "Server") {
-                    SettingsRow(symbol: library.isDemo ? "shippingbox.fill" : "externaldrive.fill", tint: .indigo, title: model.serverTitle) {
+                    SettingsRow(symbol: library.isDemo ? "shippingbox.fill" : "externaldrive.fill", tint: Palette.brand, title: model.serverTitle) {
                         Circle()
                             .fill(model.isConnected ? Color.green : Color.gray.opacity(0.5))
                             .frame(width: 8, height: 8)
                             .accessibilityLabel(model.isConnected ? "Connected" : "Offline")
                     }
-                    SettingsButtonRow(symbol: "network", tint: .blue, title: "Remote Access Help") { isShowingRemoteAccessHelp = true }
+                    SettingsButtonRow(symbol: "network", tint: Palette.brand, title: "Remote Access Help") { isShowingRemoteAccessHelp = true }
                     if model.connection != nil, permissions.canManageServer {
                         NavigationLink {
                             FolderPickerView(mode: .settings)
                         } label: {
-                            SettingsRow(symbol: "folder.fill", tint: .orange, title: "Music folder") {
+                            SettingsRow(symbol: "folder.fill", tint: Palette.brand, title: "Music folder") {
                                 SettingsValue(model.musicFolderLabel)
                                 DisclosureChevron()
                             }
                         }
                         .buttonStyle(RowPressStyle())
-                        SettingsButtonRow(symbol: "arrow.clockwise", tint: .blue, title: model.isReconnecting ? "Reconnecting…" : "Reconnect") {
+                        SettingsButtonRow(symbol: "arrow.clockwise", tint: Palette.brand, title: model.isReconnecting ? "Reconnecting…" : "Reconnect") {
                             Task { await model.reconnect() }
                         }
                         .disabled(model.isReconnecting)
@@ -518,7 +520,7 @@ struct SettingsView: View {
 
                 if !model.legacyLibraryRecoveries.isEmpty {
                     SettingsGroup(title: "Saved library", footer: "An earlier version kept favourites, playlists and history under the server name. Recover them into this connection after confirming the old server. Current edits are kept; older downloads need downloading again.") {
-                        SettingsButtonRow(symbol: "clock.arrow.circlepath", tint: .blue, title: "Recover saved library") {
+                        SettingsButtonRow(symbol: "clock.arrow.circlepath", tint: Palette.brand, title: "Recover saved library") {
                             isRecoveringLegacyLibrary = true
                         }
                     }
@@ -530,7 +532,7 @@ struct SettingsView: View {
                     SettingsRow(symbol: "clock.arrow.circlepath", tint: .gray, title: "Last scan") {
                         SettingsValue(model.lastScanText)
                     }
-                    SettingsRow(symbol: "square.stack.fill", tint: .purple, title: "Library") {
+                    SettingsRow(symbol: "square.stack.fill", tint: Palette.brand, title: "Library") {
                         SettingsValue(library.catalogue.summary)
                     }
                     if model.indexer.isEnriching {
@@ -538,28 +540,28 @@ struct SettingsView: View {
                             SettingsValue("\(model.indexer.enrichedCount.formatted()) of \(model.indexer.enrichTotal.formatted())")
                         }
                     }
-                    SettingsRow(symbol: "eye.fill", tint: .green, title: "Watch for changes") {
+                    SettingsRow(symbol: "eye.fill", tint: Palette.brand, title: "Watch for changes") {
                         Toggle("Watch for changes", isOn: $model.watchFolder).labelsHidden()
                     }
                     #if os(iOS)
-                    SettingsRow(symbol: "sun.max.fill", tint: .yellow, title: "Stay awake to scan") {
+                    SettingsRow(symbol: "sun.max.fill", tint: Palette.brand, title: "Stay awake to scan") {
                         Toggle("Stay awake to scan", isOn: $model.keepsScreenOnWhileScanning)
                             .labelsHidden()
                     }
                     #endif
-                    SettingsButtonRow(symbol: "arrow.triangle.2.circlepath", tint: .blue, title: model.isScanning ? "Scanning…" : "Scan now") {
+                    SettingsButtonRow(symbol: "arrow.triangle.2.circlepath", tint: Palette.brand, title: model.isScanning ? "Scanning…" : "Scan now") {
                         model.rescan()
                     }
                     .disabled(model.isScanning)
-                    SettingsButtonRow(symbol: "arrow.clockwise", tint: .blue, title: "Read Song Tags Again") { isConfirmingTagRead = true }
+                    SettingsButtonRow(symbol: "arrow.clockwise", tint: Palette.brand, title: "Read Song Tags Again") { isConfirmingTagRead = true }
                         .disabled(model.isScanning || !model.isConnected || model.isDemo)
-                    SettingsRow(symbol: "parentheses", tint: .brown, title: "Clean album names") {
+                    SettingsRow(symbol: "parentheses", tint: Palette.brand, title: "Clean album names") {
                         Toggle("Clean album names", isOn: $library.hidesBracketedTitleParts).labelsHidden()
                     }
                     NavigationLink {
                         GenreNamesView()
                     } label: {
-                        SettingsRow(symbol: "tag.fill", tint: .pink, title: "Genre names") {
+                        SettingsRow(symbol: "tag.fill", tint: Palette.brand, title: "Genre names") {
                             SettingsValue(library.genreRenames.isEmpty ? "None" : library.genreRenames.count.formatted())
                             DisclosureChevron()
                         }
@@ -575,7 +577,7 @@ struct SettingsView: View {
                 #if !os(tvOS)
                 SettingsGroup(title: "Downloads") {
                     NavigationLink(value: LibraryRoute.downloads) {
-                        SettingsRow(symbol: "arrow.down.circle.fill", tint: .green, title: "On this \(Device.noun)") {
+                        SettingsRow(symbol: "arrow.down.circle.fill", tint: Palette.brand, title: "On this \(Device.noun)") {
                             SettingsValue(ByteText.format(downloads.totalBytes))
                             DisclosureChevron()
                         }
@@ -601,7 +603,7 @@ struct SettingsView: View {
                     NavigationLink {
                         ReleaseNotesView()
                     } label: {
-                        SettingsRow(symbol: "sparkles", tint: .purple, title: "What's New") {
+                        SettingsRow(symbol: "sparkles", tint: Palette.brand, title: "What's New") {
                             if hasUnseenNotes {
                                 Circle()
                                     .fill(Color.accentColor)

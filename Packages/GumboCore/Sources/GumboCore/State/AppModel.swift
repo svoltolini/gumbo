@@ -641,6 +641,7 @@ public final class AppModel {
     }
 
     public func clearProfileNavigation() {
+        searchQuery = ""
         cancelPendingAlbumNavigation()
         cancelPendingPlaylistNavigation()
         albumToOpen = nil

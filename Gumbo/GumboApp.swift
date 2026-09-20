@@ -98,6 +98,14 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
 
 @main
 struct GumboApp: App {
+    private static var isLayoutFixture: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        ProcessInfo.processInfo.arguments.contains("--sample-library")
+            && ProcessInfo.processInfo.arguments.contains("--ui-preview")
+        #else
+        false
+        #endif
+    }
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var profiles: ProfileStore
     @State private var cloud: CloudSync
@@ -114,6 +122,10 @@ struct GumboApp: App {
         let cloud = CloudSync()
         cloud.profiles = profiles
         profiles.sync = cloud
+        if Self.isLayoutFixture {
+            cloud.profiles = nil
+            profiles.sync = nil
+        }
         AppDelegate.cloud = cloud
         let library = LibraryStore()
         library.profiles = profiles
@@ -217,7 +229,8 @@ struct GumboApp: App {
         }
         profiles.openAutomaticallyIfPossible()
         widgetFeed.start(library: library, player: player, downloads: downloads, profiles: profiles)
-        cloud.start()
+        // Sample layout fixtures do not contact iCloud or change their profile as account checks finish.
+        if !Self.isLayoutFixture { cloud.start() }
         // A paired Apple Watch gets the active profile's playlists and its own way into the server.
         watchBridge.provider = { [library, model, profiles] in
             guard model.stage == .ready, let active = profiles.active else { return nil }
@@ -247,6 +260,27 @@ struct GumboApp: App {
         if ProcessInfo.processInfo.arguments.contains("--sample-library") {
             model.useSampleLibrary()
             model.openLibrary()
+            #if DEBUG && targetEnvironment(simulator)
+            // Deterministic layout fixtures use ordinary profile admission and only the sample library.
+            // These arguments have no effect in device or Release builds.
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--ui-preview") {
+                profiles.openAutomaticallyIfPossible()
+                if let index = arguments.firstIndex(of: "--preview-tab"), index + 1 < arguments.count {
+                    switch arguments[index + 1] {
+                    case "search": model.selectedTab = .search
+                    case "playlists": model.selectedTab = .playlists
+                    case "downloads": model.selectedTab = .downloads
+                    case "settings": model.selectedTab = .settings
+                    default: break
+                    }
+                }
+                if let index = arguments.firstIndex(of: "--preview-query"), index + 1 < arguments.count {
+                    model.searchQuery = arguments[index + 1]
+                }
+                model.appearance = arguments.contains("--preview-dark") ? .dark : .light
+            }
+            #endif
         }
     }
 
@@ -298,11 +332,12 @@ struct GumboApp: App {
                 .environment(downloads)
                 .environment(profiles)
                 .environment(cloud)
+                .tint(Palette.accent)
                 .preferredColorScheme(model.appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
                     model.scenePhaseChanged(phase, isPlaying: player.isPlaying)
                     if phase == .active || phase == .background { watchBridge.sync() }
-                    if phase == .active { Task { await cloud.refresh(reason: "foreground") } }
+                    if phase == .active, !Self.isLayoutFixture { Task { await cloud.refresh(reason: "foreground") } }
                     if phase == .background {
                         profiles.flushSave()
                         if model.isScanning {

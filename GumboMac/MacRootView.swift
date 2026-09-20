@@ -55,7 +55,10 @@ struct MacMainView: View {
                     navigation.isNamingPlaylist = true
                 }
                 .help("Create a playlist (⌘N)")
-                Button("Scan for New Music", systemImage: "arrow.clockwise") { model.rescan() }
+                Button { model.rescan() } label: {
+                    ScanActivityIcon(isActive: model.isScanning)
+                }
+                    .accessibilityLabel(model.isScanning ? "Library scanning" : "Scan for New Music")
                     .disabled(model.isScanning || model.connection == nil)
                     .help("Scan for new music (⌘R)")
                 Button("Now Playing", systemImage: "sidebar.right") { navigation.isShowingNowPlaying.toggle() }

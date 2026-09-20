@@ -6,7 +6,6 @@ import SwiftUI
 /// Tapping shows a detail sheet with last scan info and rescan option.
 struct ScanStatusButton: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsDetail = false
 
     private var isScanning: Bool { model.isScanning }
@@ -36,14 +35,7 @@ struct ScanStatusButton: View {
     }
 
     private var scanningIcon: some View {
-        Image(systemName: "arrow.triangle.2.circlepath")
-            .symbolEffect(
-                .variableColor.iterative,
-                options: .repeating,
-                isActive: isScanning
-            )
-            .symbolEffectsRemoved(reduceMotion)
-            .foregroundStyle(.primary)
+        ScanActivityIcon(isActive: isScanning)
     }
 
     private var idleIcon: some View {
@@ -63,6 +55,18 @@ struct ScanStatusButton: View {
             return "Scanning in progress"
         }
         return model.indexingFailure?.title ?? model.lastScanText
+    }
+}
+
+/// Rotation describes active work clearly; Reduce Motion leaves a static, labelled activity icon.
+struct ScanActivityIcon: View {
+    var isActive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Image(systemName: "arrow.triangle.2.circlepath")
+            .symbolEffect(.rotate, options: .repeating, isActive: isActive && !reduceMotion)
+            .foregroundStyle(Palette.accent)
     }
 }
 
@@ -116,8 +120,12 @@ struct ScanDetailSheet: View {
             Label {
                 Text("Status")
             } icon: {
-                Image(systemName: isScanning ? "arrow.triangle.2.circlepath" : (model.indexingFailure != nil ? "exclamationmark.circle" : (model.scanCompleted ? "checkmark.circle" : "clock")))
-                    .foregroundStyle(model.scanCompleted ? Color.green : Color.orange)
+                if isScanning {
+                    ScanActivityIcon(isActive: true)
+                } else {
+                    Image(systemName: model.indexingFailure != nil ? "exclamationmark.circle" : (model.scanCompleted ? "checkmark.circle" : "clock"))
+                        .foregroundStyle(model.indexingFailure != nil ? Color.red : Palette.accent)
+                }
             }
             Spacer()
             if isScanning {

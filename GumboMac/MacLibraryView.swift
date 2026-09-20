@@ -242,12 +242,6 @@ private enum MacSearchScope: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-private nonisolated struct MacSearchRequest: Equatable {
-    let text: String
-    let revision: Int
-    let source: String
-}
-
 struct MacSearchView: View {
     @Environment(MacNavigation.self) private var navigation
     @Environment(LibraryStore.self) private var library
@@ -255,9 +249,19 @@ struct MacSearchView: View {
     @State private var entries: [TrackListEntry] = []
     @State private var scope: MacSearchScope = .songs
     @State private var path = NavigationPath()
-    @State private var completedQuery = ""
+    @State private var completedRequest: LibrarySearchRequest?
 
     private var query: String { navigation.searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var request: LibrarySearchRequest {
+        LibrarySearchRequest(text: query, revision: library.contentRevision,
+                             source: library.catalogue.driveID, root: library.catalogue.rootPath)
+    }
+    private var isSearching: Bool { completedRequest != request }
+    private var hasCurrentContent: Bool {
+        guard let completedRequest else { return false }
+        return completedRequest.revision == request.revision
+            && completedRequest.source == request.source && completedRequest.root == request.root
+    }
 
     private var scopeIsEmpty: Bool {
         switch scope {
@@ -294,20 +298,26 @@ struct MacSearchView: View {
                     .frame(maxWidth: 520)
                     .padding(16)
                     Divider()
-                    if completedQuery != query {
+                    if !hasCurrentContent || (isSearching && scopeIsEmpty) {
                         ProgressView("Searching…").frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if scopeIsEmpty {
                         ContentUnavailableView.search(text: query)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        switch scope {
-                        case .songs: MacTrackTable(entries: entries, title: "Search Results")
-                        case .albums: ScrollView { MacAlbumGrid(albums: results.albums) }
-                        case .artists:
-                            List(results.artists) { artist in
-                                NavigationLink(value: artist) { Label(artist.name, systemImage: "person.crop.circle") }
+                        Group {
+                            switch scope {
+                            case .songs: MacTrackTable(entries: entries, title: "Search Results")
+                            case .albums: ScrollView { MacAlbumGrid(albums: results.albums) }
+                            case .artists:
+                                List(results.artists) { artist in
+                                    NavigationLink(value: artist) { Label(artist.name, systemImage: "person.crop.circle") }
+                                }
+                                .listStyle(.inset)
                             }
-                            .listStyle(.inset)
+                        }
+                        .disabled(isSearching)
+                        .overlay(alignment: .topTrailing) {
+                            if isSearching { ProgressView().controlSize(.small).padding() }
                         }
                     }
                 }
@@ -317,17 +327,22 @@ struct MacSearchView: View {
         }
         .onChange(of: navigation.searchText) { _, _ in path = NavigationPath() }
         .onChange(of: navigation.searchRequest) { _, _ in path = NavigationPath() }
-        .task(id: MacSearchRequest(text: navigation.searchText, revision: library.contentRevision, source: library.catalogue.driveID)) {
-            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
-            guard !Task.isCancelled else { return }
-            results = library.searchResults(navigation.searchText)
+        .task(id: request) {
+            let pending = request
+            if !pending.text.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(160)) } catch { return }
+            }
+            guard library.contentSourceID == pending.source, library.contentRootPath == pending.root else { return }
+            let found = await library.searchIndex.resultsInBackground(for: pending.text)
+            guard !Task.isCancelled, pending == request else { return }
+            results = found
             entries = TrackListEntry.make(from: results.tracks)
             if scopeIsEmpty {
                 if !results.tracks.isEmpty { scope = .songs }
                 else if !results.albums.isEmpty { scope = .albums }
                 else if !results.artists.isEmpty { scope = .artists }
             }
-            completedQuery = query
+            completedRequest = pending
         }
     }
 }

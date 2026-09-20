@@ -151,10 +151,10 @@ struct SmartPlaylistCover: View {
 
     private var colors: [Color] {
         switch kind {
-        case .favourites: [Color(hex: "#ff7a95"), Color(hex: "#d4234f"), Color(hex: "#5e0b26")]
-        case .mix: [Color(hex: "#8f7dff"), Color(hex: "#4a2fd6"), Color(hex: "#160b52")]
-        case .recentlyPlayed: [Color(hex: "#5eead4"), Color(hex: "#0d9488"), Color(hex: "#083f3a")]
-        case .shuffle: [Color(hex: "#fcd34d"), Color(hex: "#ea580c"), Color(hex: "#6b1d0b")]
+        case .favourites: [Palette.brand, Palette.black, Palette.silver]
+        case .mix: [Palette.silver, Palette.brand, Palette.black]
+        case .recentlyPlayed: [Palette.black, Palette.brand, Palette.silver]
+        case .shuffle: [Palette.brand, Palette.silver, Palette.black]
         }
     }
 

@@ -414,13 +414,12 @@ extension View {
         #endif
     }
 
-    /// A search page's own field, where the page is the one to draw it. The television puts the field
-    /// above the page's content. On iPhone and iPad the page adds none: the tab bar is the field there,
-    /// placed by the tab view (see `MainTabView`), and one inside the page's navigation stack would sit in
-    /// the bar's drawer instead, hidden under the large title until a pull down.
+    /// Search belongs to its page, never to the shared tab container. Keep it discoverable at rest.
     @ViewBuilder func pageSearchField(text: Binding<String>, prompt: Text, onSubmit action: @escaping () -> Void) -> some View {
         #if os(iOS)
-        self
+        searchable(text: text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
+            .onSubmit(of: .search, action)
+            .scrollDismissesKeyboard(.interactively)
         #else
         searchable(text: text, prompt: prompt)
             .onSubmit(of: .search, action)
