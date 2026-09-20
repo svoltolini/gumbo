@@ -43,7 +43,7 @@ h1, h2, h3, p, figure { margin: 0; }
 .hero { display: grid; grid-template-columns: 1fr 1.08fr; align-items: center; gap: 25px; min-height: 685px; padding-block: 72px 88px; }
 .hero-copy { position: relative; z-index: 2; animation: arrive .7s ease both; }
 .eyebrow { color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .14em; font-weight: 600; line-height: 1.5; }
-.product-label { display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
+.product-label { text-transform: none; letter-spacing: .035em; display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
 .status-dot { width: 6px; height: 6px; border-radius: 100%; background: var(--silver); box-shadow: 0 0 0 4px #d4d5d60b; }
 h1 { font-size: clamp(48px, 5.3vw, 70px); line-height: 1.035; letter-spacing: -.052em; font-weight: 600; }
 .soft-text { color: #a3a3a9; }
