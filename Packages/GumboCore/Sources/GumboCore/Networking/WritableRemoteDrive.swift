@@ -21,12 +21,16 @@ public nonisolated enum RemoteWriteError: LocalizedError, Sendable, Equatable {
     case missing
     /// The copy on the server does not have the size it should; nothing was replaced.
     case incompleteTransfer
+    case changed
+    case recoveryNeeded(String)
 
     public var errorDescription: String? {
         switch self {
         case .unsupported: "This server doesn't let Gumbo change files."
         case .readOnly: "This account can only read the music folder, so its files can't be changed."
         case .missing: "The file is no longer on the server."
+        case .changed: "The file changed on the server. Update your library and try again."
+        case .recoveryNeeded(let path): "The replacement could not be confirmed. Check the original file and its backup at \(path) in File Station before trying again."
         case .incompleteTransfer: "The file didn't transfer completely, so it was left unchanged."
         }
     }
@@ -78,14 +82,17 @@ extension WritableRemoteDrive {
 
     /// Puts `file` in place of the song at `path`. The new copy goes up under a temporary name and
     /// is checked for size first; the original is only moved aside once the copy is complete, and
-    /// moved back if the swap fails, so the folder never loses the song. `expectedSize` is the local
+    /// restored if the swap fails. If restoration cannot be confirmed, report the backup path.
+    /// `expectedSize` is the local
     /// file's size and `modified` the time to stamp on the new copy.
-    public func replaceFile(at path: String, with file: URL, expectedSize: Int64, modified: Date?) async throws {
+    public func replaceFile(at path: String, with file: URL, expectedSize: Int64, modified: Date?, expectedOriginal: RemoteEntry? = nil,
+                            authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async throws {
         let folder = (path as NSString).deletingLastPathComponent
         let name = (path as NSString).lastPathComponent
         guard !folder.isEmpty, !name.isEmpty else { throw RemoteWriteError.missing }
-        let temporaryName = RemoteFileNames.temporary(for: name)
-        let backupName = RemoteFileNames.backup(for: name)
+        let transaction = UUID().uuidString
+        let temporaryName = RemoteFileNames.temporary(for: name) + "-" + transaction
+        let backupName = RemoteFileNames.backup(for: name) + "-" + transaction
         let temporary = folder + "/" + temporaryName
         let backup = folder + "/" + backupName
         do {
@@ -106,14 +113,56 @@ extension WritableRemoteDrive {
             try? await delete(temporary)
             throw RemoteWriteError.incompleteTransfer
         }
-        // A backup left by an interrupted attempt is only in the way now that the song itself is
-        // known to be in place: it was just downloaded in full.
-        if (try? await info(backup)) != nil { try await delete(backup) }
-        try await rename(path, to: backupName)
+        // Another person or converter may have changed the file while this copy was prepared.
+        // Unique staging names also keep simultaneous clients from swapping each other's uploads.
+        if let expectedOriginal {
+            do {
+                let current = try await info(path)
+                guard !current.isDirectory, current.size == expectedOriginal.size,
+                      current.modified == expectedOriginal.modified else { throw RemoteWriteError.changed }
+            } catch {
+                try? await delete(temporary)
+                throw error
+            }
+        }
         do {
+            try Task.checkCancellation()
+            guard authorized() else { throw MetadataWriteError.notAuthorized }
+        } catch {
+            try? await delete(temporary)
+            throw error
+        }
+        do {
+            try await rename(path, to: backupName)
+        } catch let originalError {
+            // A lost response may mean the rename happened, even though the request threw.
+            // Restore our unique backup if it exists; never assume the original stayed put.
+            do {
+                _ = try await info(backup)
+                try await rename(backup, to: name)
+            } catch {
+                try? await delete(temporary)
+                if error.isMissingPath || (error as? RemoteWriteError) == .missing { throw originalError }
+                throw RemoteWriteError.recoveryNeeded(backup)
+            }
+            try? await delete(temporary)
+            throw originalError
+        }
+        do {
+            // Two clients can both pass the first check before either renames. Check the file
+            // actually moved aside as well, before replacing it or discarding its backup.
+            if let expectedOriginal {
+                let moved = try await info(backup)
+                guard !moved.isDirectory, moved.size == expectedOriginal.size,
+                      moved.modified == expectedOriginal.modified else { throw RemoteWriteError.changed }
+            }
             try await rename(temporary, to: name)
         } catch {
-            try? await rename(backup, to: name)
+            do { try await rename(backup, to: name) }
+            catch {
+                try? await delete(temporary)
+                throw RemoteWriteError.recoveryNeeded(backup)
+            }
             try? await delete(temporary)
             throw error
         }

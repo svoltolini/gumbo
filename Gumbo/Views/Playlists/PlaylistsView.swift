@@ -4,6 +4,7 @@ import SwiftUI
 /// Playlists tab: the lists the app keeps for you, then the ones you made.
 struct PlaylistsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(AppModel.self) private var model
     @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
@@ -15,7 +16,9 @@ struct PlaylistsView: View {
     @Namespace private var artworkNamespace
 
     @Environment(\.isWideLayout) private var isWide
-    private var columns: [GridItem] { Grids.cards(wide: isWide) }
+    private var columns: [GridItem] {
+        dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : Grids.cards(wide: isWide)
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -112,6 +115,7 @@ struct PlaylistsView: View {
 
 /// Square cover with the name and a line of detail, like an album card.
 struct PlaylistCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let playlist: Playlist
     /// Replaces the song count for the app's own lists.
     var subtitle: String?
@@ -121,15 +125,27 @@ struct PlaylistCard: View {
         NavigationLink(value: destination) {
             VStack(alignment: .leading, spacing: 2) {
                 PlaylistCover(playlist: playlist, cornerRadius: 12)
+                    .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 180 : .infinity)
                     .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
                     .zoomSource(id: destination.sourceID, shape: .rounded(12), shadow: .tile)
                     .padding(.bottom, 8)
-                FadingText(playlist.name)
-                    .font(.subheadline.weight(.medium))
-                FadingText(subtitle ?? playlist.summary)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    Text(playlist.name)
+                        .font(.subheadline.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle ?? playlist.summary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    FadingText(playlist.name)
+                        .font(.subheadline.weight(.medium))
+                    FadingText(subtitle ?? playlist.summary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .cardButton()

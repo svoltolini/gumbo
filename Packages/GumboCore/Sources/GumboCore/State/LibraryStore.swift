@@ -146,6 +146,7 @@ public final class LibraryStore {
 
     /// Writes tag changes into the files on the server and reports progress to the screen that asked.
     public let metadataWriter = MetadataWriter()
+    public private(set) var isDeletingFiles = false
     public private(set) var metadataMutationRevision = 0
     private var catalogueRevision = 0
     public var onMetadataWriteWillBegin: (() -> Void)?
@@ -369,7 +370,7 @@ public final class LibraryStore {
     // MARK: Writing tags
 
     /// Whether edits can reach the files themselves: a signed-in server that accepts uploads.
-    public var canWriteTags: Bool { profiles?.isLocked != true && !isDemo && (drive as? any WritableRemoteDrive) != nil }
+    public var canWriteTags: Bool { profiles?.isLocked != true && !isDemo && drive?.id == catalogue.driveID && (drive as? any WritableRemoteDrive) != nil }
 
     /// Every song shown under the genre `name`: those whose own tag reads it, plus tagless songs of
     /// albums filed there. Songs not yet read are left alone, since their real tag is unknown.
@@ -467,13 +468,18 @@ public final class LibraryStore {
 
     /// Writes `edits` into the given songs' files on the server, then folds the written tags into the
     /// catalogue and regroups albums by them. Songs that could not be written are listed in the report.
-    public func writeTags(_ edits: TagEdits, to tracks: [Track]) async -> MetadataWriteReport {
+    public func writeTags(_ edits: TagEdits, to tracks: [Track], onlyIfGenreMissing: Bool = false) async -> MetadataWriteReport {
+        guard !isDeletingFiles else {
+            var report = MetadataWriteReport()
+            report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.busy.localizedDescription) }
+            return report
+        }
         guard profiles?.isLocked != true else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notAuthorized.localizedDescription) }
             return report
         }
-        guard let drive = drive as? any WritableRemoteDrive, !isDemo else {
+        guard let drive = drive as? any WritableRemoteDrive, drive.id == catalogue.driveID, !isDemo else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notConnected.localizedDescription) }
             return report
@@ -483,16 +489,18 @@ public final class LibraryStore {
         let session = profiles?.sessionID
         metadataMutationRevision += 1
         onMetadataWriteWillBegin?()
-        let report = await metadataWriter.write(edits, to: tracks, drive: drive) { [weak self] in
+        let report = await metadataWriter.write(edits, to: tracks, drive: drive, onlyIfGenreMissing: onlyIfGenreMissing) { [weak self] in
             guard let self else { return false }
             return self.profiles?.isLocked != true && self.profiles?.sessionID == session
-                && self.catalogue.driveID == sourceID && self.catalogue.rootPath == rootPath
+                && (!onlyIfGenreMissing || self.canMaintainFiles)
+                && self.catalogue.driveID == sourceID && self.catalogue.rootPath == rootPath && self.drive?.id == sourceID
         }
-        guard catalogue.driveID == sourceID, catalogue.rootPath == rootPath, !report.written.isEmpty else { return report }
+        let updated = report.written + (onlyIfGenreMissing ? report.unchanged : [])
+        guard catalogue.driveID == sourceID, catalogue.rootPath == rootPath, !updated.isEmpty else { return report }
         let before = catalogue
         let revision = catalogueRevision
         var patched = before
-        for track in report.written { patched.apply(track) }
+        for track in updated { patched.apply(track) }
         // Regrouping walks the whole library; off the main thread like the indexer does it.
         let coverDirectory = artworkDirectory
         var regrouped = await Task.detached(priority: .userInitiated) { [patched] in
@@ -506,10 +514,72 @@ public final class LibraryStore {
         if catalogueRevision != revision {
             // A scan published while regrouping ran; fold the written tags into that newer catalogue instead.
             regrouped = catalogue
-            for track in report.written { regrouped.apply(track) }
+            for track in updated { regrouped.apply(track) }
             regrouped.regroupByTags()
         }
         replace(with: regrouped, drive: self.drive)
+        saveCatalogue()
+        return report
+    }
+
+    /// Shared-file maintenance belongs to the library owner; NAS permissions are still enforced by the server.
+    public var canMaintainFiles: Bool { canWriteTags && (profiles?.canManageProfiles ?? true) }
+
+    public func fillMissingGenre(_ genre: String, trackIDs: Set<String>) async -> MetadataWriteReport {
+        let genre = genre.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selected = tracks.filter { trackIDs.contains($0.id) }
+        guard canMaintainFiles, !GenreLookup.isMissing(genre), genre.count <= 100 else {
+            var report = MetadataWriteReport()
+            report.failures = selected.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: "Open the owner's profile and enter a genre before saving.") }
+            return report
+        }
+        return await writeTags(TagEdits(genre: genre), to: selected, onlyIfGenreMissing: true)
+    }
+
+    public func deleteReviewedFiles(_ findings: [MusicFileInspection]) async -> MusicFileDeletionReport {
+        var report = MusicFileDeletionReport()
+        guard canMaintainFiles, !isDeletingFiles, !metadataWriter.isWriting,
+              let drive = drive as? any WritableRemoteDrive else {
+            report.failures = findings.map { MetadataWriteFailure(trackID: $0.id, title: $0.track.title,
+                message: "Connect as the library owner and wait for other file changes to finish.") }
+            return report
+        }
+        let sourceID = catalogue.driveID
+        let root = catalogue.rootPath
+        let session = profiles?.sessionID
+        isDeletingFiles = true
+        defer { isDeletingFiles = false }
+        metadataMutationRevision += 1
+        onMetadataWriteWillBegin?()
+        for finding in findings {
+            do {
+                try Task.checkCancellation()
+                guard let current = track(id: finding.id), current.path == finding.track.path,
+                      let path = current.path, path.hasPrefix(root.hasSuffix("/") ? root : root + "/") else {
+                    throw RemoteWriteError.changed
+                }
+                try await MusicFileInspector.deleteReviewed(finding, drive: drive) { [weak self] in
+                    guard let self else { return false }
+                    return self.canMaintainFiles && self.profiles?.sessionID == session
+                        && self.catalogue.driveID == sourceID && self.catalogue.rootPath == root
+                        && self.drive?.id == sourceID
+                }
+                report.deleted.append(current)
+            } catch {
+                if Task.isCancelled || error is CancellationError { report.wasCancelled = true; break }
+                report.failures.append(MetadataWriteFailure(trackID: finding.id, title: finding.track.title,
+                                                           message: MetadataWriter.message(for: error)))
+            }
+        }
+        guard catalogue.driveID == sourceID, catalogue.rootPath == root, !report.deleted.isEmpty else { return report }
+        let removed = Set(report.deleted.map(\.id))
+        var patched = catalogue
+        for index in patched.albums.indices {
+            patched.albums[index].tracks.removeAll { removed.contains($0.id) }
+            for song in patched.albums[index].tracks.indices { patched.albums[index].tracks[song].index = song }
+        }
+        patched.albums.removeAll { $0.tracks.isEmpty }
+        replace(with: patched, drive: self.drive)
         saveCatalogue()
         return report
     }

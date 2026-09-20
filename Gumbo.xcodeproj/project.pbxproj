@@ -44,6 +44,7 @@
 		325DFA490C8175E5C9E066AB /* ArtistsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */; };
 		32B8D24D9AEDD63DF01739D0 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471AC93C920E27576A515E4E /* Components.swift */; };
 		34128A0662F5A82A866C288F /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9652EC7FF5019EFC63864A69 /* InviteSheet.swift */; };
+		3420E29996BCAD7F456F2F41 /* LibraryMaintenanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23445943226781EBB019469D /* LibraryMaintenanceView.swift */; };
 		3421EF61D0C3E0D3582964AF /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2CE7C5F77DEE0409940776 /* MacSettingsView.swift */; };
 		3475D6CBEDE9683CB7D09113 /* GumboWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E434DB16ED20099D2C1868 /* GumboWatchApp.swift */; };
 		397E9ADD5B01300A947E0936 /* MacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6ABE675A87FAD55F262A30F /* MacRootView.swift */; };
@@ -133,6 +134,7 @@
 		B41B014CD89F73142BF170F4 /* TVRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DA4EF908D36E54DDA53BB9 /* TVRootView.swift */; };
 		B5A938FCDBF507621D98E7C2 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */; };
 		B9CA03034E0E281AB107620A /* PlaybackIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEC44E5B1B9F268FF64B89F /* PlaybackIntents.swift */; };
+		B9DE4FC0EC4C7D1BEF1F49CE /* LibraryMaintenanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23445943226781EBB019469D /* LibraryMaintenanceView.swift */; };
 		BB8BD3B5C0170E285E950363 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 73639340E4ECA1F35AB8A3FB /* Assets.xcassets */; };
 		BC7EBF1025F330D97A27CC2A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9D9996A3D64083D6DE98B530 /* PrivacyInfo.xcprivacy */; };
 		BCBBD1909AD86C0C729157AB /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */; };
@@ -161,6 +163,7 @@
 		E0EF0C93E4E3EF81BE899F19 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
 		E1A6C87C73E9FA60B6F3E659 /* JoinWithLinkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */; };
 		E223442A4EFB8A4C94F06948 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 65D17515AA2A0BB4C92708EA /* PrivacyInfo.xcprivacy */; };
+		E265100365780AA19E7BD57E /* LibraryMaintenanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23445943226781EBB019469D /* LibraryMaintenanceView.swift */; };
 		E316D96DA20D392266D84209 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945E5C03A0F645DBB7B9E87D /* Platform.swift */; };
 		E34D7A5844AD4F2A6D3B7C89 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
 		E4FAB486BC7192FBB140B4D7 /* GumboShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7880F336195EC2B7C6788C5F /* GumboShared */; };
@@ -253,6 +256,7 @@
 		1D8DD07110745F8D44FD9C7E /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		1F8FE1566692E54AC03F2E3A /* GumboMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GumboMac.entitlements; sourceTree = "<group>"; };
 		21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistsListView.swift; sourceTree = "<group>"; };
+		23445943226781EBB019469D /* LibraryMaintenanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryMaintenanceView.swift; sourceTree = "<group>"; };
 		237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyDetailsView.swift; sourceTree = "<group>"; };
 		2AA082BBE1046245EC568AFD /* NowPlayingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingView.swift; sourceTree = "<group>"; };
 		2C1A27F63A04D6093B324A25 /* PINEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PINEntryView.swift; sourceTree = "<group>"; };
@@ -435,6 +439,7 @@
 				7286D341526727D1D3C020BB /* DiagnosticsView.swift */,
 				C10EE0A819A08F25633D7A0E /* DownloadsView.swift */,
 				744DFEFB8D4C58FFE926E903 /* FamilyView.swift */,
+				23445943226781EBB019469D /* LibraryMaintenanceView.swift */,
 				237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */,
 				EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */,
 				635CAEE6178E102936FBC21E /* SettingsView.swift */,
@@ -941,6 +946,7 @@
 				2EB6B88AA9D46EDFDCA6AB45 /* InviteSheet.swift in Sources */,
 				E1A6C87C73E9FA60B6F3E659 /* JoinWithLinkSheet.swift in Sources */,
 				F783C958BD2CBB44EC00BFEC /* LibraryHomeView.swift in Sources */,
+				B9DE4FC0EC4C7D1BEF1F49CE /* LibraryMaintenanceView.swift in Sources */,
 				5DD4B997405D697AC1809D10 /* LibraryView.swift in Sources */,
 				76B6B67F01D525FF30230117 /* LoginSheet.swift in Sources */,
 				07A40BD5D608ECF9683736C9 /* NowPlayingView.swift in Sources */,
@@ -1001,6 +1007,7 @@
 				A726CE542A5ABEA0F901670B /* InviteSheet.swift in Sources */,
 				8644F458B1765BF818238007 /* JoinWithLinkSheet.swift in Sources */,
 				7192E7F9D0F96724C3ACA8AA /* LibraryHomeView.swift in Sources */,
+				E265100365780AA19E7BD57E /* LibraryMaintenanceView.swift in Sources */,
 				9DDB339B0A6CBD736F06D3A8 /* LibraryView.swift in Sources */,
 				E922C8CCDC2F4338ED8F0567 /* LoginSheet.swift in Sources */,
 				273D392AB13EEEC5F0811C53 /* MainTabView.swift in Sources */,
@@ -1055,6 +1062,7 @@
 				34128A0662F5A82A866C288F /* InviteSheet.swift in Sources */,
 				456F8BDD3AA825BE77CB20C2 /* JoinWithLinkSheet.swift in Sources */,
 				51AD4481590FA4572FE930FD /* LibraryHomeView.swift in Sources */,
+				3420E29996BCAD7F456F2F41 /* LibraryMaintenanceView.swift in Sources */,
 				8E728C639D7149753168CE2F /* LibraryView.swift in Sources */,
 				A12B06EE7824A90E14C3B05B /* LoginSheet.swift in Sources */,
 				DBF882A932EDB3759490B05D /* MacCollectionViews.swift in Sources */,
@@ -1144,7 +1152,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = WatchAppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboWatch/Info.plist;
 				MARKETING_VERSION = 1.0;
@@ -1231,7 +1239,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = WatchAppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboWatch/Info.plist;
 				MARKETING_VERSION = 1.0;
@@ -1252,7 +1260,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_ENTITLEMENTS = GumboTV/GumboTV.entitlements;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1276,7 +1284,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = GumboMac/GumboMac.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = GumboMac/Info.plist;
@@ -1297,7 +1305,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GumboWidgets/GumboWidgets.entitlements;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
@@ -1404,7 +1412,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Gumbo/Gumbo.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = Gumbo/Info.plist;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
@@ -1431,7 +1439,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Gumbo/Gumbo.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = Gumbo/Info.plist;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
@@ -1458,7 +1466,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_ENTITLEMENTS = GumboTV/GumboTV.entitlements;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboTV/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1479,7 +1487,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GumboWidgets/GumboWidgets.entitlements;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				INFOPLIST_FILE = GumboWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
@@ -1525,7 +1533,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = GumboMac/GumboMac.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 202609201659;
+				CURRENT_PROJECT_VERSION = 202609201803;
 				DEVELOPMENT_TEAM = C6GW4A76XK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = GumboMac/Info.plist;

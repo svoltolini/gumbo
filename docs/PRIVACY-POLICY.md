@@ -12,6 +12,12 @@ Your NAS receives the credentials, folder requests and media requests needed for
 
 Gumbo uses cover images from your NAS folders and pictures embedded in your music files. It does not send artist or album names to an online artwork search service. If your files have no cover, Gumbo shows a generated design.
 
+## Optional genre lookup and file maintenance
+
+When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for matching genres. This lookup is optional and happens only after you start it. It does not send audio, file paths or NAS credentials. You can enter a genre yourself without using online lookup. Suggestions are reviewed before saving, and existing genre tags are preserved.
+
+Saving reviewed genres writes tags to the original files on your NAS, affecting everyone who uses those files. The owner can use Problem Files to check songs with missing playback information and permanently delete selected damaged files after reviewing the results and confirming. Removing a download only removes a device copy; deleting from Problem Files removes a shared original. Copies on other devices and server backups may remain.
+
 ## iCloud and family sharing
 
 When iCloud is available, Gumbo uses Apple's CloudKit service to synchronize profile names, selected profile photos, favourites, playlists, recent plays, recent searches, settings and change-reconciliation information. Profile records also include the profile's Apple account association, role, dates, and PIN verification values when a PIN is set. This is data in the app's private or family-shared CloudKit zone, not a Gumbo-operated database.
@@ -32,7 +38,7 @@ Apple provides App Store and TestFlight distribution under its own terms and you
 
 ## Your choices
 
-You can remove downloads, edit or delete eligible profiles, and clear diagnostics in Gumbo. iCloud changes and deletions need connectivity to reach other devices. Family access can be managed in Gumbo and on the NAS; removing a participant does not recall copies already downloaded on that person's devices. You can also manage Apple service and backup settings through Apple. Gumbo cannot delete the original library, independent NAS logs or backups maintained outside the app through these controls.
+You can remove downloads, edit or delete eligible profiles, and clear diagnostics in Gumbo. iCloud changes and deletions need connectivity to reach other devices. Family access can be managed in Gumbo and on the NAS; removing a participant does not recall copies already downloaded on that person's devices. You can also manage Apple service and backup settings through Apple. Shared-file maintenance requires the library owner and NAS write permissions. Gumbo cannot remove independent NAS logs, NAS backups or copies on other devices through these controls.
 
 ## Publication checklist
 

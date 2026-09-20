@@ -9,7 +9,7 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
         app.launchArguments = ["--sample-library", "--ui-preview", "--preview-tab", tab]
         if let query { app.launchArguments += ["--preview-query", query] }
         app.launch()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.navigationBars[tab.capitalized].waitForExistence(timeout: 15))
         return app
     }
 
@@ -116,5 +116,33 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
             app.navigationBars.buttons.firstMatch.tap()
             XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         }
+    }
+}
+
+
+extension ReleaseSmokeTests {
+    @MainActor func testMaintenanceScreensRequireARealLibraryBeforeChangingFiles() {
+        let app = launch()
+        tapSettingsRow(app.buttons["settings.advanced"], in: app)
+        tapSettingsRow(app.buttons["Find Missing Genres"], in: app)
+        XCTAssertTrue(app.navigationBars["Find Missing Genres"].waitForExistence(timeout: 5))
+        for _ in 0..<8 where !app.buttons["Find Suggestions"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["Find Suggestions"].exists)
+        XCTAssertFalse(app.buttons["Find Suggestions"].isEnabled)
+        capture(app, name: "Missing genres review")
+        app.navigationBars.buttons.firstMatch.tap()
+        tapSettingsRow(app.buttons["Problem Files"], in: app)
+        XCTAssertTrue(app.navigationBars["Problem Files"].waitForExistence(timeout: 5))
+        for _ in 0..<8 where !app.buttons["Check Files"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["Check Files"].exists)
+        XCTAssertFalse(app.buttons["Check Files"].isEnabled)
+        XCTAssertFalse(app.buttons["Delete from NAS"].exists)
+        capture(app, name: "Problem files review")
+    }
+
+    @MainActor func testMadeForYouPlaylistArtwork() {
+        let app = launch(tab: "playlists")
+        XCTAssertTrue(app.navigationBars["Playlists"].waitForExistence(timeout: 5))
+        capture(app, name: "Made for You artwork")
     }
 }

@@ -13,6 +13,8 @@ App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b914
 | Feature | Data and destination | Source evidence |
 | --- | --- | --- |
 | NAS sign-in and playback | Credentials, folder/media requests to the configured NAS; catalogue/downloads stored on device | `Networking/SynologyClient.swift`, `State/AppModel.swift`, `State/LibraryStore.swift`, `State/DownloadManager.swift` |
+| Optional genre lookup | User-started album and artist text queries to Apple music search; no audio, NAS paths or credentials; review before NAS tag writes | `Networking/GenreLookup.swift`, `LibraryMaintenanceView.swift` |
+| Shared-file maintenance | Owner-controlled reviewed genre edits and confirmed damaged-file deletion on the connected NAS; no Gumbo service receives files | `MetadataWriter.swift`, `MusicFileInspection.swift` |
 | Album artwork | NAS-folder images and embedded music pictures only; no external artwork search or image requests | `Indexing/CoverStore.swift`, source reads in `LibraryIndexer.swift` and `LibraryStore.swift`, `GumboShared/ArtworkPolicy.swift` |
 | Profile sync | Name, chosen photo, role, dates, Apple user-record association, PIN verification values; favourites, playlists, searches, recent plays and settings in private/family-shared CloudKit zone | `CloudSync.record(for:)`, `Models/Profile.swift`, `ProfileStateMerge.swift` |
 | Family connection | NAS address, names, account and music folder in family CloudKit record; selected Family Access password in `record.encryptedValues`; anyone with the share link can join | `CloudSync.record(for: FamilyInfo)` |
