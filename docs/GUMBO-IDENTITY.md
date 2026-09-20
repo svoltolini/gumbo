@@ -41,6 +41,12 @@ Source configuration and unsigned/simulator builds cannot register or verify App
 
 These gates remain tracked in [#118](https://github.com/svoltolini/gumbo/issues/118). No registration, schema deployment, App Store submission or TestFlight upload is implied by the rename.
 
+## Signing evidence — 20 September 2026
+
+Xcode registered the explicit Gumbo app and widget IDs, app group and CloudKit container for the development team. The CarPlay Audio capability was enabled for the new Gumbo app ID in Apple Developer. A signed **Release** build for the paired physical iPhone succeeded, including the Watch companion and widgets, using version `1.0` / build `202609151900`. The embedded app profile includes the new CloudKit container, app group and CarPlay entitlement; the Watch development profile is currently a wildcard profile.
+
+Both Debug and Release retain the same required app capabilities. No reduced-capability development configuration is needed. This establishes development signing, not App Store distribution, production CloudKit schema deployment or successful runtime journeys. Physical acceptance is tracked in [#123](https://github.com/svoltolini/gumbo/issues/123); the remaining production gates stay in #118.
+
 ## Historical records
 
 Earlier remediation/release documents are historical; product and source-path spelling has been normalized for navigation in the current tree. Their dates, measurements and results do not validate the new app identity.

@@ -19,6 +19,7 @@ final class WatchPlayer {
     private(set) var current: WatchTrack?
     private(set) var isPlaying = false
     private(set) var queueTitle: String?
+    private(set) var lastError: String?
 
     private let player = AVQueuePlayer()
     private var queue: [(track: WatchTrack, url: URL)] = []
@@ -46,6 +47,7 @@ final class WatchPlayer {
               WatchDownloads.shared.allowsPlayback(files) else { return }
         let command = intent.advance()
         pendingActivation = true
+        lastError = nil
         var order = files
         if shuffled {
             order.shuffle()
@@ -56,14 +58,24 @@ final class WatchPlayer {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
-            _ = try await session.activate(options: [])
+            guard try await session.activate(options: []) else {
+                if intent.accepts(command) {
+                    pendingActivation = false
+                    if !Task.isCancelled { lastError = "Audio couldn't start. Connect your headphones and try again." }
+                }
+                return
+            }
         } catch {
-            if intent.accepts(command) { pendingActivation = false }
+            if intent.accepts(command) {
+                pendingActivation = false
+                if !Task.isCancelled { lastError = "Audio couldn't start. \(error.localizedDescription)" }
+            }
             return
         }
-        guard !Task.isCancelled, intent.accepts(command), authorization.isGranted,
-              WatchDownloads.shared.allowsPlayback(order) else { return }
+        guard intent.accepts(command) else { return }
         pendingActivation = false
+        guard !Task.isCancelled, authorization.isGranted,
+              WatchDownloads.shared.allowsPlayback(order) else { return }
         queue = order
         queueTitle = title
         player.removeAllItems()
@@ -94,8 +106,11 @@ final class WatchPlayer {
         current = nil
         queueTitle = nil
         isPlaying = false
+        lastError = nil
         updateNowPlaying()
     }
+
+    func dismissPlaybackError() { lastError = nil }
 
     private func pause() {
         intent.advance()
@@ -146,11 +161,21 @@ final class WatchPlayer {
         guard !commandsReady else { return }
         commandsReady = true
         let centre = MPRemoteCommandCenter.shared()
-        centre.playCommand.addTarget { [weak self] _ in self?.resume(); return .success }
-        centre.pauseCommand.addTarget { [weak self] _ in self?.pause(); return .success }
-        centre.togglePlayPauseCommand.addTarget { [weak self] _ in self?.togglePlayPause(); return .success }
-        centre.nextTrackCommand.addTarget { [weak self] _ in self?.next(); return .success }
-        centre.previousTrackCommand.addTarget { [weak self] _ in self?.previous(); return .success }
+        // Remote command callbacks may arrive on a system queue, as with the shared player.
+        func onMain(_ action: @escaping @MainActor (WatchPlayer) -> Void) -> @Sendable (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus {
+            { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    action(self)
+                }
+                return .success
+            }
+        }
+        centre.playCommand.addTarget(handler: onMain { $0.resume() })
+        centre.pauseCommand.addTarget(handler: onMain { $0.pause() })
+        centre.togglePlayPauseCommand.addTarget(handler: onMain { $0.togglePlayPause() })
+        centre.nextTrackCommand.addTarget(handler: onMain { $0.next() })
+        centre.previousTrackCommand.addTarget(handler: onMain { $0.previous() })
     }
 
     private func updateNowPlaying() {

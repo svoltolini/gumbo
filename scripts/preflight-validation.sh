@@ -171,10 +171,10 @@ check_entitlement() {
 }
 
 # iOS entitlements
-check_entitlement "project.yml" "com.apple.security.application-groups" "iOS: App Groups"
-check_entitlement "project.yml" "com.apple.developer.icloud-container-identifiers" "iOS: CloudKit"
-check_entitlement "project.yml" "com.apple.developer.carplay-audio" "iOS: CarPlay Audio"
-check_entitlement "project.yml" "aps-environment" "iOS: Push Notifications"
+check_entitlement "Gumbo/Gumbo.entitlements" "com.apple.security.application-groups" "iOS: App Groups"
+check_entitlement "Gumbo/Gumbo.entitlements" "com.apple.developer.icloud-container-identifiers" "iOS: CloudKit"
+check_entitlement "Gumbo/Gumbo.entitlements" "com.apple.developer.carplay-audio" "iOS: CarPlay Audio"
+check_entitlement "Gumbo/Gumbo.entitlements" "aps-environment" "iOS: Push Notifications"
 
 # Mac entitlements
 check_entitlement "project.yml" "com.apple.security.app-sandbox" "Mac: App Sandbox"
