@@ -16,6 +16,7 @@ struct GenreEditorSheet: View {
     /// Songs shown here whose files carry another genre tag, left by a rename made before files were written.
     @State private var untaggedCount = 0
     @State private var isWriting = false
+    @State private var isStopping = false
     @State private var writtenName = ""
     @State private var report: MetadataWriteReport?
     @FocusState private var isEditingName: Bool
@@ -55,9 +56,7 @@ struct GenreEditorSheet: View {
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if isWriting {
-                        Button("Stop") { library.metadataWriter.cancel() }
-                    } else if report == nil {
+                    if !isWriting && report == nil {
                         Button("Cancel") { dismiss() }
                     }
                 }
@@ -143,7 +142,10 @@ struct GenreEditorSheet: View {
 
     private var progressSection: some View {
         Section {
-            TagWriteProgressView(writer: library.metadataWriter, title: "Writing “\(writtenName)”")
+            TagWriteProgressView(writer: library.metadataWriter, title: "Saving genre", subtitle: writtenName, isStopping: isStopping) {
+                isStopping = true
+                library.metadataWriter.cancel()
+            }
         } footer: {
             Text("Each song is downloaded, its genre tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
                 .fixedSize(horizontal: false, vertical: true)
@@ -199,6 +201,7 @@ struct GenreEditorSheet: View {
         }
         isEditingName = false
         writtenName = newName
+        isStopping = false
         isWriting = true
         Task { @MainActor in
             guard isContextCurrent() else {
@@ -207,6 +210,7 @@ struct GenreEditorSheet: View {
             }
             let result = await library.writeGenre(name, to: newName)
             isWriting = false
+            isStopping = false
             if result.isComplete {
                 dismiss()
             } else {
@@ -220,25 +224,17 @@ struct GenreEditorSheet: View {
 struct TagWriteProgressView: View {
     let writer: MetadataWriter
     let title: String
+    var subtitle: String? = nil
+    var isStopping = false
+    let onStop: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: writer.progress) {
-                Text(title)
-            } currentValueLabel: {
-                HStack {
-                    Text("\(writer.completed) of \(writer.total)")
-                    if let current = writer.currentTitle {
-                        Text("· \(current)")
-                            .lineLimit(1)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
+        OperationProgressView(
+            title: title, subtitle: subtitle, currentItem: writer.currentTitle,
+            fractionCompleted: writer.total > 0 ? writer.progress : nil,
+            counter: writer.total > 0 ? "\(writer.completed) of \(writer.total) songs" : nil,
+            isStopping: isStopping, onStop: onStop
+        )
     }
 }
 
