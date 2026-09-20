@@ -1,0 +1,36 @@
+# Copy to .github/workflows/website-pages.yml at the repository root.
+# Enable GitHub Actions in Settings > Pages before running this workflow.
+name: Deploy Gumbo website
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: gumbo-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload static website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          # Use "." when this website is its own repository root.
+          path: website
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
