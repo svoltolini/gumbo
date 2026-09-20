@@ -118,6 +118,29 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
             XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         }
     }
+
+    @MainActor func testReturningWhilePlayingKeepsBrowsingAndPlayerOpensOnTap() {
+        let app = launch(tab: "search", query: "Parallel Lives")
+        app.staticTexts["Parallel Lives"].firstMatch.tap()
+        let play = app.buttons["Play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].firstMatch.waitForExistence(timeout: 5))
+        app.tabBars.buttons["Settings"].tap()
+
+        for _ in 0..<2 {
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["settings.general"].isHittable, "Returning while playing must leave Settings usable")
+            XCTAssertFalse(app.buttons["Previous track"].exists, "The full player must only open on request")
+            XCTAssertTrue(app.buttons["Pause"].isHittable, "The mini-player stays available")
+        }
+        capture(app, name: "Browsing after returning while playing")
+        app.staticTexts["Ana Kestrel"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Previous track"].waitForExistence(timeout: 5), "Tapping the mini-player should still open it")
+        capture(app, name: "Player opened explicitly")
+    }
 }
 
 
