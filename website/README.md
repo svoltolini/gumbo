@@ -2,15 +2,17 @@
 
 Static HTML/CSS with a small script. No dependencies or build step.
 
-## Paste the TestFlight link
+## TestFlight invitation
 
-In `index.html`, near the top of `<head>`, replace the empty string:
+The external **Gumbo Founding Testers** group has a **50-person public-link limit**. The invitation is configured once in `index.html`, near the top of `<head>`:
 
 ```js
-const TESTFLIGHT_PUBLIC_LINK = "";
+const TESTFLIGHT_PUBLIC_LINK = "https://testflight.apple.com/join/GensWMTh";
 ```
 
-Use your actual `https://testflight.apple.com/join/ALPHANUMERIC` public invitation URL. This one constant controls every beta button through `site.js`. Empty/invalid links lead to the beta section with a coming-soon message. Without JavaScript, visitors can still read the page and beta information.
+This one constant controls every beta button through `site.js`. For a replacement group, use its actual `https://testflight.apple.com/join/ALPHANUMERIC` invitation URL. Empty/invalid links lead to the beta section with a coming-soon message. Without JavaScript, visitors can still read the page and beta information.
+
+Apple must approve an external beta build before the invitation accepts testers. The page keeps a visible availability note; a configured link alone does not mean installation is open. The 50-person cap is enforced in App Store Connect. Group/build review status and external acceptance are tracked in [issue #162](https://github.com/svoltolini/gumbo/issues/162).
 
 ## Preview and customise
 

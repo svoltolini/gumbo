@@ -17,11 +17,14 @@
   } catch { /* An unfinished link keeps the honest, accessible coming-soon state. */ }
 
   if (invitation) {
-    links.forEach(link => { link.href = invitation; });
-    status.hidden = true;
+    links.forEach(link => {
+      link.href = invitation;
+      link.setAttribute("aria-describedby", "beta-status");
+    });
     return;
   }
 
+  status.textContent = "The public invitation link is coming soon. Please check back here.";
   links.forEach(link => {
     link.setAttribute("aria-describedby", "beta-status");
     link.addEventListener("click", () => {
