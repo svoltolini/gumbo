@@ -1,5 +1,7 @@
 # Gumbo 1.0 — responsiveness and artwork privacy
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 This is the historical batch 4 record. Its optional Apple artwork behavior is superseded by the source-only release change tracked in [#34](https://github.com/svoltolini/gumbo/issues/34); see the current privacy policy and release evidence.
 
 Batch 4 addresses [#33](https://github.com/svoltolini/gumbo/issues/33) and the in-app work in [#14](https://github.com/svoltolini/gumbo/issues/14). Marketing version remains **1.0**; every target uses build **202609142150**.

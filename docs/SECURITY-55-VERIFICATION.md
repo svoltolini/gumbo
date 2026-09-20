@@ -1,5 +1,7 @@
 # Security Issue #55 Verification — Family Revocation Credential Isolation
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 **Issue:** [#55 - Failed family revocation leaves stale credentials accessible](https://github.com/svoltolini/gumbo/issues/55)
 
 **Severity:** P1 Release Blocker

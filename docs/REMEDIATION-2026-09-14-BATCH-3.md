@@ -1,5 +1,7 @@
 # Gumbo 1.0 — third remediation batch
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Date: 14 September 2026. Base: `f284565b289ae3dd048726516eb112d913e2728a`.
 
 This continues [batch 2](REMEDIATION-2026-09-14-BATCH-2.md) in [PR #32](https://github.com/svoltolini/gumbo/pull/32). Marketing version stays **1.0**. The candidate build is **202609142035** on all five targets.
@@ -27,7 +29,7 @@ This continues [batch 2](REMEDIATION-2026-09-14-BATCH-2.md) in [PR #32](https://
 | Packaging | Every app/extension archive contains its privacy manifest. The exported iPhone binary and App Store distribution profile include CarPlay audio; executable uses production CloudKit and is not debuggable. The 17 compiled Watch images retain their original pixel digests and slot mappings after catalog separation. |
 | Whitespace | Passed. |
 
-Final archive/export/upload evidence is under `/tmp/skyr-remediation-3/final`; core tests are in `/tmp/skyr-remediation-3/cloud-final-package.log`, independent cloud checks in `/tmp/skyr-remediation-3/cloud-review`, and icon checks in `/tmp/skyr-remediation-3/icon-diagnosis`.
+Final archive/export/upload evidence is under `/tmp/gumbo-remediation-3/final`; core tests are in `/tmp/gumbo-remediation-3/cloud-final-package.log`, independent cloud checks in `/tmp/gumbo-remediation-3/cloud-review`, and icon checks in `/tmp/gumbo-remediation-3/icon-diagnosis`.
 
 iOS and macOS uploads were accepted and processed as VALID, with internalBuildState IN_BETA_TESTING and membership in the existing internal Testers group verified through the API. Their testing notes were updated and read back. The first tvOS upload was rejected for a missing 1× wide Top Shelf image; both 1× sizes were then derived from the existing 2× artwork with the owner's explicit approval. The corrected exported TV asset catalog and signature were checked before retrying. These TV-only assets are absent from the iOS and Mac compiled catalogs and do not alter their accepted builds. The corrected TV upload was accepted (delivery `809d9258-05cd-4f9b-8cde-8d0667ccd2e3`). All three platforms now report VALID and IN_BETA_TESTING, and membership in the internal Testers group was verified. Testing notes were saved and read back for all three. External beta state is READY_FOR_BETA_SUBMISSION; no external beta review or public App Store release is claimed.
 

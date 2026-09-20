@@ -1,5 +1,7 @@
 # Catalogue cache ordering — issue 21
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Changing the selected folder or NAS invalidates unfinished cache saves. A new cache is prepared away from the main actor and published only if it is still the latest requested save. The final generation check and atomic replacement use the same short lock as source changes and sign-out. An older scan cannot overwrite a newer completed catalogue or recreate a cache after removal.
 
 The previous committed cache stays intact if encoding, staging, or publication fails, or if a folder change is interrupted. Its existing canonical source and exact-root checks prevent it from being restored under the new selection; it remains recoverable when the user explicitly reconnects to the original source and folder. The JSON format is unchanged.

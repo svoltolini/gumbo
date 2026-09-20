@@ -1,5 +1,7 @@
 # Gumbo P1 Board Status — 15 September 2026
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 This document records the verification of open P1 issues and security filing status following the earlier triage. It does not include TestFlight upload or marketing version changes.
 
 ## P1 Issues Verification
@@ -11,10 +13,10 @@ Issues marked "code done" in earlier triage were verified against main branch (`
 **Status:** FIX VERIFIED — awaiting Tester device pass
 
 **Evidence:**
-- `WatchDownloadJob` in `Packages/SkyrCore/Sources/SkyrCore/Models/WatchCatalogue.swift:82-108` uses structured JSON task metadata instead of path-based filenames
+- `WatchDownloadJob` in `Packages/GumboCore/Sources/GumboCore/Models/WatchCatalogue.swift:82-108` uses structured JSON task metadata instead of path-based filenames
 - `cacheID` property (line 74-78) creates source-scoped identifiers via `DownloadManager.cacheKey(trackID:driveID:)`
 - Safe local filenames isolate by generation, profile and NAS source
-- Test coverage in `Packages/SkyrCore/Tests/SkyrCoreTests/DownloadTests.swift:105-114`:
+- Test coverage in `Packages/GumboCore/Tests/GumboCoreTests/DownloadTests.swift:105-114`:
 
 ```swift
 @Test func watchTaskMetadataPreservesNestedUnicodeNamesAndSeparatesSources() throws {
@@ -35,7 +37,7 @@ Issues marked "code done" in earlier triage were verified against main branch (`
 **Status:** FIX VERIFIED — awaiting Tester two-NAS journey
 
 **Evidence:**
-- `DownloadManager.cacheKey` in `Packages/SkyrCore/Sources/SkyrCore/State/DownloadManager.swift:349-363` uses length-delimited JSON encoding of `[driveID, trackID]` with SHA256 hash
+- `DownloadManager.cacheKey` in `Packages/GumboCore/Sources/GumboCore/State/DownloadManager.swift:349-363` uses length-delimited JSON encoding of `[driveID, trackID]` with SHA256 hash
 - `DownloadRecord` (line 10-44) stores `driveID` and requires it for manifest loading
 - Legacy manifests without `driveID` are pruned on load (line 991-994)
 
@@ -191,7 +193,7 @@ Malformed or adversarially crafted media metadata (MP4/ID3 tags) can cause unbou
 
 ## Affected Components
 
-- `Packages/SkyrCore/Sources/SkyrCore/Indexing/` — MP4/ID3 tag parsing
+- `Packages/GumboCore/Sources/GumboCore/Indexing/` — MP4/ID3 tag parsing
 - Any file scanned from a user's NAS library
 
 ## Potential Impact
@@ -206,8 +208,8 @@ Source fixes merged in batch 2: MP4/ID3 changes check spans before arithmetic, i
 
 ## Verification
 
-- `Packages/SkyrCore/Tests/SkyrCoreTests/MediaBoundaryTests.swift`
-- `Packages/SkyrCore/Tests/SkyrCoreTests/BoundedBytesTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/MediaBoundaryTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/BoundedBytesTests.swift`
 ```
 
 ---
@@ -233,8 +235,8 @@ When family sharing removal fails (CloudKit unavailable, partial acknowledgement
 
 ## Affected Components
 
-- `Packages/SkyrCore/Sources/SkyrCore/State/CloudSync.swift` — sharing removal
-- `Packages/SkyrCore/Sources/SkyrCore/Models/FamilyInfo.swift` — credential distribution
+- `Packages/GumboCore/Sources/GumboCore/State/CloudSync.swift` — sharing removal
+- `Packages/GumboCore/Sources/GumboCore/Models/FamilyInfo.swift` — credential distribution
 
 ## Potential Impact
 
@@ -248,7 +250,7 @@ Source fixes merged in batch 3: Sharing removal requires CloudKit acknowledgemen
 
 ## Verification
 
-- `Packages/SkyrCore/Tests/SkyrCoreTests/FamilyAccessTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/FamilyAccessTests.swift`
 - Manual family removal/rejoin journeys remain device acceptance
 ```
 
@@ -275,7 +277,7 @@ The profile PIN (used to protect owner/admin access) could be removed or bypasse
 
 ## Affected Components
 
-- `Packages/SkyrCore/Sources/SkyrCore/State/ProfileStore.swift` — PIN validation
+- `Packages/GumboCore/Sources/GumboCore/State/ProfileStore.swift` — PIN validation
 - Profile management and activation flows
 
 ## Potential Impact
@@ -290,7 +292,7 @@ Source fixes merged in batch 1: Profile activation validates the canonical PIN; 
 
 ## Verification
 
-- `Packages/SkyrCore/Tests/SkyrCoreTests/ProfileAuthorizationTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/ProfileAuthorizationTests.swift`
 - Biometric hardware and remote profile changes remain device acceptance
 ```
 
@@ -317,7 +319,7 @@ Family NAS credentials distributed through CloudKit may be offered for a differe
 
 ## Affected Components
 
-- `Packages/SkyrCore/Sources/SkyrCore/State/CloudSync.swift` — FamilyInfo distribution
+- `Packages/GumboCore/Sources/GumboCore/State/CloudSync.swift` — FamilyInfo distribution
 - Connection and credential presentation flows
 
 ## Potential Impact
@@ -332,8 +334,8 @@ Source fixes merged in batch 3: Only credentials verified for the current NAS so
 
 ## Verification
 
-- `Packages/SkyrCore/Tests/SkyrCoreTests/FamilyAccessTests.swift` — 14 family access cases
-- `Packages/SkyrCore/Tests/SkyrCoreTests/ConnectionTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/FamilyAccessTests.swift` — 14 family access cases
+- `Packages/GumboCore/Tests/GumboCoreTests/ConnectionTests.swift`
 ```
 
 ---
@@ -373,7 +375,7 @@ Source fixes merged in batch 2: NAS whole-file artwork downloads now consume a b
 
 ## Verification
 
-- `Packages/SkyrCore/Tests/SkyrCoreTests/BoundedBytesTests.swift`
+- `Packages/GumboCore/Tests/GumboCoreTests/BoundedBytesTests.swift`
 - Image decoding/Foundation memory bounds remain outside source control
 ```
 

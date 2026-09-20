@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Skyr 1.0 Preflight Validation Script
+# Gumbo 1.0 Preflight Validation Script
 #
 # Runs automated checks that do not require physical devices or TestFlight.
 # Use this before device acceptance testing to catch configuration issues early.
@@ -87,11 +87,11 @@ check_version() {
     fi
 }
 
-check_version "Skyr"
-check_version "SkyrWidgets"
-check_version "SkyrWatch"
-check_version "SkyrMac"
-check_version "SkyrTV"
+check_version "Gumbo"
+check_version "GumboWidgets"
+check_version "GumboWatch"
+check_version "GumboMac"
+check_version "GumboTV"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Privacy Manifest Check
@@ -115,11 +115,11 @@ check_privacy_manifest() {
     fi
 }
 
-check_privacy_manifest "Skyr" "iOS"
-check_privacy_manifest "SkyrWidgets" "Widgets"
-check_privacy_manifest "SkyrWatch" "Watch"
-check_privacy_manifest "SkyrMac" "Mac"
-check_privacy_manifest "SkyrTV" "TV"
+check_privacy_manifest "Gumbo" "iOS"
+check_privacy_manifest "GumboWidgets" "Widgets"
+check_privacy_manifest "GumboWatch" "Watch"
+check_privacy_manifest "GumboMac" "Mac"
+check_privacy_manifest "GumboTV" "TV"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Export Compliance Check
@@ -139,10 +139,10 @@ check_export_compliance() {
         # Also check the Info.plist directly if it exists
         local plist_path=""
         case $target in
-            Skyr) plist_path="$PROJECT_ROOT/Skyr/Info.plist" ;;
-            SkyrWatch) plist_path="$PROJECT_ROOT/SkyrWatch/Info.plist" ;;
-            SkyrMac) plist_path="$PROJECT_ROOT/SkyrMac/Info.plist" ;;
-            SkyrTV) plist_path="$PROJECT_ROOT/SkyrTV/Info.plist" ;;
+            Gumbo) plist_path="$PROJECT_ROOT/Gumbo/Info.plist" ;;
+            GumboWatch) plist_path="$PROJECT_ROOT/GumboWatch/Info.plist" ;;
+            GumboMac) plist_path="$PROJECT_ROOT/GumboMac/Info.plist" ;;
+            GumboTV) plist_path="$PROJECT_ROOT/GumboTV/Info.plist" ;;
         esac
         
         if [[ -n "$plist_path" && -f "$plist_path" ]] && grep -q "ITSAppUsesNonExemptEncryption" "$plist_path"; then
@@ -155,10 +155,10 @@ check_export_compliance() {
     fi
 }
 
-check_export_compliance "Skyr"
-check_export_compliance "SkyrWatch" "true"  # Watch is embedded in iOS app
-check_export_compliance "SkyrMac"
-check_export_compliance "SkyrTV"
+check_export_compliance "Gumbo"
+check_export_compliance "GumboWatch" "true"  # Watch is embedded in iOS app
+check_export_compliance "GumboMac"
+check_export_compliance "GumboTV"
 # Widgets extension inherits from main app; check not required
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,7 +227,7 @@ check_file "docs/TESTFLIGHT-ACCEPTANCE-MATRIX.md" "Acceptance matrix"
 if [[ "$SKIP_TESTS" == "false" ]]; then
     section "Swift Package Tests"
     
-    cd "$PROJECT_ROOT/Packages/SkyrCore"
+    cd "$PROJECT_ROOT/Packages/GumboCore"
     
     if swift test 2>&1 | tee /tmp/swift-test-output.txt | tail -20; then
         TEST_RESULT=$(grep -E "Test Suite.*passed|tests passed" /tmp/swift-test-output.txt | tail -1 || echo "")
@@ -261,11 +261,11 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
     if command -v xcodebuild &> /dev/null; then
         info "Checking project generation..."
         
-        if [[ -d "$PROJECT_ROOT/Skyr.xcodeproj" ]]; then
+        if [[ -d "$PROJECT_ROOT/Gumbo.xcodeproj" ]]; then
             pass "Xcode project exists"
             
             # List available schemes
-            SCHEMES=$(xcodebuild -project "$PROJECT_ROOT/Skyr.xcodeproj" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | head -10 | tr -d ' ' || echo "")
+            SCHEMES=$(xcodebuild -project "$PROJECT_ROOT/Gumbo.xcodeproj" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | head -10 | tr -d ' ' || echo "")
             if [[ -n "$SCHEMES" ]]; then
                 pass "Project schemes available: $(echo $SCHEMES | tr '\n' ' ')"
             else

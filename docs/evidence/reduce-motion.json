@@ -1,29 +1,8 @@
 {
-  "mac": {
-    "initialReducedNoDrift": true,
-    "sameViewRuntimeDriftRestoredAndRemoved": true,
-    "onscreenDriftObservations": 3,
-    "actualEnvironmentValues": [
-      false,
-      true
-    ]
-  },
-  "iphone": {
-    "initialReducedNoDrift": true,
-    "sameViewRuntimeDriftRestoredAndRemoved": true,
-    "onscreenDriftObservations": 3,
-    "actualEnvironmentValues": [
-      false,
-      true
-    ]
-  },
-  "tv": {
-    "initialReducedNoDrift": true,
-    "sameViewRuntimeDriftRestoredAndRemoved": true,
-    "onscreenDriftObservations": 3,
-    "actualEnvironmentValues": [
-      false,
-      true
-    ]
-  }
+  "schemaVersion": 1,
+  "kind": "historical-evidence-reference",
+  "sourceRevision": "503696ddce36c40932867e561fd6e772dcda3f61",
+  "sourceURL": "https://github.com/svoltolini/gumbo/blob/503696ddce36c40932867e561fd6e772dcda3f61/docs/evidence/reduce-motion.json",
+  "sourceSHA256": "e24023e7e9c6acbe951d156a0f3763cebf47f1c1ec428de735db693deb0e0640",
+  "notice": "Original evidence for the previous app identity. This is not validation of the new Gumbo identifiers or distribution."
 }

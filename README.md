@@ -4,17 +4,19 @@ Gumbo is a native Apple-platform music app for a personal Synology NAS library. 
 
 The repository contains the iPhone/iPad app, native Mac app, Apple TV app, Apple Watch companion, widgets, Live Activities, CarPlay scene, and the shared Swift package.
 
+Gumbo now uses a separate app identity, with new bundle IDs, CloudKit container, app group, URL scheme and local storage. It does not update or migrate the previous TestFlight app. See [the identity and distribution checklist](docs/GUMBO-IDENTITY.md) before signing or uploading a build.
+
 ## Project map
 
 | Area | Location | Responsibility |
 | --- | --- | --- |
-| Shared core | `Packages/SkyrCore/Sources/SkyrCore` | Synology networking, indexing, library state, playback, downloads, profiles, and CloudKit |
-| Shared widget models | `Packages/SkyrCore/Sources/SkyrShared` | Widget snapshots, deep links, and Live Activity state |
-| iPhone and iPad | `Skyr` | Main SwiftUI app, setup, library, player, settings, CarPlay bridge, and Watch bridge |
-| Mac | `SkyrMac` | Native Mac shell, setup assistant, navigation, and player bar |
-| Apple TV | `SkyrTV` | TV navigation, focus-based UI, setup, and playback |
-| Apple Watch | `SkyrWatch` | Received catalogue, playlist downloads, and independent local playback |
-| Widgets | `SkyrWidgets` | Home, downloads, playlists, rediscovery, and download Live Activity |
+| Shared core | `Packages/GumboCore/Sources/GumboCore` | Synology networking, indexing, library state, playback, downloads, profiles, and CloudKit |
+| Shared widget models | `Packages/GumboCore/Sources/GumboShared` | Widget snapshots, deep links, and Live Activity state |
+| iPhone and iPad | `Gumbo` | Main SwiftUI app, setup, library, player, settings, CarPlay bridge, and Watch bridge |
+| Mac | `GumboMac` | Native Mac shell, setup assistant, navigation, and player bar |
+| Apple TV | `GumboTV` | TV navigation, focus-based UI, setup, and playback |
+| Apple Watch | `GumboWatch` | Received catalogue, playlist downloads, and independent local playback |
+| Widgets | `GumboWidgets` | Home, downloads, playlists, rediscovery, and download Live Activity |
 | Project definition | `project.yml` | XcodeGen targets, capabilities, deployment targets, and versions |
 
 The only supported server provider in the current implementation is Synology DSM/File Station. Bonjour discovers HTTP and SMB-advertising devices, but Gumbo is not an SMB client.
@@ -22,10 +24,10 @@ The only supported server provider in the current implementation is Synology DSM
 ## Local checks
 
 ```sh
-swift test -c release --package-path Packages/SkyrCore
-xcodebuild -project Skyr.xcodeproj -scheme Skyr -configuration Release -destination 'generic/platform=iOS Simulator' build
-xcodebuild -project Skyr.xcodeproj -scheme SkyrMac -configuration Release -destination 'generic/platform=macOS' build
-xcodebuild -project Skyr.xcodeproj -scheme SkyrTV -configuration Release -destination 'generic/platform=tvOS Simulator' build
+swift test -c release --package-path Packages/GumboCore
+xcodebuild -project Gumbo.xcodeproj -scheme Gumbo -configuration Release -destination 'generic/platform=iOS Simulator' build
+xcodebuild -project Gumbo.xcodeproj -scheme GumboMac -configuration Release -destination 'generic/platform=macOS' build
+xcodebuild -project Gumbo.xcodeproj -scheme GumboTV -configuration Release -destination 'generic/platform=tvOS Simulator' build
 ```
 
 Use XcodeGen after changing `project.yml`, and treat `project.yml` as the source of truth for generated project settings.

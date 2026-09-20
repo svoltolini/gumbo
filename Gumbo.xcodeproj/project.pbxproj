@@ -1,0 +1,1544 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		001FA7883DC2AFADBCAFBF7B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7FE60068A19F4A8888345A0D /* PrivacyInfo.xcprivacy */; };
+		0021F8B8124B9F1F93A7160B /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945E5C03A0F645DBB7B9E87D /* Platform.swift */; };
+		00363C3805113EB1CD924707 /* DownloadStateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */; };
+		01A1794E636DFA1808BDDBE7 /* MacPlayerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFF1A1F3E3A71A3FC8D8368 /* MacPlayerBar.swift */; };
+		02AB199CCFBBF7B791A2767B /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E590B09B1D985261599E4EF8 /* Permissions.swift */; };
+		04CC2E1BE4C925E1AEEB7415 /* ProfilePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */; };
+		06E90835B0D2DADDB626590A /* ArtistsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */; };
+		07A40BD5D608ECF9683736C9 /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA082BBE1046245EC568AFD /* NowPlayingView.swift */; };
+		083BADEBD8FE7CE894BADBE2 /* PINEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1A27F63A04D6093B324A25 /* PINEntryView.swift */; };
+		0FF493ABA4AA288A703D7997 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945E5C03A0F645DBB7B9E87D /* Platform.swift */; };
+		12486E80F13637771EA219D7 /* ConnectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */; };
+		12BC2E1FD2FD6FAD738D6D2C /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58D27939FB42A50AF978D76 /* WatchBridge.swift */; };
+		13A059607D180D45BF71B354 /* DownloadStateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */; };
+		18D0D2A1144359E576F5A6D3 /* MacNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51595F1F46FD2FE65983E3A1 /* MacNavigation.swift */; };
+		1903F76791150B574542F2F2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E5957FDBAB31BDDE6EB6BE2C /* PrivacyInfo.xcprivacy */; };
+		1A25EA814D45BEA48F2AC342 /* MacTrackTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2C06C80C460EE82EFB9AE9 /* MacTrackTable.swift */; };
+		1B01ACD46A368D7967EC0D8E /* ProfileAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D35C62CD8F6D0E1DB943B68 /* ProfileAvatarView.swift */; };
+		1D6B952DA1E09F76A0EC18C0 /* DownloadButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */; };
+		21D56E75077E6EE1970D6C46 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635CAEE6178E102936FBC21E /* SettingsView.swift */; };
+		251199715DDF4D44FC43A071 /* ReleaseNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */; };
+		273D392AB13EEEC5F0811C53 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC31531F4CCB07603F7D26A4 /* MainTabView.swift */; };
+		27BC705F44A8EC12B96CE79E /* ArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEACB388CE26DD6A618A9BB /* ArtworkView.swift */; };
+		28F0D910D768F47B0632AD81 /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10EE0A819A08F25633D7A0E /* DownloadsView.swift */; };
+		2988F7BB085504733B2C5DDB /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1886F791273A25140EC4A644 /* MiniPlayerView.swift */; };
+		29CE3A3F87035D549EF37170 /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4552480715CA4A884BA09557 /* AddToPlaylistSheet.swift */; };
+		2BEB4D5E2D033DDB61B65F72 /* GumboHomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCAC40075DBBA3878161886 /* GumboHomeWidget.swift */; };
+		2C7DAAF0C0F13EB8CBF7FD11 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E590B09B1D985261599E4EF8 /* Permissions.swift */; };
+		2D1BCA68D1188B1C0B22946B /* PrivacyDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */; };
+		2D7FC1EB74005B7F34BA73EE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 73639340E4ECA1F35AB8A3FB /* Assets.xcassets */; };
+		2E638CDB94805134E0E249C1 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0852E38F68F085CC348B7EB0 /* WelcomeView.swift */; };
+		2EB6B88AA9D46EDFDCA6AB45 /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9652EC7FF5019EFC63864A69 /* InviteSheet.swift */; };
+		2EFEB525717F861A0E8AD3A8 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1606C2EDFFECD0EECE3566A0 /* SearchView.swift */; };
+		313AA6CE152817EC4AC5EC01 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471AC93C920E27576A515E4E /* Components.swift */; };
+		3171308A3377DAB17E493A5F /* WatchPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 789CE74607113259C7891438 /* WatchPlayer.swift */; };
+		325DFA490C8175E5C9E066AB /* ArtistsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */; };
+		32B8D24D9AEDD63DF01739D0 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471AC93C920E27576A515E4E /* Components.swift */; };
+		34128A0662F5A82A866C288F /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9652EC7FF5019EFC63864A69 /* InviteSheet.swift */; };
+		3421EF61D0C3E0D3582964AF /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2CE7C5F77DEE0409940776 /* MacSettingsView.swift */; };
+		3475D6CBEDE9683CB7D09113 /* GumboWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E434DB16ED20099D2C1868 /* GumboWatchApp.swift */; };
+		397E9ADD5B01300A947E0936 /* MacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6ABE675A87FAD55F262A30F /* MacRootView.swift */; };
+		3AEF22859ACA0ECAC000AAA3 /* PlaybackIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEC44E5B1B9F268FF64B89F /* PlaybackIntents.swift */; };
+		3C370A2F1784C552F736F929 /* DownloadButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */; };
+		3DA32832DE87923F6DA3DCEA /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA082BBE1046245EC568AFD /* NowPlayingView.swift */; };
+		3E1EBE7FBA3D555F81B9D0AC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 73639340E4ECA1F35AB8A3FB /* Assets.xcassets */; };
+		3F980321EC024459ED35C047 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0852E38F68F085CC348B7EB0 /* WelcomeView.swift */; };
+		405AD3FAA7552DAE618E0079 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D5460268D3572AB23AE33E /* OnboardingView.swift */; };
+		40F8A22786BA4AC1D16BE5BF /* GumboShared in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C5265806645CC8D278E59 /* GumboShared */; };
+		410E19D013C906E58C320C07 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0852E38F68F085CC348B7EB0 /* WelcomeView.swift */; };
+		44165F75876CE7FEFB78299A /* GumboCore in Frameworks */ = {isa = PBXBuildFile; productRef = E730BFCFBD3155ECC05021BE /* GumboCore */; };
+		456F8BDD3AA825BE77CB20C2 /* JoinWithLinkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */; };
+		480338F0B901EE7924FE46EF /* GumboCore in Frameworks */ = {isa = PBXBuildFile; productRef = 98D1DACDFA3BFFA757468161 /* GumboCore */; };
+		4C6BB521554B2EA82CB5142F /* ArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEACB388CE26DD6A618A9BB /* ArtworkView.swift */; };
+		4DF624C7C981FAD8FD80FA70 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4867E75B801D20F01B5D1 /* RootView.swift */; };
+		4E8187040DC1E74E71B12B3C /* IndexingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A55C2869D8C7B0351AB45 /* IndexingView.swift */; };
+		51AD4481590FA4572FE930FD /* LibraryHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */; };
+		53382677C544259E9A9EF906 /* GumboMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4310D34A31FE13F9A95839F3 /* GumboMacApp.swift */; };
+		5432FEB03B957B8B36B82907 /* DownloadStateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */; };
+		56CEC909E179E897F3138961 /* ReleaseNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */; };
+		58060D892FD9EE7FC66E93BE /* GumboApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B74A6627EA12CDA1C3152A0B /* GumboApp.swift */; };
+		59C291DF875462F73468E5F4 /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4552480715CA4A884BA09557 /* AddToPlaylistSheet.swift */; };
+		5A829C9AD6EED01BD72F3177 /* PINEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1A27F63A04D6093B324A25 /* PINEntryView.swift */; };
+		5DD4B997405D697AC1809D10 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B621334B1925BF0C9EF737 /* LibraryView.swift */; };
+		5F42640ACAFEBD655D4A125F /* PrivacyDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */; };
+		5FC324752732FD970392FE51 /* MacNowPlayingInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 871A74E176E2ECAD6D738B16 /* MacNowPlayingInspector.swift */; };
+		62B7997FFB954BDE8BA7B844 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C404805D22DDA6CBD85B36B3 /* PlaylistDetailView.swift */; };
+		67D1E350A0BA8C97D4CCBBDF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D5460268D3572AB23AE33E /* OnboardingView.swift */; };
+		68BA8D3E3B0A9BA302E381B5 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7286D341526727D1D3C020BB /* DiagnosticsView.swift */; };
+		6C742AC728E846156912A283 /* ArtistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */; };
+		6CC2EAC23E89588D4158C629 /* MacSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4E40D20C28EBBC3D8DB462 /* MacSetupView.swift */; };
+		6D2344CA1027CDECD2737E89 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D229CD864AFF39B01013B705 /* PlaylistsView.swift */; };
+		6D539466CA122D8525CE58DF /* GenreEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F8ED69C53415D54E4D87DDF /* GenreEditorSheet.swift */; };
+		6DEAA79881CE9E8102F5BB7C /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10EE0A819A08F25633D7A0E /* DownloadsView.swift */; };
+		6E0B70308004D7802A0717AD /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7286D341526727D1D3C020BB /* DiagnosticsView.swift */; };
+		7017ABBA812A2B0FE988CFDD /* PlaylistsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D86282B8C7F7C2FA99641B02 /* PlaylistsListView.swift */; };
+		7192E7F9D0F96724C3ACA8AA /* LibraryHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */; };
+		71D8FC4657A70B51E450CF82 /* ProfileAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D35C62CD8F6D0E1DB943B68 /* ProfileAvatarView.swift */; };
+		7289C7BAB063F05B9D9DC270 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D229CD864AFF39B01013B705 /* PlaylistsView.swift */; };
+		728E110E71B931ED15F2340D /* ArtistsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */; };
+		74B7F29D8719BDD2ABAF631E /* GumboWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B43AA8D2A092AB44D2E0A7E2 /* GumboWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		76B6B67F01D525FF30230117 /* LoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C1361F80E2A35710474D9C /* LoginSheet.swift */; };
+		7A7C7C42FBB3F25615AE82C7 /* ArtworkPrivacyControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841C36AD186F0FED0DDAACEB /* ArtworkPrivacyControl.swift */; };
+		7A9433F11B4D1E636335AE64 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635CAEE6178E102936FBC21E /* SettingsView.swift */; };
+		7B3C69BBC76EED3F2D10FF86 /* ProfileAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D35C62CD8F6D0E1DB943B68 /* ProfileAvatarView.swift */; };
+		7BE4680E0A699D293EE36547 /* ArtistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */; };
+		7C8392DBA757415AA80871DB /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */; };
+		7D34F50C93A263E99A400D44 /* FolderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB34C452968B31746A9DB2 /* FolderPickerView.swift */; };
+		7D39D6EC4366E241D1DE0951 /* WidgetPieces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55B4E56CF14321B06E5E2368 /* WidgetPieces.swift */; };
+		7DA11168BB428646D1AF9D7E /* FamilyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744DFEFB8D4C58FFE926E903 /* FamilyView.swift */; };
+		7FE6A3C76C8A21420688C623 /* SetupPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84F4EB41A4A2A55FF53CF53B /* SetupPage.swift */; };
+		83ACDE8C85E9251F3EC3A938 /* GumboWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C1A17E53C69AFB3304A4A9 /* GumboWidgetsBundle.swift */; };
+		8411743576DB44E5D6F1D709 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4867E75B801D20F01B5D1 /* RootView.swift */; };
+		8591019D52FECCE7EE080304 /* ProfileEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5B043DF219220DA185B3B1 /* ProfileEditorSheet.swift */; };
+		8644F458B1765BF818238007 /* JoinWithLinkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */; };
+		8880D55A74AFA6F5493661B7 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7286D341526727D1D3C020BB /* DiagnosticsView.swift */; };
+		88C06B7709137AC1ED4CBBDE /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635CAEE6178E102936FBC21E /* SettingsView.swift */; };
+		88CC3C4AE18F1A9872F95C9D /* DownloadsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8182B7232DBEF7D38EC783B8 /* DownloadsWidget.swift */; };
+		8B2FFF0F0E2A2AAF6DB4EF0D /* GumboCore in Frameworks */ = {isa = PBXBuildFile; productRef = BE97EF595EF2A1C8A5E5D920 /* GumboCore */; };
+		8C6A4835AB3D34AE1B4EB3E5 /* ProfileEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5B043DF219220DA185B3B1 /* ProfileEditorSheet.swift */; };
+		8E728C639D7149753168CE2F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B621334B1925BF0C9EF737 /* LibraryView.swift */; };
+		9075E7E22CD4FF880388A857 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1606C2EDFFECD0EECE3566A0 /* SearchView.swift */; };
+		915EBF8EFE405E6F8B9E4DC5 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471AC93C920E27576A515E4E /* Components.swift */; };
+		9195F190449259C32CC7F769 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4867E75B801D20F01B5D1 /* RootView.swift */; };
+		936F3B1C0266985BB752F86F /* ProfilePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */; };
+		941BC25C5554B7D41A577817 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19A55DA694504D295E91AC /* AlbumView.swift */; };
+		9A3F5B84FB16B5C9F572AE7C /* PINEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1A27F63A04D6093B324A25 /* PINEntryView.swift */; };
+		9A63C8312082AB59B1FD0B34 /* FolderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB34C452968B31746A9DB2 /* FolderPickerView.swift */; };
+		9DDB339B0A6CBD736F06D3A8 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B621334B1925BF0C9EF737 /* LibraryView.swift */; };
+		9F14D85E9257245A79E6F8D8 /* FamilyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744DFEFB8D4C58FFE926E903 /* FamilyView.swift */; };
+		A12B06EE7824A90E14C3B05B /* LoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C1361F80E2A35710474D9C /* LoginSheet.swift */; };
+		A17ADB0F7D5DB6046FBF1911 /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10EE0A819A08F25633D7A0E /* DownloadsView.swift */; };
+		A1B0E3A040F5676BF45EBF82 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8DD07110745F8D44FD9C7E /* WatchRootView.swift */; };
+		A2A1866B149F11F34B04D8AA /* GenresView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DCD283428D6B8551D478C6 /* GenresView.swift */; };
+		A4CD0337D0658C26B3B9C68F /* ProfilePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */; };
+		A5BA31604A2D2BEA4F12C2E2 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 870C2DD94349EC3F66196E46 /* CarPlaySceneDelegate.swift */; };
+		A726CE542A5ABEA0F901670B /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9652EC7FF5019EFC63864A69 /* InviteSheet.swift */; };
+		A8FAAC386345910CA62A4A23 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19A55DA694504D295E91AC /* AlbumView.swift */; };
+		A9FD9023DB44784684742DC6 /* ConnectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */; };
+		AA39667FA9D2C317A8111271 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7F112896DF4008AEEAC04DEA /* Assets.xcassets */; };
+		AA4EF442E38A55E22805AC93 /* RemoteAccessGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DC2EDE97D67519D7046D24 /* RemoteAccessGuide.swift */; };
+		AAD12A9AA0D85B921E68995A /* ScanStatusButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EB491E0D6CE9D59AB320CA /* ScanStatusButton.swift */; };
+		AD340C62C5765CD0EF17E4E1 /* ScanStatusButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EB491E0D6CE9D59AB320CA /* ScanStatusButton.swift */; };
+		AF2133266208EA79789D3FF4 /* DownloadButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */; };
+		B41B014CD89F73142BF170F4 /* TVRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DA4EF908D36E54DDA53BB9 /* TVRootView.swift */; };
+		B5A938FCDBF507621D98E7C2 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */; };
+		B9CA03034E0E281AB107620A /* PlaybackIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEC44E5B1B9F268FF64B89F /* PlaybackIntents.swift */; };
+		BB8BD3B5C0170E285E950363 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 73639340E4ECA1F35AB8A3FB /* Assets.xcassets */; };
+		BC7EBF1025F330D97A27CC2A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9D9996A3D64083D6DE98B530 /* PrivacyInfo.xcprivacy */; };
+		BCBBD1909AD86C0C729157AB /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */; };
+		BF00020F3336F3C7AC753D5D /* GenresView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DCD283428D6B8551D478C6 /* GenresView.swift */; };
+		C481AE036863174004458AAA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D9BFBDBB2AB8B4F3147B4210 /* PrivacyInfo.xcprivacy */; };
+		C82C20B80F224E64802A4772 /* RemoteAccessGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DC2EDE97D67519D7046D24 /* RemoteAccessGuide.swift */; };
+		C8986158A476C0598822BCF7 /* PrivacyDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */; };
+		CA0DD94B0829E4A0CEBA599D /* GumboWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D1376A32FB4EAB98574265C3 /* GumboWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CB303A90CD22A1B60688B30E /* GenreEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F8ED69C53415D54E4D87DDF /* GenreEditorSheet.swift */; };
+		CC5E7E9ECCCF25859CE4658F /* WatchDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = C041D4A53977F11B795DB953 /* WatchDownloads.swift */; };
+		CDA1D8AAB885AEC3079AB0CA /* WatchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A49C3A54F18A1CB6755E8B4 /* WatchStore.swift */; };
+		CEE51FAAB4D2DE99ABF57118 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 73639340E4ECA1F35AB8A3FB /* Assets.xcassets */; };
+		D0EE563F3F60B789691CD762 /* ProfileEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5B043DF219220DA185B3B1 /* ProfileEditorSheet.swift */; };
+		D1321DFADD4FCFDEAA6BEC9B /* SetupPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84F4EB41A4A2A55FF53CF53B /* SetupPage.swift */; };
+		D15B2E2D7502C19E632EB487 /* DownloadLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B4C2D674700226B9B4C789 /* DownloadLiveActivity.swift */; };
+		D17844E2391E67636DEB3B7D /* ArtistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */; };
+		D7096295EB72E2BD6D61D4B2 /* ArtworkPrivacyControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841C36AD186F0FED0DDAACEB /* ArtworkPrivacyControl.swift */; };
+		D758C058705D56B5FC858628 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19A55DA694504D295E91AC /* AlbumView.swift */; };
+		D7C2514DD025DEBB8887707A /* ReleaseNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */; };
+		D8A79D68DB5DDCD86163B618 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E590B09B1D985261599E4EF8 /* Permissions.swift */; };
+		D98448F490A141918C91F9BB /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
+		DB3BAF38CD12E8FA95274AB0 /* GenresView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DCD283428D6B8551D478C6 /* GenresView.swift */; };
+		DBF882A932EDB3759490B05D /* MacCollectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B488F74A4474CEE890AB9B /* MacCollectionViews.swift */; };
+		DDE2DB27A5F16FFBA17DBFC7 /* ArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEACB388CE26DD6A618A9BB /* ArtworkView.swift */; };
+		E0828D47B1937789D699F9DE /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA082BBE1046245EC568AFD /* NowPlayingView.swift */; };
+		E0EF0C93E4E3EF81BE899F19 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
+		E1A6C87C73E9FA60B6F3E659 /* JoinWithLinkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */; };
+		E223442A4EFB8A4C94F06948 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 65D17515AA2A0BB4C92708EA /* PrivacyInfo.xcprivacy */; };
+		E316D96DA20D392266D84209 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945E5C03A0F645DBB7B9E87D /* Platform.swift */; };
+		E34D7A5844AD4F2A6D3B7C89 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
+		E4FAB486BC7192FBB140B4D7 /* GumboShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7880F336195EC2B7C6788C5F /* GumboShared */; };
+		E533DF949DBAE1D9C0831159 /* GumboTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A1E7707B45804ECAF9C471 /* GumboTVApp.swift */; };
+		E8BF35C48A3CBE215EC15FCC /* MacLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD855CD236441555E52B759 /* MacLibraryView.swift */; };
+		E8DFE3DC8BCB97A3C5BB97DF /* IndexingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A55C2869D8C7B0351AB45 /* IndexingView.swift */; };
+		E922C8CCDC2F4338ED8F0567 /* LoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C1361F80E2A35710474D9C /* LoginSheet.swift */; };
+		E93B1B07766D389527037998 /* FamilyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744DFEFB8D4C58FFE926E903 /* FamilyView.swift */; };
+		EC7BAD81E49148DA38BFB9AA /* GenreEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F8ED69C53415D54E4D87DDF /* GenreEditorSheet.swift */; };
+		EC921F869CE6F0114A829F7A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D5460268D3572AB23AE33E /* OnboardingView.swift */; };
+		EEE21A82E1C7B089DFAF9879 /* RediscoverWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7550DF8A9717FA7E7C70D83B /* RediscoverWidget.swift */; };
+		F0A931EEEEF1B33D63814609 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1606C2EDFFECD0EECE3566A0 /* SearchView.swift */; };
+		F13F699DBD1BDB6EFBC3F981 /* GumboCore in Frameworks */ = {isa = PBXBuildFile; productRef = 630A8BB24BE6DBFF0F1BE582 /* GumboCore */; };
+		F15B90B56A97FCBD5AC80393 /* ArtworkPrivacyControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841C36AD186F0FED0DDAACEB /* ArtworkPrivacyControl.swift */; };
+		F1D8F3E6FA56A11FA7775EBE /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D229CD864AFF39B01013B705 /* PlaylistsView.swift */; };
+		F3112FF463C8F75E6EE877F2 /* SetupPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84F4EB41A4A2A55FF53CF53B /* SetupPage.swift */; };
+		F783C958BD2CBB44EC00BFEC /* LibraryHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */; };
+		F802C0C5420CF8E0022AAA3B /* ConnectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */; };
+		F921836E0367EE641531C442 /* FolderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB34C452968B31746A9DB2 /* FolderPickerView.swift */; };
+		FABB5DF1CEC8D4D2DD48D0B3 /* ScanStatusButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EB491E0D6CE9D59AB320CA /* ScanStatusButton.swift */; };
+		FB41FEB9059DC5CD2E7AAD62 /* RemoteAccessGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DC2EDE97D67519D7046D24 /* RemoteAccessGuide.swift */; };
+		FC0202D3173EC38608BB237B /* IndexingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A55C2869D8C7B0351AB45 /* IndexingView.swift */; };
+		FF15AC01284481888B282B1F /* PlaylistsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16275445FC71D49AB9D2A4C /* PlaylistsWidget.swift */; };
+		FFD85F474D86D2A7F3185B0A /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4552480715CA4A884BA09557 /* AddToPlaylistSheet.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1E987BF6BE058594B7AFC1B9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0DD7FE060F6582D412D71510 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BB7AF75C6C102202B3A09E91;
+			remoteInfo = GumboWatch;
+		};
+		46E5269B1D161CC1E3BF6C3A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0DD7FE060F6582D412D71510 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D277EDC69B3B03D1897791A3;
+			remoteInfo = GumboWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9B14276603995BFB4106CF80 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				74B7F29D8719BDD2ABAF631E /* GumboWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC688846736659A9BB0B3E8E /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				CA0DD94B0829E4A0CEBA599D /* GumboWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		06DEDFE46C599A2FF52E016D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0852E38F68F085CC348B7EB0 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		0D19A55DA694504D295E91AC /* AlbumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumView.swift; sourceTree = "<group>"; };
+		0E5B043DF219220DA185B3B1 /* ProfileEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorSheet.swift; sourceTree = "<group>"; };
+		0F8ED69C53415D54E4D87DDF /* GenreEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenreEditorSheet.swift; sourceTree = "<group>"; };
+		140A55C2869D8C7B0351AB45 /* IndexingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingView.swift; sourceTree = "<group>"; };
+		1606C2EDFFECD0EECE3566A0 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		1886F791273A25140EC4A644 /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
+		18D5460268D3572AB23AE33E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		1BD855CD236441555E52B759 /* MacLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacLibraryView.swift; sourceTree = "<group>"; };
+		1D0E357640C240C0946A5251 /* Gumbo.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gumbo.entitlements; sourceTree = "<group>"; };
+		1D35C62CD8F6D0E1DB943B68 /* ProfileAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileAvatarView.swift; sourceTree = "<group>"; };
+		1D8DD07110745F8D44FD9C7E /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
+		1F8FE1566692E54AC03F2E3A /* GumboMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GumboMac.entitlements; sourceTree = "<group>"; };
+		21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistsListView.swift; sourceTree = "<group>"; };
+		237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyDetailsView.swift; sourceTree = "<group>"; };
+		2AA082BBE1046245EC568AFD /* NowPlayingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingView.swift; sourceTree = "<group>"; };
+		2C1A27F63A04D6093B324A25 /* PINEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PINEntryView.swift; sourceTree = "<group>"; };
+		2CEACB388CE26DD6A618A9BB /* ArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkView.swift; sourceTree = "<group>"; };
+		38DCD283428D6B8551D478C6 /* GenresView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenresView.swift; sourceTree = "<group>"; };
+		3B15A290876EA6A2B263CF66 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4310D34A31FE13F9A95839F3 /* GumboMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboMacApp.swift; sourceTree = "<group>"; };
+		4552480715CA4A884BA09557 /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
+		45DC2EDE97D67519D7046D24 /* RemoteAccessGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessGuide.swift; sourceTree = "<group>"; };
+		471AC93C920E27576A515E4E /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		4A49C3A54F18A1CB6755E8B4 /* WatchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchStore.swift; sourceTree = "<group>"; };
+		4C2C06C80C460EE82EFB9AE9 /* MacTrackTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTrackTable.swift; sourceTree = "<group>"; };
+		4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadButton.swift; sourceTree = "<group>"; };
+		51595F1F46FD2FE65983E3A1 /* MacNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNavigation.swift; sourceTree = "<group>"; };
+		53A1E7707B45804ECAF9C471 /* GumboTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboTVApp.swift; sourceTree = "<group>"; };
+		55B4E56CF14321B06E5E2368 /* WidgetPieces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPieces.swift; sourceTree = "<group>"; };
+		5897B078B5A617366DA36E93 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		59C1361F80E2A35710474D9C /* LoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginSheet.swift; sourceTree = "<group>"; };
+		5D459871BDCBDBD2385CA361 /* GumboMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GumboMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryHomeView.swift; sourceTree = "<group>"; };
+		635CAEE6178E102936FBC21E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		65D17515AA2A0BB4C92708EA /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		7286D341526727D1D3C020BB /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		73639340E4ECA1F35AB8A3FB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		744DFEFB8D4C58FFE926E903 /* FamilyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyView.swift; sourceTree = "<group>"; };
+		7550DF8A9717FA7E7C70D83B /* RediscoverWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RediscoverWidget.swift; sourceTree = "<group>"; };
+		77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilePickerView.swift; sourceTree = "<group>"; };
+		789CE74607113259C7891438 /* WatchPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPlayer.swift; sourceTree = "<group>"; };
+		78E434DB16ED20099D2C1868 /* GumboWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboWatchApp.swift; sourceTree = "<group>"; };
+		7BEC44E5B1B9F268FF64B89F /* PlaybackIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackIntents.swift; sourceTree = "<group>"; };
+		7D2CE7C5F77DEE0409940776 /* MacSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
+		7F112896DF4008AEEAC04DEA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7FE60068A19F4A8888345A0D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		8182B7232DBEF7D38EC783B8 /* DownloadsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsWidget.swift; sourceTree = "<group>"; };
+		836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectSheet.swift; sourceTree = "<group>"; };
+		841C36AD186F0FED0DDAACEB /* ArtworkPrivacyControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkPrivacyControl.swift; sourceTree = "<group>"; };
+		84A10A5B769A7431F6F1BD0D /* GumboTV.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GumboTV.entitlements; sourceTree = "<group>"; };
+		84F4EB41A4A2A55FF53CF53B /* SetupPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPage.swift; sourceTree = "<group>"; };
+		870C2DD94349EC3F66196E46 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		871A74E176E2ECAD6D738B16 /* MacNowPlayingInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNowPlayingInspector.swift; sourceTree = "<group>"; };
+		8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateReader.swift; sourceTree = "<group>"; };
+		91F9C65AB92F7367B60052D5 /* GumboCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = GumboCore; path = Packages/GumboCore; sourceTree = SOURCE_ROOT; };
+		93B4867E75B801D20F01B5D1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		945E5C03A0F645DBB7B9E87D /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		9652EC7FF5019EFC63864A69 /* InviteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteSheet.swift; sourceTree = "<group>"; };
+		98DB34C452968B31746A9DB2 /* FolderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerView.swift; sourceTree = "<group>"; };
+		9D9996A3D64083D6DE98B530 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9DCAC40075DBBA3878161886 /* GumboHomeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboHomeWidget.swift; sourceTree = "<group>"; };
+		A8B4C2D674700226B9B4C789 /* DownloadLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadLiveActivity.swift; sourceTree = "<group>"; };
+		A9C1A17E53C69AFB3304A4A9 /* GumboWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboWidgetsBundle.swift; sourceTree = "<group>"; };
+		B43AA8D2A092AB44D2E0A7E2 /* GumboWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = GumboWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B6B488F74A4474CEE890AB9B /* MacCollectionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCollectionViews.swift; sourceTree = "<group>"; };
+		B74A6627EA12CDA1C3152A0B /* GumboApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboApp.swift; sourceTree = "<group>"; };
+		B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryView.swift; sourceTree = "<group>"; };
+		BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JoinWithLinkSheet.swift; sourceTree = "<group>"; };
+		BC1F13FE019A2C8ABAEF9833 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BC31531F4CCB07603F7D26A4 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		BC5CE2071BB9B3C886305A5C /* Gumbo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Gumbo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BDB500146D20BFD17B3664A9 /* GumboTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GumboTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C041D4A53977F11B795DB953 /* WatchDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchDownloads.swift; sourceTree = "<group>"; };
+		C0B621334B1925BF0C9EF737 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		C10EE0A819A08F25633D7A0E /* DownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
+		C16275445FC71D49AB9D2A4C /* PlaylistsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsWidget.swift; sourceTree = "<group>"; };
+		C3DA4EF908D36E54DDA53BB9 /* TVRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVRootView.swift; sourceTree = "<group>"; };
+		C404805D22DDA6CBD85B36B3 /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
+		C58D27939FB42A50AF978D76 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
+		C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistView.swift; sourceTree = "<group>"; };
+		CC4E40D20C28EBBC3D8DB462 /* MacSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSetupView.swift; sourceTree = "<group>"; };
+		D1376A32FB4EAB98574265C3 /* GumboWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GumboWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D229CD864AFF39B01013B705 /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
+		D86282B8C7F7C2FA99641B02 /* PlaylistsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsListView.swift; sourceTree = "<group>"; };
+		D9BFBDBB2AB8B4F3147B4210 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		E0EB491E0D6CE9D59AB320CA /* ScanStatusButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanStatusButton.swift; sourceTree = "<group>"; };
+		E320C84C2CDA9D8F829A5977 /* GumboWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GumboWidgets.entitlements; sourceTree = "<group>"; };
+		E590B09B1D985261599E4EF8 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
+		E5957FDBAB31BDDE6EB6BE2C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseNotesView.swift; sourceTree = "<group>"; };
+		F6ABE675A87FAD55F262A30F /* MacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRootView.swift; sourceTree = "<group>"; };
+		F6BB3DE21BE6913D15C58D02 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FEF8A609D4AD95A00076974E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FEFF1A1F3E3A71A3FC8D8368 /* MacPlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPlayerBar.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		035FB6DAFAC56C507074609C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				480338F0B901EE7924FE46EF /* GumboCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5144DE301799903C6B6107FA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B2FFF0F0E2A2AAF6DB4EF0D /* GumboCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		93CEB96207B6C8B4F75A2699 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F13F699DBD1BDB6EFBC3F981 /* GumboCore in Frameworks */,
+				40F8A22786BA4AC1D16BE5BF /* GumboShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B454306F389ECEDCCB853396 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4FAB486BC7192FBB140B4D7 /* GumboShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0FDF88BE94CCBB285C84798 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				44165F75876CE7FEFB78299A /* GumboCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A290722A2AB505238C2F72F /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				2CEACB388CE26DD6A618A9BB /* ArtworkView.swift */,
+				945E5C03A0F645DBB7B9E87D /* Platform.swift */,
+				5897B078B5A617366DA36E93 /* Theme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		28D3FC58D1D2E09AC81C40E9 /* Gumbo */ = {
+			isa = PBXGroup;
+			children = (
+				73639340E4ECA1F35AB8A3FB /* Assets.xcassets */,
+				1D0E357640C240C0946A5251 /* Gumbo.entitlements */,
+				B74A6627EA12CDA1C3152A0B /* GumboApp.swift */,
+				BC1F13FE019A2C8ABAEF9833 /* Info.plist */,
+				D9BFBDBB2AB8B4F3147B4210 /* PrivacyInfo.xcprivacy */,
+				C58D27939FB42A50AF978D76 /* WatchBridge.swift */,
+				84AE5804CD26506AEA0117F8 /* CarPlay */,
+				D96E8F14D45F8DA8FD12699C /* Shared */,
+				1A290722A2AB505238C2F72F /* Theme */,
+				C1E3C2AF962BBC74AA367C5C /* Views */,
+			);
+			path = Gumbo;
+			sourceTree = "<group>";
+		};
+		2A72CF23D8E0649BD724476C /* Main */ = {
+			isa = PBXGroup;
+			children = (
+				BC31531F4CCB07603F7D26A4 /* MainTabView.swift */,
+				1886F791273A25140EC4A644 /* MiniPlayerView.swift */,
+			);
+			path = Main;
+			sourceTree = "<group>";
+		};
+		2B5BFB13C6DC15BB918E370A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C404805D22DDA6CBD85B36B3 /* PlaylistDetailView.swift */,
+				D86282B8C7F7C2FA99641B02 /* PlaylistsListView.swift */,
+				1D8DD07110745F8D44FD9C7E /* WatchRootView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		4AA97924244AE90ADE434C59 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				841C36AD186F0FED0DDAACEB /* ArtworkPrivacyControl.swift */,
+				7286D341526727D1D3C020BB /* DiagnosticsView.swift */,
+				C10EE0A819A08F25633D7A0E /* DownloadsView.swift */,
+				744DFEFB8D4C58FFE926E903 /* FamilyView.swift */,
+				237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */,
+				EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */,
+				635CAEE6178E102936FBC21E /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		4CE6292E00B41A94B394FD92 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				91F9C65AB92F7367B60052D5 /* GumboCore */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		4DC8E0F39D6C3D4BFF733C09 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BC5CE2071BB9B3C886305A5C /* Gumbo.app */,
+				5D459871BDCBDBD2385CA361 /* GumboMac.app */,
+				BDB500146D20BFD17B3664A9 /* GumboTV.app */,
+				D1376A32FB4EAB98574265C3 /* GumboWatch.app */,
+				B43AA8D2A092AB44D2E0A7E2 /* GumboWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		59D5EB5C9971587A2F2AF753 /* GumboMac */ = {
+			isa = PBXGroup;
+			children = (
+				1F8FE1566692E54AC03F2E3A /* GumboMac.entitlements */,
+				4310D34A31FE13F9A95839F3 /* GumboMacApp.swift */,
+				06DEDFE46C599A2FF52E016D /* Info.plist */,
+				B6B488F74A4474CEE890AB9B /* MacCollectionViews.swift */,
+				1BD855CD236441555E52B759 /* MacLibraryView.swift */,
+				51595F1F46FD2FE65983E3A1 /* MacNavigation.swift */,
+				871A74E176E2ECAD6D738B16 /* MacNowPlayingInspector.swift */,
+				FEFF1A1F3E3A71A3FC8D8368 /* MacPlayerBar.swift */,
+				F6ABE675A87FAD55F262A30F /* MacRootView.swift */,
+				7D2CE7C5F77DEE0409940776 /* MacSettingsView.swift */,
+				CC4E40D20C28EBBC3D8DB462 /* MacSetupView.swift */,
+				4C2C06C80C460EE82EFB9AE9 /* MacTrackTable.swift */,
+				E5957FDBAB31BDDE6EB6BE2C /* PrivacyInfo.xcprivacy */,
+			);
+			path = GumboMac;
+			sourceTree = "<group>";
+		};
+		6BFB01C56D6C32DB1BFC61D3 = {
+			isa = PBXGroup;
+			children = (
+				28D3FC58D1D2E09AC81C40E9 /* Gumbo */,
+				59D5EB5C9971587A2F2AF753 /* GumboMac */,
+				AC7E8B2E32C83172B3458176 /* GumboTV */,
+				AD1EAEB97A98FA0722668974 /* GumboWatch */,
+				B867E0BC7C0AA41378E6E71F /* GumboWidgets */,
+				4CE6292E00B41A94B394FD92 /* Packages */,
+				4DC8E0F39D6C3D4BFF733C09 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7B46D18E0C11146ACCBC28C1 /* Playlists */ = {
+			isa = PBXGroup;
+			children = (
+				4552480715CA4A884BA09557 /* AddToPlaylistSheet.swift */,
+				D229CD864AFF39B01013B705 /* PlaylistsView.swift */,
+			);
+			path = Playlists;
+			sourceTree = "<group>";
+		};
+		84AE5804CD26506AEA0117F8 /* CarPlay */ = {
+			isa = PBXGroup;
+			children = (
+				870C2DD94349EC3F66196E46 /* CarPlaySceneDelegate.swift */,
+			);
+			path = CarPlay;
+			sourceTree = "<group>";
+		};
+		AC7E8B2E32C83172B3458176 /* GumboTV */ = {
+			isa = PBXGroup;
+			children = (
+				84A10A5B769A7431F6F1BD0D /* GumboTV.entitlements */,
+				53A1E7707B45804ECAF9C471 /* GumboTVApp.swift */,
+				F6BB3DE21BE6913D15C58D02 /* Info.plist */,
+				65D17515AA2A0BB4C92708EA /* PrivacyInfo.xcprivacy */,
+				C3DA4EF908D36E54DDA53BB9 /* TVRootView.swift */,
+			);
+			path = GumboTV;
+			sourceTree = "<group>";
+		};
+		AD1EAEB97A98FA0722668974 /* GumboWatch */ = {
+			isa = PBXGroup;
+			children = (
+				7F112896DF4008AEEAC04DEA /* Assets.xcassets */,
+				78E434DB16ED20099D2C1868 /* GumboWatchApp.swift */,
+				FEF8A609D4AD95A00076974E /* Info.plist */,
+				9D9996A3D64083D6DE98B530 /* PrivacyInfo.xcprivacy */,
+				C041D4A53977F11B795DB953 /* WatchDownloads.swift */,
+				789CE74607113259C7891438 /* WatchPlayer.swift */,
+				4A49C3A54F18A1CB6755E8B4 /* WatchStore.swift */,
+				2B5BFB13C6DC15BB918E370A /* Views */,
+			);
+			path = GumboWatch;
+			sourceTree = "<group>";
+		};
+		B2F9973D4DD3AA4F901EFB9D /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				471AC93C920E27576A515E4E /* Components.swift */,
+				4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */,
+				8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		B448BCF6AE1EC755693B483C /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				2AA082BBE1046245EC568AFD /* NowPlayingView.swift */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		B7F3BB4B49361E79FC2B7D17 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				21D746F6EE7DB7D7B2010163 /* ArtistsListView.swift */,
+				0F8ED69C53415D54E4D87DDF /* GenreEditorSheet.swift */,
+				38DCD283428D6B8551D478C6 /* GenresView.swift */,
+				5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */,
+				C0B621334B1925BF0C9EF737 /* LibraryView.swift */,
+				E0EB491E0D6CE9D59AB320CA /* ScanStatusButton.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		B867E0BC7C0AA41378E6E71F /* GumboWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				A8B4C2D674700226B9B4C789 /* DownloadLiveActivity.swift */,
+				8182B7232DBEF7D38EC783B8 /* DownloadsWidget.swift */,
+				9DCAC40075DBBA3878161886 /* GumboHomeWidget.swift */,
+				E320C84C2CDA9D8F829A5977 /* GumboWidgets.entitlements */,
+				A9C1A17E53C69AFB3304A4A9 /* GumboWidgetsBundle.swift */,
+				3B15A290876EA6A2B263CF66 /* Info.plist */,
+				C16275445FC71D49AB9D2A4C /* PlaylistsWidget.swift */,
+				7FE60068A19F4A8888345A0D /* PrivacyInfo.xcprivacy */,
+				7550DF8A9717FA7E7C70D83B /* RediscoverWidget.swift */,
+				55B4E56CF14321B06E5E2368 /* WidgetPieces.swift */,
+			);
+			path = GumboWidgets;
+			sourceTree = "<group>";
+		};
+		C1E3C2AF962BBC74AA367C5C /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				93B4867E75B801D20F01B5D1 /* RootView.swift */,
+				CAB9C9D86E38352DAEDC80CA /* Album */,
+				E9494FFEF556963665ED0559 /* Artist */,
+				B2F9973D4DD3AA4F901EFB9D /* Components */,
+				D8B9813F27175AAF0D0C1007 /* Connect */,
+				B7F3BB4B49361E79FC2B7D17 /* Library */,
+				2A72CF23D8E0649BD724476C /* Main */,
+				B448BCF6AE1EC755693B483C /* Player */,
+				7B46D18E0C11146ACCBC28C1 /* Playlists */,
+				D490175B4B302CE21685E34B /* Profiles */,
+				DA734B13901C3E20F096C256 /* Search */,
+				4AA97924244AE90ADE434C59 /* Settings */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		CAB9C9D86E38352DAEDC80CA /* Album */ = {
+			isa = PBXGroup;
+			children = (
+				0D19A55DA694504D295E91AC /* AlbumView.swift */,
+			);
+			path = Album;
+			sourceTree = "<group>";
+		};
+		D490175B4B302CE21685E34B /* Profiles */ = {
+			isa = PBXGroup;
+			children = (
+				9652EC7FF5019EFC63864A69 /* InviteSheet.swift */,
+				BB76994E4267A29C5D305570 /* JoinWithLinkSheet.swift */,
+				E590B09B1D985261599E4EF8 /* Permissions.swift */,
+				2C1A27F63A04D6093B324A25 /* PINEntryView.swift */,
+				1D35C62CD8F6D0E1DB943B68 /* ProfileAvatarView.swift */,
+				0E5B043DF219220DA185B3B1 /* ProfileEditorSheet.swift */,
+				77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */,
+			);
+			path = Profiles;
+			sourceTree = "<group>";
+		};
+		D8B9813F27175AAF0D0C1007 /* Connect */ = {
+			isa = PBXGroup;
+			children = (
+				836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */,
+				98DB34C452968B31746A9DB2 /* FolderPickerView.swift */,
+				140A55C2869D8C7B0351AB45 /* IndexingView.swift */,
+				59C1361F80E2A35710474D9C /* LoginSheet.swift */,
+				18D5460268D3572AB23AE33E /* OnboardingView.swift */,
+				45DC2EDE97D67519D7046D24 /* RemoteAccessGuide.swift */,
+				B8215708E3F0EDF709E92B8F /* ServerDiscoveryView.swift */,
+				84F4EB41A4A2A55FF53CF53B /* SetupPage.swift */,
+				0852E38F68F085CC348B7EB0 /* WelcomeView.swift */,
+			);
+			path = Connect;
+			sourceTree = "<group>";
+		};
+		D96E8F14D45F8DA8FD12699C /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				7BEC44E5B1B9F268FF64B89F /* PlaybackIntents.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		DA734B13901C3E20F096C256 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				1606C2EDFFECD0EECE3566A0 /* SearchView.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
+		E9494FFEF556963665ED0559 /* Artist */ = {
+			isa = PBXGroup;
+			children = (
+				C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */,
+			);
+			path = Artist;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2C8180AEDDC83A62423FAC85 /* GumboMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4820ED2DBE400D78658F1E0B /* Build configuration list for PBXNativeTarget "GumboMac" */;
+			buildPhases = (
+				A1F4A4225269428661D69272 /* Sources */,
+				371AEF7449EE38C7E27DBECC /* Resources */,
+				5144DE301799903C6B6107FA /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GumboMac;
+			packageProductDependencies = (
+				BE97EF595EF2A1C8A5E5D920 /* GumboCore */,
+			);
+			productName = GumboMac;
+			productReference = 5D459871BDCBDBD2385CA361 /* GumboMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		3B6AC207A8EFFF8971586CF5 /* Gumbo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EEF115E14F76CED7B8EB8942 /* Build configuration list for PBXNativeTarget "Gumbo" */;
+			buildPhases = (
+				9ECBCBD82B7FC61CA6E6591B /* Sources */,
+				BD2B241B7F2A91B5444D0464 /* Resources */,
+				93CEB96207B6C8B4F75A2699 /* Frameworks */,
+				9B14276603995BFB4106CF80 /* Embed Foundation Extensions */,
+				CC688846736659A9BB0B3E8E /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EE93F56715F416DD72CF2FA4 /* PBXTargetDependency */,
+				8180CB1717AF39A61CE61D15 /* PBXTargetDependency */,
+			);
+			name = Gumbo;
+			packageProductDependencies = (
+				630A8BB24BE6DBFF0F1BE582 /* GumboCore */,
+				CD7C5265806645CC8D278E59 /* GumboShared */,
+			);
+			productName = Gumbo;
+			productReference = BC5CE2071BB9B3C886305A5C /* Gumbo.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7B9534332377287C598952EA /* GumboTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3E5526159E648501B43DB2C1 /* Build configuration list for PBXNativeTarget "GumboTV" */;
+			buildPhases = (
+				27F1B8E238D99AECAF862B7C /* Sources */,
+				08AC84DF0D0F686656AAFBA6 /* Resources */,
+				C0FDF88BE94CCBB285C84798 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GumboTV;
+			packageProductDependencies = (
+				E730BFCFBD3155ECC05021BE /* GumboCore */,
+			);
+			productName = GumboTV;
+			productReference = BDB500146D20BFD17B3664A9 /* GumboTV.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BB7AF75C6C102202B3A09E91 /* GumboWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 963CB2C6359C5A19181AC927 /* Build configuration list for PBXNativeTarget "GumboWatch" */;
+			buildPhases = (
+				A4293157A3837097D5481534 /* Sources */,
+				75BC0470081FFA8D41832322 /* Resources */,
+				035FB6DAFAC56C507074609C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GumboWatch;
+			packageProductDependencies = (
+				98D1DACDFA3BFFA757468161 /* GumboCore */,
+			);
+			productName = GumboWatch;
+			productReference = D1376A32FB4EAB98574265C3 /* GumboWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D277EDC69B3B03D1897791A3 /* GumboWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A83A2A0FD28A2E1165BD174 /* Build configuration list for PBXNativeTarget "GumboWidgets" */;
+			buildPhases = (
+				E1A12C61BB4EE1AEB492291B /* Sources */,
+				FB8449C59CA6AD4F544E51C7 /* Resources */,
+				B454306F389ECEDCCB853396 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GumboWidgets;
+			packageProductDependencies = (
+				7880F336195EC2B7C6788C5F /* GumboShared */,
+			);
+			productName = GumboWidgets;
+			productReference = B43AA8D2A092AB44D2E0A7E2 /* GumboWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0DD7FE060F6582D412D71510 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2C8180AEDDC83A62423FAC85 = {
+						DevelopmentTeam = C6GW4A76XK;
+						ProvisioningStyle = Automatic;
+					};
+					3B6AC207A8EFFF8971586CF5 = {
+						DevelopmentTeam = C6GW4A76XK;
+						ProvisioningStyle = Automatic;
+					};
+					7B9534332377287C598952EA = {
+						DevelopmentTeam = C6GW4A76XK;
+						ProvisioningStyle = Automatic;
+					};
+					BB7AF75C6C102202B3A09E91 = {
+						DevelopmentTeam = C6GW4A76XK;
+						ProvisioningStyle = Automatic;
+					};
+					D277EDC69B3B03D1897791A3 = {
+						DevelopmentTeam = C6GW4A76XK;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 3BF246F6F61975FD4F2486BC /* Build configuration list for PBXProject "Gumbo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6BFB01C56D6C32DB1BFC61D3;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1B931C6CEA853BC6C0C41714 /* XCLocalSwiftPackageReference "Packages/GumboCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4DC8E0F39D6C3D4BFF733C09 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3B6AC207A8EFFF8971586CF5 /* Gumbo */,
+				D277EDC69B3B03D1897791A3 /* GumboWidgets */,
+				BB7AF75C6C102202B3A09E91 /* GumboWatch */,
+				2C8180AEDDC83A62423FAC85 /* GumboMac */,
+				7B9534332377287C598952EA /* GumboTV */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		08AC84DF0D0F686656AAFBA6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2D7FC1EB74005B7F34BA73EE /* Assets.xcassets in Resources */,
+				E223442A4EFB8A4C94F06948 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		371AEF7449EE38C7E27DBECC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3E1EBE7FBA3D555F81B9D0AC /* Assets.xcassets in Resources */,
+				1903F76791150B574542F2F2 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		75BC0470081FFA8D41832322 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA39667FA9D2C317A8111271 /* Assets.xcassets in Resources */,
+				BB8BD3B5C0170E285E950363 /* Assets.xcassets in Resources */,
+				BC7EBF1025F330D97A27CC2A /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BD2B241B7F2A91B5444D0464 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CEE51FAAB4D2DE99ABF57118 /* Assets.xcassets in Resources */,
+				C481AE036863174004458AAA /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FB8449C59CA6AD4F544E51C7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				001FA7883DC2AFADBCAFBF7B /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		27F1B8E238D99AECAF862B7C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				59C291DF875462F73468E5F4 /* AddToPlaylistSheet.swift in Sources */,
+				941BC25C5554B7D41A577817 /* AlbumView.swift in Sources */,
+				7BE4680E0A699D293EE36547 /* ArtistView.swift in Sources */,
+				728E110E71B931ED15F2340D /* ArtistsListView.swift in Sources */,
+				7A7C7C42FBB3F25615AE82C7 /* ArtworkPrivacyControl.swift in Sources */,
+				DDE2DB27A5F16FFBA17DBFC7 /* ArtworkView.swift in Sources */,
+				915EBF8EFE405E6F8B9E4DC5 /* Components.swift in Sources */,
+				12486E80F13637771EA219D7 /* ConnectSheet.swift in Sources */,
+				68BA8D3E3B0A9BA302E381B5 /* DiagnosticsView.swift in Sources */,
+				3C370A2F1784C552F736F929 /* DownloadButton.swift in Sources */,
+				5432FEB03B957B8B36B82907 /* DownloadStateReader.swift in Sources */,
+				6DEAA79881CE9E8102F5BB7C /* DownloadsView.swift in Sources */,
+				7DA11168BB428646D1AF9D7E /* FamilyView.swift in Sources */,
+				F921836E0367EE641531C442 /* FolderPickerView.swift in Sources */,
+				6D539466CA122D8525CE58DF /* GenreEditorSheet.swift in Sources */,
+				A2A1866B149F11F34B04D8AA /* GenresView.swift in Sources */,
+				E533DF949DBAE1D9C0831159 /* GumboTVApp.swift in Sources */,
+				4E8187040DC1E74E71B12B3C /* IndexingView.swift in Sources */,
+				2EB6B88AA9D46EDFDCA6AB45 /* InviteSheet.swift in Sources */,
+				E1A6C87C73E9FA60B6F3E659 /* JoinWithLinkSheet.swift in Sources */,
+				F783C958BD2CBB44EC00BFEC /* LibraryHomeView.swift in Sources */,
+				5DD4B997405D697AC1809D10 /* LibraryView.swift in Sources */,
+				76B6B67F01D525FF30230117 /* LoginSheet.swift in Sources */,
+				07A40BD5D608ECF9683736C9 /* NowPlayingView.swift in Sources */,
+				67D1E350A0BA8C97D4CCBBDF /* OnboardingView.swift in Sources */,
+				083BADEBD8FE7CE894BADBE2 /* PINEntryView.swift in Sources */,
+				02AB199CCFBBF7B791A2767B /* Permissions.swift in Sources */,
+				0FF493ABA4AA288A703D7997 /* Platform.swift in Sources */,
+				7289C7BAB063F05B9D9DC270 /* PlaylistsView.swift in Sources */,
+				5F42640ACAFEBD655D4A125F /* PrivacyDetailsView.swift in Sources */,
+				1B01ACD46A368D7967EC0D8E /* ProfileAvatarView.swift in Sources */,
+				8C6A4835AB3D34AE1B4EB3E5 /* ProfileEditorSheet.swift in Sources */,
+				04CC2E1BE4C925E1AEEB7415 /* ProfilePickerView.swift in Sources */,
+				251199715DDF4D44FC43A071 /* ReleaseNotesView.swift in Sources */,
+				C82C20B80F224E64802A4772 /* RemoteAccessGuide.swift in Sources */,
+				4DF624C7C981FAD8FD80FA70 /* RootView.swift in Sources */,
+				AD340C62C5765CD0EF17E4E1 /* ScanStatusButton.swift in Sources */,
+				F0A931EEEEF1B33D63814609 /* SearchView.swift in Sources */,
+				7C8392DBA757415AA80871DB /* ServerDiscoveryView.swift in Sources */,
+				88C06B7709137AC1ED4CBBDE /* SettingsView.swift in Sources */,
+				7FE6A3C76C8A21420688C623 /* SetupPage.swift in Sources */,
+				B41B014CD89F73142BF170F4 /* TVRootView.swift in Sources */,
+				E34D7A5844AD4F2A6D3B7C89 /* Theme.swift in Sources */,
+				410E19D013C906E58C320C07 /* WelcomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9ECBCBD82B7FC61CA6E6591B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FFD85F474D86D2A7F3185B0A /* AddToPlaylistSheet.swift in Sources */,
+				D758C058705D56B5FC858628 /* AlbumView.swift in Sources */,
+				6C742AC728E846156912A283 /* ArtistView.swift in Sources */,
+				06E90835B0D2DADDB626590A /* ArtistsListView.swift in Sources */,
+				D7096295EB72E2BD6D61D4B2 /* ArtworkPrivacyControl.swift in Sources */,
+				27BC705F44A8EC12B96CE79E /* ArtworkView.swift in Sources */,
+				A5BA31604A2D2BEA4F12C2E2 /* CarPlaySceneDelegate.swift in Sources */,
+				32B8D24D9AEDD63DF01739D0 /* Components.swift in Sources */,
+				A9FD9023DB44784684742DC6 /* ConnectSheet.swift in Sources */,
+				6E0B70308004D7802A0717AD /* DiagnosticsView.swift in Sources */,
+				AF2133266208EA79789D3FF4 /* DownloadButton.swift in Sources */,
+				13A059607D180D45BF71B354 /* DownloadStateReader.swift in Sources */,
+				A17ADB0F7D5DB6046FBF1911 /* DownloadsView.swift in Sources */,
+				9F14D85E9257245A79E6F8D8 /* FamilyView.swift in Sources */,
+				7D34F50C93A263E99A400D44 /* FolderPickerView.swift in Sources */,
+				EC7BAD81E49148DA38BFB9AA /* GenreEditorSheet.swift in Sources */,
+				DB3BAF38CD12E8FA95274AB0 /* GenresView.swift in Sources */,
+				58060D892FD9EE7FC66E93BE /* GumboApp.swift in Sources */,
+				E8DFE3DC8BCB97A3C5BB97DF /* IndexingView.swift in Sources */,
+				A726CE542A5ABEA0F901670B /* InviteSheet.swift in Sources */,
+				8644F458B1765BF818238007 /* JoinWithLinkSheet.swift in Sources */,
+				7192E7F9D0F96724C3ACA8AA /* LibraryHomeView.swift in Sources */,
+				9DDB339B0A6CBD736F06D3A8 /* LibraryView.swift in Sources */,
+				E922C8CCDC2F4338ED8F0567 /* LoginSheet.swift in Sources */,
+				273D392AB13EEEC5F0811C53 /* MainTabView.swift in Sources */,
+				2988F7BB085504733B2C5DDB /* MiniPlayerView.swift in Sources */,
+				E0828D47B1937789D699F9DE /* NowPlayingView.swift in Sources */,
+				EC921F869CE6F0114A829F7A /* OnboardingView.swift in Sources */,
+				5A829C9AD6EED01BD72F3177 /* PINEntryView.swift in Sources */,
+				2C7DAAF0C0F13EB8CBF7FD11 /* Permissions.swift in Sources */,
+				0021F8B8124B9F1F93A7160B /* Platform.swift in Sources */,
+				3AEF22859ACA0ECAC000AAA3 /* PlaybackIntents.swift in Sources */,
+				6D2344CA1027CDECD2737E89 /* PlaylistsView.swift in Sources */,
+				C8986158A476C0598822BCF7 /* PrivacyDetailsView.swift in Sources */,
+				7B3C69BBC76EED3F2D10FF86 /* ProfileAvatarView.swift in Sources */,
+				8591019D52FECCE7EE080304 /* ProfileEditorSheet.swift in Sources */,
+				A4CD0337D0658C26B3B9C68F /* ProfilePickerView.swift in Sources */,
+				D7C2514DD025DEBB8887707A /* ReleaseNotesView.swift in Sources */,
+				FB41FEB9059DC5CD2E7AAD62 /* RemoteAccessGuide.swift in Sources */,
+				8411743576DB44E5D6F1D709 /* RootView.swift in Sources */,
+				FABB5DF1CEC8D4D2DD48D0B3 /* ScanStatusButton.swift in Sources */,
+				9075E7E22CD4FF880388A857 /* SearchView.swift in Sources */,
+				B5A938FCDBF507621D98E7C2 /* ServerDiscoveryView.swift in Sources */,
+				21D56E75077E6EE1970D6C46 /* SettingsView.swift in Sources */,
+				F3112FF463C8F75E6EE877F2 /* SetupPage.swift in Sources */,
+				E0EF0C93E4E3EF81BE899F19 /* Theme.swift in Sources */,
+				12BC2E1FD2FD6FAD738D6D2C /* WatchBridge.swift in Sources */,
+				3F980321EC024459ED35C047 /* WelcomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1F4A4225269428661D69272 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				29CE3A3F87035D549EF37170 /* AddToPlaylistSheet.swift in Sources */,
+				A8FAAC386345910CA62A4A23 /* AlbumView.swift in Sources */,
+				D17844E2391E67636DEB3B7D /* ArtistView.swift in Sources */,
+				325DFA490C8175E5C9E066AB /* ArtistsListView.swift in Sources */,
+				F15B90B56A97FCBD5AC80393 /* ArtworkPrivacyControl.swift in Sources */,
+				4C6BB521554B2EA82CB5142F /* ArtworkView.swift in Sources */,
+				313AA6CE152817EC4AC5EC01 /* Components.swift in Sources */,
+				F802C0C5420CF8E0022AAA3B /* ConnectSheet.swift in Sources */,
+				8880D55A74AFA6F5493661B7 /* DiagnosticsView.swift in Sources */,
+				1D6B952DA1E09F76A0EC18C0 /* DownloadButton.swift in Sources */,
+				00363C3805113EB1CD924707 /* DownloadStateReader.swift in Sources */,
+				28F0D910D768F47B0632AD81 /* DownloadsView.swift in Sources */,
+				E93B1B07766D389527037998 /* FamilyView.swift in Sources */,
+				9A63C8312082AB59B1FD0B34 /* FolderPickerView.swift in Sources */,
+				CB303A90CD22A1B60688B30E /* GenreEditorSheet.swift in Sources */,
+				BF00020F3336F3C7AC753D5D /* GenresView.swift in Sources */,
+				53382677C544259E9A9EF906 /* GumboMacApp.swift in Sources */,
+				FC0202D3173EC38608BB237B /* IndexingView.swift in Sources */,
+				34128A0662F5A82A866C288F /* InviteSheet.swift in Sources */,
+				456F8BDD3AA825BE77CB20C2 /* JoinWithLinkSheet.swift in Sources */,
+				51AD4481590FA4572FE930FD /* LibraryHomeView.swift in Sources */,
+				8E728C639D7149753168CE2F /* LibraryView.swift in Sources */,
+				A12B06EE7824A90E14C3B05B /* LoginSheet.swift in Sources */,
+				DBF882A932EDB3759490B05D /* MacCollectionViews.swift in Sources */,
+				E8BF35C48A3CBE215EC15FCC /* MacLibraryView.swift in Sources */,
+				18D0D2A1144359E576F5A6D3 /* MacNavigation.swift in Sources */,
+				5FC324752732FD970392FE51 /* MacNowPlayingInspector.swift in Sources */,
+				01A1794E636DFA1808BDDBE7 /* MacPlayerBar.swift in Sources */,
+				397E9ADD5B01300A947E0936 /* MacRootView.swift in Sources */,
+				3421EF61D0C3E0D3582964AF /* MacSettingsView.swift in Sources */,
+				6CC2EAC23E89588D4158C629 /* MacSetupView.swift in Sources */,
+				1A25EA814D45BEA48F2AC342 /* MacTrackTable.swift in Sources */,
+				3DA32832DE87923F6DA3DCEA /* NowPlayingView.swift in Sources */,
+				405AD3FAA7552DAE618E0079 /* OnboardingView.swift in Sources */,
+				9A3F5B84FB16B5C9F572AE7C /* PINEntryView.swift in Sources */,
+				D8A79D68DB5DDCD86163B618 /* Permissions.swift in Sources */,
+				E316D96DA20D392266D84209 /* Platform.swift in Sources */,
+				F1D8F3E6FA56A11FA7775EBE /* PlaylistsView.swift in Sources */,
+				2D1BCA68D1188B1C0B22946B /* PrivacyDetailsView.swift in Sources */,
+				71D8FC4657A70B51E450CF82 /* ProfileAvatarView.swift in Sources */,
+				D0EE563F3F60B789691CD762 /* ProfileEditorSheet.swift in Sources */,
+				936F3B1C0266985BB752F86F /* ProfilePickerView.swift in Sources */,
+				56CEC909E179E897F3138961 /* ReleaseNotesView.swift in Sources */,
+				AA4EF442E38A55E22805AC93 /* RemoteAccessGuide.swift in Sources */,
+				9195F190449259C32CC7F769 /* RootView.swift in Sources */,
+				AAD12A9AA0D85B921E68995A /* ScanStatusButton.swift in Sources */,
+				2EFEB525717F861A0E8AD3A8 /* SearchView.swift in Sources */,
+				BCBBD1909AD86C0C729157AB /* ServerDiscoveryView.swift in Sources */,
+				7A9433F11B4D1E636335AE64 /* SettingsView.swift in Sources */,
+				D1321DFADD4FCFDEAA6BEC9B /* SetupPage.swift in Sources */,
+				D98448F490A141918C91F9BB /* Theme.swift in Sources */,
+				2E638CDB94805134E0E249C1 /* WelcomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A4293157A3837097D5481534 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3475D6CBEDE9683CB7D09113 /* GumboWatchApp.swift in Sources */,
+				62B7997FFB954BDE8BA7B844 /* PlaylistDetailView.swift in Sources */,
+				7017ABBA812A2B0FE988CFDD /* PlaylistsListView.swift in Sources */,
+				CC5E7E9ECCCF25859CE4658F /* WatchDownloads.swift in Sources */,
+				3171308A3377DAB17E493A5F /* WatchPlayer.swift in Sources */,
+				A1B0E3A040F5676BF45EBF82 /* WatchRootView.swift in Sources */,
+				CDA1D8AAB885AEC3079AB0CA /* WatchStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E1A12C61BB4EE1AEB492291B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D15B2E2D7502C19E632EB487 /* DownloadLiveActivity.swift in Sources */,
+				88CC3C4AE18F1A9872F95C9D /* DownloadsWidget.swift in Sources */,
+				2BEB4D5E2D033DDB61B65F72 /* GumboHomeWidget.swift in Sources */,
+				83ACDE8C85E9251F3EC3A938 /* GumboWidgetsBundle.swift in Sources */,
+				B9CA03034E0E281AB107620A /* PlaybackIntents.swift in Sources */,
+				FF15AC01284481888B282B1F /* PlaylistsWidget.swift in Sources */,
+				EEE21A82E1C7B089DFAF9879 /* RediscoverWidget.swift in Sources */,
+				7D39D6EC4366E241D1DE0951 /* WidgetPieces.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8180CB1717AF39A61CE61D15 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BB7AF75C6C102202B3A09E91 /* GumboWatch */;
+			targetProxy = 1E987BF6BE058594B7AFC1B9 /* PBXContainerItemProxy */;
+		};
+		EE93F56715F416DD72CF2FA4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D277EDC69B3B03D1897791A3 /* GumboWidgets */;
+			targetProxy = 46E5269B1D161CC1E3BF6C3A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		07BC2EE96CEC9365F6E845B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = WatchAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboWatch/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo.watchkitapp;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		098B5DC61EDF49C7D6E60FE5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		0A830ECD48E6F8A4CF0F32A6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = WatchAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboWatch/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo.watchkitapp;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		57714EF9AEB1749E173431E5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_ENTITLEMENTS = GumboTV/GumboTV.entitlements;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = appletvos;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		590CFA5919B99053776A991C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = GumboMac/GumboMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = GumboMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+		5F1610F411EEF278F6197755 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GumboWidgets/GumboWidgets.entitlements;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo.widgets;
+				PRODUCT_NAME = GumboWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AAFC677ADE38B9493EE11DE6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		AD5303DC526DADE7F67FB9B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Gumbo/Gumbo.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = Gumbo/Info.plist;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BA937FE2223ABFF43D91141F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Gumbo/Gumbo.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = Gumbo/Info.plist;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DAD269A13A1DFE460773E794 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_ENTITLEMENTS = GumboTV/GumboTV.entitlements;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = appletvos;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		E39279BD8E2C2136D44D545D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GumboWidgets/GumboWidgets.entitlements;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				INFOPLIST_FILE = GumboWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo.widgets;
+				PRODUCT_NAME = GumboWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E77DEA67226F5362C2A4A5FE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = GumboMac/GumboMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 202609151900;
+				DEVELOPMENT_TEAM = C6GW4A76XK;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = GumboMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.samuelvoltolini.gumbo;
+				PRODUCT_NAME = Gumbo;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0A83A2A0FD28A2E1165BD174 /* Build configuration list for PBXNativeTarget "GumboWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F1610F411EEF278F6197755 /* Debug */,
+				E39279BD8E2C2136D44D545D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3BF246F6F61975FD4F2486BC /* Build configuration list for PBXProject "Gumbo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				098B5DC61EDF49C7D6E60FE5 /* Debug */,
+				AAFC677ADE38B9493EE11DE6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3E5526159E648501B43DB2C1 /* Build configuration list for PBXNativeTarget "GumboTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DAD269A13A1DFE460773E794 /* Debug */,
+				57714EF9AEB1749E173431E5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4820ED2DBE400D78658F1E0B /* Build configuration list for PBXNativeTarget "GumboMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E77DEA67226F5362C2A4A5FE /* Debug */,
+				590CFA5919B99053776A991C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		963CB2C6359C5A19181AC927 /* Build configuration list for PBXNativeTarget "GumboWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A830ECD48E6F8A4CF0F32A6 /* Debug */,
+				07BC2EE96CEC9365F6E845B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EEF115E14F76CED7B8EB8942 /* Build configuration list for PBXNativeTarget "Gumbo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA937FE2223ABFF43D91141F /* Debug */,
+				AD5303DC526DADE7F67FB9B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1B931C6CEA853BC6C0C41714 /* XCLocalSwiftPackageReference "Packages/GumboCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GumboCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		630A8BB24BE6DBFF0F1BE582 /* GumboCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboCore;
+		};
+		7880F336195EC2B7C6788C5F /* GumboShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboShared;
+		};
+		98D1DACDFA3BFFA757468161 /* GumboCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboCore;
+		};
+		BE97EF595EF2A1C8A5E5D920 /* GumboCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboCore;
+		};
+		CD7C5265806645CC8D278E59 /* GumboShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboShared;
+		};
+		E730BFCFBD3155ECC05021BE /* GumboCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GumboCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 0DD7FE060F6582D412D71510 /* Project object */;
+}

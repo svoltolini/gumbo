@@ -1,5 +1,7 @@
 # Reduce Motion coverage
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 The remaining decorative movement in the reviewed shared screens now uses stable states or short fades when Reduce Motion is enabled. This includes the iPhone root transition, library facet and onboarding movement, album carousel changes, playlist/download grids, status badges, page indicators, indexing numbers and artist-header stretch. Both root stage and profile-lock animation modifiers are disabled together so one cannot reintroduce the other's movement. Default preference branches retain their existing motion.
 
 ## Validation

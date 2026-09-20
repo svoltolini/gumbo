@@ -23,10 +23,10 @@ These checks run without physical devices or TestFlight and are captured in `scr
 
 ### Package Tests (190+ tests)
 
-Run the full SkyrCore test suite:
+Run the full GumboCore test suite:
 
 ```bash
-cd Packages/SkyrCore && swift test
+cd Packages/GumboCore && swift test
 ```
 
 Coverage areas:
@@ -44,9 +44,9 @@ Coverage areas:
 Verify all targets compile for Release:
 
 ```bash
-xcodebuild -project Skyr.xcodeproj -scheme Skyr -configuration Release -destination 'generic/platform=iOS' build
-xcodebuild -project Skyr.xcodeproj -scheme SkyrMac -configuration Release -destination 'generic/platform=macOS' build
-xcodebuild -project Skyr.xcodeproj -scheme SkyrTV -configuration Release -destination 'generic/platform=tvOS' build
+xcodebuild -project Gumbo.xcodeproj -scheme Gumbo -configuration Release -destination 'generic/platform=iOS' build
+xcodebuild -project Gumbo.xcodeproj -scheme GumboMac -configuration Release -destination 'generic/platform=macOS' build
+xcodebuild -project Gumbo.xcodeproj -scheme GumboTV -configuration Release -destination 'generic/platform=tvOS' build
 ```
 
 ### Version Alignment
@@ -56,10 +56,10 @@ All targets must share the same version numbers:
 | Target | MARKETING_VERSION | CURRENT_PROJECT_VERSION |
 | --- | --- | --- |
 | Gumbo (iOS) | 1.0 | 202609151900 |
-| SkyrWidgets | 1.0 | 202609151900 |
-| SkyrWatch | 1.0 | 202609151900 |
-| SkyrMac | 1.0 | 202609151900 |
-| SkyrTV | 1.0 | 202609151900 |
+| GumboWidgets | 1.0 | 202609151900 |
+| GumboWatch | 1.0 | 202609151900 |
+| GumboMac | 1.0 | 202609151900 |
+| GumboTV | 1.0 | 202609151900 |
 
 ### Privacy Manifest Validation
 
@@ -69,11 +69,11 @@ All five targets must include a PrivacyInfo.xcprivacy file with:
 - `NSPrivacyAccessedAPITypes` with reasons
 
 Locations:
-- `Skyr/PrivacyInfo.xcprivacy`
-- `SkyrWidgets/PrivacyInfo.xcprivacy`
-- `SkyrWatch/PrivacyInfo.xcprivacy`
-- `SkyrMac/PrivacyInfo.xcprivacy`
-- `SkyrTV/PrivacyInfo.xcprivacy`
+- `Gumbo/PrivacyInfo.xcprivacy`
+- `GumboWidgets/PrivacyInfo.xcprivacy`
+- `GumboWatch/PrivacyInfo.xcprivacy`
+- `GumboMac/PrivacyInfo.xcprivacy`
+- `GumboTV/PrivacyInfo.xcprivacy`
 
 ### Entitlements Check
 

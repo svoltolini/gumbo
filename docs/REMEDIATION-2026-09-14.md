@@ -1,5 +1,7 @@
 # Gumbo 1.0 — first remediation batch
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Date: 14 September 2026
 
 This report records the first batch. See the [second remediation batch](REMEDIATION-2026-09-14-BATCH-2.md) for subsequent CloudKit, download, media, and Axiom-informed interface work and its verification.

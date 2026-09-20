@@ -1,5 +1,7 @@
 # Gumbo 1.0 — native Mac, Settings and library reliability
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 This batch addresses [#37](https://github.com/svoltolini/gumbo/issues/37), [#38](https://github.com/svoltolini/gumbo/issues/38), [#20](https://github.com/svoltolini/gumbo/issues/20), [#23](https://github.com/svoltolini/gumbo/issues/23) and [#30](https://github.com/svoltolini/gumbo/issues/30), with further work on navigation, performance, accessibility and remote-access guidance. Marketing version remains **1.0**, and the source build remains **202609142150**. At the owner's request, intermediate batches are merged without TestFlight uploads; the final consolidated candidate will receive a new build number.
 
 ## Native desktop behavior
@@ -32,7 +34,7 @@ Onboarding and Server Settings include a native, optional Remote Access Help pag
 
 ## Validation and limits
 
-The complete Release package suite passed **219 tests in 11 suites** with normal parallelism, including SkyrCore and SkyrShared/widget authorization. The focused metadata/playback suite also passed **44 tests in three suites**. Production Mac, iOS (including Watch/widgets) and TV Release builds passed; the final queue-menu guard passed an additional Mac Release compilation. TV reports only the routine skipped AppIntents extraction notice. Results and the native fixture checklist are recorded in [native UI evidence](evidence/native-ui-checks.json). All fixtures use synthetic data, dedicated temporary storage, ordinary local WAV playback and mock CloudKit. No real NAS, family account or personal music files were modified.
+The complete Release package suite passed **219 tests in 11 suites** with normal parallelism, including GumboCore and GumboShared/widget authorization. The focused metadata/playback suite also passed **44 tests in three suites**. Production Mac, iOS (including Watch/widgets) and TV Release builds passed; the final queue-menu guard passed an additional Mac Release compilation. TV reports only the routine skipped AppIntents extraction notice. Results and the native fixture checklist are recorded in [native UI evidence](evidence/native-ui-checks.json). All fixtures use synthetic data, dedicated temporary storage, ordinary local WAV playback and mock CloudKit. No real NAS, family account or personal music files were modified.
 
 The actual Mac interface was exercised at wide and approximately 900-point minimum window widths, in light/dark appearance, with six long-name profiles. Checks include keyboard/sorted playback, queue navigation, repeated playlist entries, native creation and rename actions, search, profile isolation, window reopening, Settings and player accessibility values. The iPhone 17 Pro/iOS 26.5 simulator was checked at standard and Accessibility Extra Large text sizes; nested server labels and decorative icon overflow were corrected. Mac Settings category, nested navigation, appearance and resizing were checked separately. These are visual/accessibility-tree checks, not a claim of complete spoken VoiceOver or physical-device acceptance.
 

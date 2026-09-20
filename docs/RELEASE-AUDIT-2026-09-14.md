@@ -1,5 +1,7 @@
 # Gumbo 1.0 release audit
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Date: 14 September 2026
 
 Target public-release weekend: 19–20 September 2026
