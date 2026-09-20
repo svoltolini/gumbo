@@ -49,6 +49,7 @@ struct SettingsView: View {
     @State private var isRecoveringLegacyLibrary = false
     @State private var isConfirmingTagRead = false
     @State private var isShowingRemoteAccessHelp = false
+    @State private var editingProfile: ProfileEditorTarget?
 
     private var permissions: Permissions { Permissions(profiles: profiles, cloud: cloud) }
     private var canScan: Bool { model.isConnected && !model.isScanning && !model.isDemo && !library.metadataWriter.isWriting && !library.isDeletingFiles }
@@ -77,15 +78,14 @@ struct SettingsView: View {
         .navigationTitle(category?.rawValue ?? "Settings")
         .titleDisplay(large: category == nil)
         .sheet(isPresented: $isRecoveringLegacyLibrary) { LegacyLibraryRecoverySheet() }
+        .sheet(item: $editingProfile) { ProfileEditorSheet(profile: $0.profile) }
         #if os(tvOS)
         .fullScreenCover(isPresented: $isShowingRemoteAccessHelp) { RemoteAccessGuide() }
         #else
         .sheet(isPresented: $isShowingRemoteAccessHelp) { RemoteAccessGuide() }
         #endif
         .confirmationDialog("Refresh song information?", isPresented: $isConfirmingTagRead, titleVisibility: .visible) {
-            NavigationLink { MissingGenresView() } label: { Text("Find Missing Genres") }
-                NavigationLink { ProblemFilesView() } label: { Text("Problem Files") }
-                Button("Refresh Song Information") { model.rereadMetadata() }
+            Button("Refresh Song Information") { if canScan { model.rereadMetadata() } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Gumbo will read album and song information from your music files again. This may take a while. Your favourites and playlists stay in place.")
@@ -105,11 +105,7 @@ struct SettingsView: View {
         Group {
             Section {
                 NavigationLink { SettingsView(category: .profiles) } label: { profileLabel }
-                NavigationLink { FamilyView() } label: {
-                    LabeledContent {
-                        Text(cloud.status.text).foregroundStyle(.secondary)
-                    } label: { NativeSettingsLabel("Family Sharing", symbol: "person.2") }
-                }
+                    .accessibilityIdentifier("settings.profiles")
             }
             Section {
                 categoryLink(.general)
@@ -157,12 +153,44 @@ struct SettingsView: View {
     }
 
     private var profileSections: some View {
-        Section {
-            NavigationLink { ManageProfilesView() } label: { profileLabel }
-            Button("Switch Profile") { profiles.lock() }
-            NavigationLink { FamilyView() } label: {
-                LabeledContent("Family Sharing", value: cloud.status.text)
-                    .foregroundStyle(.primary)
+        Group {
+            if let profile = profiles.active {
+                Section {
+                    Button { editingProfile = .existing(profile) } label: {
+                        VStack(spacing: 10) {
+                            ProfileAvatarView(profile: profile, size: 96)
+                            Text(profile.name)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("Edit Profile")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!permissions.canEdit(profile, profiles: profiles))
+                    .accessibilityLabel("Edit profile for \(profile.name)")
+                    .accessibilityIdentifier("profile.edit")
+                    .listRowBackground(Color.clear)
+                }
+            }
+            Section {
+                NavigationLink { ManageProfilesView() } label: {
+                    NativeSettingsLabel("Manage Profiles", symbol: "person.2", subtitle: "Profiles and invitations")
+                }
+                Button { profiles.lock() } label: {
+                    NativeSettingsLabel("Switch Profile", symbol: "arrow.left.arrow.right")
+                }
+                .accessibilityIdentifier("profile.switch")
+            }
+            Section {
+                NavigationLink { FamilyView() } label: {
+                    NativeSettingsLabel("Family Sharing", symbol: "person.2", subtitle: cloud.status.text)
+                }
             }
         }
     }
@@ -236,25 +264,44 @@ struct SettingsView: View {
         @Bindable var library = library
         return Group {
             Section {
-                NavigationLink { MissingGenresView() } label: { Text("Find Missing Genres") }
-                NavigationLink { ProblemFilesView() } label: { Text("Problem Files") }
-                Button("Refresh Song Information") { isConfirmingTagRead = true }
-                    .disabled(!canScan)
+                NavigationLink { MissingGenresView() } label: {
+                    NativeSettingsLabel("Find Missing Genres", symbol: "tag", subtitle: "Review suggestions before saving to your files")
+                }
+                .accessibilityIdentifier("settings.missingGenres")
+                NavigationLink { ProblemFilesView() } label: {
+                    NativeSettingsLabel("Problem Files", symbol: "doc.badge.ellipsis", subtitle: "Check music that won't play")
+                }
+                .accessibilityIdentifier("settings.problemFiles")
+                Button { isConfirmingTagRead = true } label: {
+                    NativeSettingsLabel("Refresh Song Information", symbol: "arrow.clockwise", subtitle: "Read tags and artwork from your files again")
+                }
+                .accessibilityIdentifier("settings.refreshTags")
+                .disabled(!canScan)
                 if model.indexer.isEnriching {
                     LabeledContent("Reading Song Information", value: "\(model.indexer.enrichedCount.formatted()) of \(model.indexer.enrichTotal.formatted())")
                 }
-                #if os(iOS)
-                Toggle("Keep Screen Awake During Updates", isOn: $model.keepsScreenOnWhileScanning)
-                #endif
             } header: { Text("Library Maintenance") } footer: {
-                Text("Refresh song information after changing album names, artists or artwork in your music files.")
+                if model.isDemo {
+                    Text("Explore these tools here. Connect to your music server to use them.")
+                } else if !model.isConnected {
+                    Text("Connect to your music server to use these tools.")
+                }
             }
             Section {
                 Toggle("Shorter Album Titles", isOn: $library.hidesBracketedTitleParts)
-                NavigationLink { GenreNamesView() } label: { Text("Edit Genre Names") }
+                NavigationLink { GenreNamesView() } label: {
+                    NativeSettingsLabel("Edit Genre Names", symbol: "textformat", subtitle: "Rename or combine genre labels in Gumbo")
+                }
             } header: { Text("Library Display") } footer: {
-                Text("Hide bracketed extras such as “Deluxe Edition” in album titles. Your music files stay unchanged.")
+                Text("Hide extras such as “Deluxe Edition”. These settings leave your music files unchanged.")
             }
+            #if os(iOS)
+            Section {
+                Toggle("Keep Screen Awake", isOn: $model.keepsScreenOnWhileScanning)
+            } header: { Text("During Library Updates") } footer: {
+                Text("Keep the display on while Gumbo scans or updates song information.")
+            }
+            #endif
             if !model.legacyLibraryRecoveries.isEmpty {
                 Section {
                     Button("Recover a Saved Library") { isRecoveringLegacyLibrary = true }
@@ -263,10 +310,11 @@ struct SettingsView: View {
                 }
             }
             Section {
-                NavigationLink { DiagnosticsView() } label: { Text("Diagnostics") }
-            } header: { Text("Troubleshooting") } footer: {
-                Text("Connection and playback details that can help investigate a problem.")
-            }
+                NavigationLink { DiagnosticsView() } label: {
+                    NativeSettingsLabel("Diagnostics", symbol: "waveform.path.ecg", subtitle: "Details to help report a problem")
+                }
+                .accessibilityIdentifier("settings.diagnostics")
+            } header: { Text("Troubleshooting") }
         }
     }
 
@@ -289,28 +337,45 @@ struct SettingsView: View {
 
 /// Neutral native labels reserve blue for actions and selections rather than every icon.
 private struct NativeSettingsLabel: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     let symbol: String
+    var subtitle: String?
 
-    init(_ title: String, symbol: String) {
+    init(_ title: String, symbol: String, subtitle: String? = nil) {
         self.title = title
         self.symbol = symbol
+        self.subtitle = subtitle
     }
 
     var body: some View {
         #if os(macOS)
-        Text(title).foregroundStyle(.primary)
+        text
         #else
-        Label {
-            Text(title).foregroundStyle(.primary)
-        } icon: {
-            Image(systemName: symbol)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
+        if dynamicTypeSize.isAccessibilitySize {
+            text
+        } else {
+            Label {
+                text
+            } icon: {
+                Image(systemName: symbol)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+            }
         }
         #endif
+    }
+
+    private var text: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).foregroundStyle(isEnabled ? .primary : .tertiary)
+            if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, subtitle == nil ? 0 : 3)
     }
 }
 

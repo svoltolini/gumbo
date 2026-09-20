@@ -72,7 +72,7 @@ struct CoverFocusStyle: ButtonStyle {
 #endif
 
 /// Decoding through ImageIO gives the same `CGImage` on both platforms, orientation applied.
-enum PlatformImages {
+nonisolated enum PlatformImages {
     static func cgImage(data: Data, maxPixelSize: Int = 1024) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return thumbnail(from: source, maxPixelSize: maxPixelSize)

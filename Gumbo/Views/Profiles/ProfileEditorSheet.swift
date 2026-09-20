@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Name, photo and lock of a profile; new ones are made here too.
 struct ProfileEditorSheet: View {
-    let profile: Profile?
+    @State private var profile: Profile?
     @Environment(ProfileStore.self) private var profiles
     @Environment(CloudSync.self) private var cloud
     @Environment(\.dismiss) private var dismiss
@@ -17,7 +17,11 @@ struct ProfileEditorSheet: View {
     @State private var photoChange: PhotoChange = .keep
     #if canImport(PhotosUI) && !os(tvOS)
     @State private var pickedItem: PhotosPickerItem?
+    @State private var isChoosingPhoto = false
     #endif
+    @State private var photoTask: Task<Void, Never>?
+    @State private var isLoadingPhoto = false
+    @State private var photoProblem: String?
     @State private var preview: CGImage?
     @State private var biometrics: Bool
     @State private var isSettingPIN = false
@@ -39,7 +43,7 @@ struct ProfileEditorSheet: View {
     }
 
     init(profile: Profile?) {
-        self.profile = profile
+        _profile = State(initialValue: profile)
         _name = State(initialValue: profile?.name ?? "")
         _avatar = State(initialValue: profile?.avatar ?? ProfileAvatar.random())
         _biometrics = State(initialValue: false)
@@ -72,7 +76,7 @@ struct ProfileEditorSheet: View {
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && isCurrentDraft
+            && isCurrentDraft && !isLoadingPhoto
     }
 
     private var isCurrentDraft: Bool {
@@ -96,7 +100,6 @@ struct ProfileEditorSheet: View {
     }
 
     var body: some View {
-        let photoLabel = hasPhoto ? "Change Photo" : "Choose Photo"
         NavigationStack {
             Group {
                 #if os(tvOS)
@@ -105,16 +108,9 @@ struct ProfileEditorSheet: View {
                         VStack(spacing: 14) {
                             ProfileAvatarView(profile: draft, size: 124, isLocked: hasPIN, preview: photoChange.isRemove ? nil : preview)
                                 .animation(.snappy(duration: 0.25), value: preview.map(ObjectIdentifier.init))
-                            #if canImport(PhotosUI) && !os(tvOS)
-                            PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
-                                Label(photoLabel, systemImage: "photo")
-                            }
-                            .buttonStyle(.glass)
-                            #else
                             Text("Change the photo from your iPhone or Mac.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                            #endif
                         }
                         .padding(.top, 8)
 
@@ -198,23 +194,16 @@ struct ProfileEditorSheet: View {
                 #else
                 Form {
                     Section {
-                        HStack {
-                            ProfileAvatarView(profile: draft, size: 64, isLocked: hasPIN, preview: photoChange.isRemove ? nil : preview)
-                            VStack(alignment: .leading) {
-                                Text("Profile Photo").font(.headline)
-                                #if canImport(PhotosUI)
-                                PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
-                                    Label(photoLabel, systemImage: "photo")
-                                }
-                                #endif
-                            }
-                        }
-                        .padding(.vertical, 4)
+                        photoEditor
+                            .listRowBackground(Color.clear)
+                    }
+                    Section {
                         TextField("Name", text: $name)
                             .wordsAutocapitalization()
                             .submitLabel(.done)
+                            .accessibilityIdentifier("profile.name")
                     } header: {
-                        Text("Profile")
+                        Text("Name")
                     }
                     Section {
                         if hasPIN {
@@ -288,6 +277,7 @@ struct ProfileEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
                         .disabled(!canSave)
+                        .accessibilityIdentifier("profile.save")
                 }
             }
             .onAppear {
@@ -296,14 +286,14 @@ struct ProfileEditorSheet: View {
             }
             #if canImport(PhotosUI) && !os(tvOS)
             .onChange(of: pickedItem) { _, item in
-                guard let item else { return }
-                Task {
-                    guard let data = try? await item.loadTransferable(type: Data.self), let image = PlatformImages.cgImage(data: data) else { return }
-                    photoChange = .set(data)
-                    preview = image
-                }
+                loadPhoto(item)
             }
             #endif
+            .onDisappear { photoTask?.cancel() }
+            .onChange(of: profiles.sessionID) { _, _ in
+                photoTask?.cancel()
+                dismiss()
+            }
             .sheet(isPresented: $isSettingPIN) {
                 PINSetupSheet { pin in pinChange = .set(pin) }
             }
@@ -329,6 +319,100 @@ struct ProfileEditorSheet: View {
         .frame(minWidth: 440, idealWidth: 500, minHeight: 440, idealHeight: 540)
         #endif
     }
+
+    #if !os(tvOS)
+    private var photoEditor: some View {
+        VStack(spacing: 12) {
+            #if canImport(PhotosUI)
+            Menu {
+                Button("Choose Photo", systemImage: "photo.on.rectangle") {
+                    // Reselecting the same image must retry a failed transfer too.
+                    pickedItem = nil
+                    isChoosingPhoto = true
+                }
+                if hasPhoto {
+                    Button("Remove Photo", systemImage: "trash", role: .destructive) {
+                        photoTask?.cancel()
+                        pickedItem = nil
+                        isLoadingPhoto = false
+                        photoProblem = nil
+                        photoChange = .remove
+                        preview = nil
+                    }
+                }
+            } label: {
+                VStack(spacing: 10) {
+                    ProfileAvatarView(profile: draft, size: 104, preview: photoChange.isRemove ? nil : preview)
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .frame(width: 34, height: 34)
+                                .background(.regularMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(.primary.opacity(0.08)))
+                                .accessibilityHidden(true)
+                        }
+                    Text(hasPhoto ? "Edit Photo" : "Add Photo")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .accessibilityLabel(hasPhoto ? "Edit Profile Photo" : "Add Profile Photo")
+            .accessibilityIdentifier("profile.photo")
+            .photosPicker(isPresented: $isChoosingPhoto, selection: $pickedItem, matching: .images)
+            #else
+            ProfileAvatarView(profile: draft, size: 104)
+            #endif
+            if isLoadingPhoto {
+                ProgressView("Loading Photo…").font(.footnote)
+            }
+            if let photoProblem {
+                Text(photoProblem).font(.footnote).foregroundStyle(.red)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+    #endif
+
+    #if canImport(PhotosUI) && !os(tvOS)
+    private func loadPhoto(_ item: PhotosPickerItem?) {
+        photoTask?.cancel()
+        photoProblem = nil
+        guard let item else { isLoadingPhoto = false; return }
+        isLoadingPhoto = true
+        photoTask = Task {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                try Task.checkCancellation()
+                let image = await Task.detached(priority: .userInitiated) {
+                    PlatformImages.cgImage(data: data, maxPixelSize: 640)
+                }.value
+                try Task.checkCancellation()
+                guard isCurrentDraft else {
+                    photoProblem = "This profile changed. Close the editor and open it again."
+                    isLoadingPhoto = false
+                    return
+                }
+                guard let image else { throw CocoaError(.fileReadCorruptFile) }
+                photoChange = .set(data)
+                preview = image
+                isLoadingPhoto = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                isLoadingPhoto = false
+                photoProblem = "This photo couldn't be loaded. Try choosing it again or pick another photo."
+            }
+        }
+    }
+    #endif
 
     private func save() {
         guard validateDraft() else { return }
@@ -364,10 +448,19 @@ struct ProfileEditorSheet: View {
             problem = "The profile could not be saved."
             return
         }
+        // The name and lock are already saved. Keep the new baseline if the photo fails so
+        // retry is still authorized and a newly created profile is not created a second time.
+        profile = saved
+        pinChange = .keep
+        let photoSaved: Bool
         switch photoChange {
-        case .keep: break
-        case .set(let data): profiles.setPhoto(data, for: saved)
-        case .remove: profiles.setPhoto(nil, for: saved)
+        case .keep: photoSaved = true
+        case .set(let data): photoSaved = profiles.setPhoto(data, for: saved)
+        case .remove: photoSaved = profiles.setPhoto(nil, for: saved)
+        }
+        guard photoSaved else {
+            photoProblem = "Your profile details were saved, but the photo couldn't be updated. Try saving again."
+            return
         }
         dismiss()
     }
@@ -456,16 +549,15 @@ struct ManageProfilesView: View {
                         } label: {
                             HStack {
                                 ProfileAvatarView(profile: profile, size: 44, isLocked: profile.isLocked)
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(profile.name).font(.body.weight(.medium))
-                                    Text(profile.role == .owner ? "Owner" : "Member")
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text((profile.role == .owner ? "Owner" : "Member") + (profile.id == profiles.activeID ? " · Current Profile" : ""))
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                                 Spacer()
-                                if profile.id == profiles.activeID {
-                                    Text("Current").font(.subheadline).foregroundStyle(.secondary)
-                                }
                                 if permissions.canEdit(profile, profiles: profiles) {
                                     Image(systemName: "pencil")
                                         .foregroundStyle(.secondary)
