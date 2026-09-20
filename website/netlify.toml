@@ -1,0 +1,5 @@
+# App repository: set the base directory to "website" in Netlify.
+# Standalone website repository: leave the base directory empty.
+# No build command is needed; publish these static files as they are.
+[build]
+  publish = "."
