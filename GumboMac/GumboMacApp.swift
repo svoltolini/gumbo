@@ -89,6 +89,9 @@ struct GumboMacApp: App {
         player.streamURLProvider = { [library, model, downloads] track in
             downloads.localURL(for: track) ?? library.streamURL(for: track, quality: model.quality)
         }
+        player.artworkProvider = { [library] album in
+            library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
+        }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
@@ -110,6 +113,7 @@ struct GumboMacApp: App {
         }
         profiles.onDeactivate = { [player, library, downloads] in
             player.stop()
+            library.metadataWriter.cancel()
             downloads.activeProfileID = "locked"
             library.loadProfileState()
         }
@@ -162,7 +166,15 @@ struct GumboMacApp: App {
         }
 
         Settings {
-            wired(MacSettingsView().profileSaveErrorAlert())
+            wired(Group {
+                if profiles.isLocked {
+                    ProfilePickerView()
+                } else {
+                    MacSettingsView()
+                        .id(profiles.sessionID)
+                        .id(library.catalogue.driveID + "|" + library.catalogue.rootPath)
+                }
+            }.profileSaveErrorAlert())
                 .frame(minWidth: 760, idealWidth: 820, minHeight: 560, idealHeight: 620)
         }
     }

@@ -260,7 +260,7 @@ struct MacAlbumCollectionView: View {
     @Environment(LibraryStore.self) private var library
 
     var body: some View {
-        let albums = collection.albums.compactMap { library.album(id: $0.id) }
+        let albums = library.albums(matching: collection.query)
         Group {
             if albums.isEmpty {
                 ContentUnavailableView("Collection Unavailable", systemImage: "square.stack", description: Text("These albums are no longer in the current library."))

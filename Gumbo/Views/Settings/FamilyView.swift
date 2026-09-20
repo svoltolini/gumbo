@@ -85,20 +85,15 @@ struct FamilyView: View {
         }
         .confirmationDialog(cloud.isOwner ? "Stop sharing the family?" : "Leave the family?", isPresented: $isConfirmingStop, titleVisibility: .visible) {
             Button(cloud.isOwner ? "Stop sharing" : "Leave", role: .destructive) {
-                Task {
-                    isWorkingOnAccess = true
-                    problem = await model.stopFamilySharing(using: cloud)
-                    isWorkingOnAccess = false
+                guard let authorization = cloud.sharingAuthorization() else { return }
+                performAccess(requiresOwner: cloud.isOwner) {
+                    await model.stopFamilySharing(using: cloud, authorization: authorization)
                 }
             }
         }
         .confirmationDialog("Remove family access?", isPresented: $isConfirmingRemoveAccess, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
-                Task {
-                    isWorkingOnAccess = true
-                    problem = await model.removeFamilyAccess()
-                    isWorkingOnAccess = false
-                }
+                performAccess { await model.removeFamilyAccess() }
             }
         } message: {
             Text("Gumbo will ask the NAS to remove the family account. Access remains until the NAS confirms removal. Existing sessions and files already downloaded may remain available.")
@@ -124,11 +119,7 @@ struct FamilyView: View {
                         .accessibilityLabel("Ready, account \(access.account)")
                 }
                 SettingsButtonRow(symbol: "arrow.triangle.2.circlepath", tint: .blue, title: isWorkingOnAccess ? "Working…" : "Rotate password") {
-                    Task {
-                        isWorkingOnAccess = true
-                        problem = await model.rotateFamilyAccess()
-                        isWorkingOnAccess = false
-                    }
+                    performAccess { await model.rotateFamilyAccess() }
                 }
                 .disabled(isWorkingOnAccess)
                 SettingsButtonRow(symbol: "key.slash", tint: .red, title: "Remove family access", role: .destructive) {
@@ -143,11 +134,7 @@ struct FamilyView: View {
                         .padding(16)
                 }
                 SettingsButtonRow(symbol: "key.fill", tint: .green, title: isWorkingOnAccess ? "Setting up…" : "Set up family access") {
-                    Task {
-                        isWorkingOnAccess = true
-                        problem = await model.setUpFamilyAccess()
-                        isWorkingOnAccess = false
-                    }
+                    performAccess { await model.setUpFamilyAccess() }
                 }
                 .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 SettingsButtonRow(symbol: "person.text.rectangle", tint: .indigo, title: "Use an existing account") {
@@ -236,20 +223,15 @@ struct FamilyView: View {
         }
         .confirmationDialog(cloud.isOwner ? "Stop sharing the family?" : "Leave the family?", isPresented: $isConfirmingStop, titleVisibility: .visible) {
             Button(cloud.isOwner ? "Stop sharing" : "Leave", role: .destructive) {
-                Task {
-                    isWorkingOnAccess = true
-                    problem = await model.stopFamilySharing(using: cloud)
-                    isWorkingOnAccess = false
+                guard let authorization = cloud.sharingAuthorization() else { return }
+                performAccess(requiresOwner: cloud.isOwner) {
+                    await model.stopFamilySharing(using: cloud, authorization: authorization)
                 }
             }
         }
         .confirmationDialog("Remove family access?", isPresented: $isConfirmingRemoveAccess, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
-                Task {
-                    isWorkingOnAccess = true
-                    problem = await model.removeFamilyAccess()
-                    isWorkingOnAccess = false
-                }
+                performAccess { await model.removeFamilyAccess() }
             }
         } message: {
             Text("Gumbo will ask the NAS to remove the family account. Access remains until the NAS confirms removal. Existing sessions and files already downloaded may remain available.")
@@ -264,11 +246,7 @@ struct FamilyView: View {
                 LabeledContent("Account", value: access.account)
                 LabeledContent("Status", value: "Ready")
                 Button(isWorkingOnAccess ? "Working…" : "Rotate password", systemImage: "arrow.triangle.2.circlepath") {
-                    Task {
-                        isWorkingOnAccess = true
-                        problem = await model.rotateFamilyAccess()
-                        isWorkingOnAccess = false
-                    }
+                    performAccess { await model.rotateFamilyAccess() }
                 }
                 .disabled(isWorkingOnAccess)
                 Button("Remove family access", role: .destructive) { isConfirmingRemoveAccess = true }
@@ -280,11 +258,7 @@ struct FamilyView: View {
                         .foregroundStyle(.secondary)
                 }
                 Button(isWorkingOnAccess ? "Setting up…" : "Set up family access", systemImage: "key") {
-                    Task {
-                        isWorkingOnAccess = true
-                        problem = await model.setUpFamilyAccess()
-                        isWorkingOnAccess = false
-                    }
+                    performAccess { await model.setUpFamilyAccess() }
                 }
                 .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 Button("Use an existing account", systemImage: "person.text.rectangle") { isEnteringAccount = true }
@@ -344,6 +318,7 @@ struct InstructionRow: View {
 #if os(tvOS)
 /// An account the owner made in DSM by hand, checked with a sign-in before it is kept.
 private struct FamilyAccountSheet: View {
+    @Environment(ProfileStore.self) private var profiles
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var account = ""
@@ -397,7 +372,10 @@ private struct FamilyAccountSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isChecking ? "Checking…" : "Use") {
+                        guard let session = profiles.sessionID, profiles.canManageProfiles else { return }
+                        let connection = model.connection
                         Task {
+                            guard profiles.sessionID == session, profiles.canManageProfiles, model.connection == connection else { return }
                             isChecking = true
                             problem = await model.useFamilyAccess(account: account.trimmingCharacters(in: .whitespaces), password: password)
                             isChecking = false
@@ -414,6 +392,7 @@ private struct FamilyAccountSheet: View {
 #else
 /// A separate NAS account, verified before Gumbo stores or shares its credentials.
 private struct FamilyAccountSheet: View {
+    @Environment(ProfileStore.self) private var profiles
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var account = ""
@@ -467,7 +446,10 @@ private struct FamilyAccountSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isChecking ? "Checking…" : "Use") {
+                        guard let session = profiles.sessionID, profiles.canManageProfiles else { return }
+                        let connection = model.connection
                         Task {
+                            guard profiles.sessionID == session, profiles.canManageProfiles, model.connection == connection else { return }
                             isChecking = true
                             problem = await model.useFamilyAccess(account: account.trimmingCharacters(in: .whitespaces), password: password)
                             isChecking = false
@@ -484,3 +466,18 @@ private struct FamilyAccountSheet: View {
     }
 }
 #endif
+
+private extension FamilyView {
+    func performAccess(requiresOwner: Bool = true, _ operation: @escaping @MainActor () async -> String?) {
+        guard let session = profiles.sessionID,
+              !requiresOwner || permissions.canManageFamily else { return }
+        let connection = model.connection
+        Task {
+            guard profiles.sessionID == session, model.connection == connection,
+                  !requiresOwner || permissions.canManageFamily else { return }
+            isWorkingOnAccess = true
+            problem = await operation()
+            isWorkingOnAccess = false
+        }
+    }
+}

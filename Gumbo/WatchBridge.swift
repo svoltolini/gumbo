@@ -13,11 +13,19 @@ import WatchConnectivity
 @MainActor
 final class WatchBridge: NSObject, WCSessionDelegate {
     /// Asked for the current state whenever a sync is due.
-    var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?)?)?
+    var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?, scope: String)?)?
     private var lastCatalogueKey: Data?
     private var lastCredentials: WatchCredentials?
 
+    private static let authorizationKey = "watch.authorization"
+    private var authorization: WatchAuthorization
+    private var authorizationScope: String?
+
     override init() {
+        let saved = WatchAuthorization.decode(UserDefaults.standard.data(forKey: Self.authorizationKey))
+            ?? WatchAuthorization(revision: 0, isGranted: false)
+        authorization = saved.successor(granted: false)
+        UserDefaults.standard.set(authorization.encoded, forKey: Self.authorizationKey)
         super.init()
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
@@ -28,16 +36,31 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// profile is locked or switched, so another profile's data never leaks. The revocation is
     /// queued via `transferUserInfo` so a disconnected Watch receives it on next sync.
     func revoke() {
-        guard WCSession.isSupported() else { return }
-        let session = WCSession.default
-        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
-            DiagnosticsLog.shared.record("Watch revoke skipped: state \(session.activationState.rawValue), paired \(session.isPaired), app installed \(session.isWatchAppInstalled)")
-            return
-        }
+        authorization = authorization.successor(granted: false)
+        authorizationScope = nil
+        persistAuthorization()
         lastCatalogueKey = nil
         lastCredentials = nil
-        _ = session.transferUserInfo(["kind": "revoke", "timestamp": Date.now.timeIntervalSince1970])
-        DiagnosticsLog.shared.record("Watch revoke: queued credential and catalogue revocation")
+        sendRevocation()
+    }
+
+    private func persistAuthorization() {
+        UserDefaults.standard.set(authorization.encoded, forKey: Self.authorizationKey)
+    }
+
+    private func sendRevocation() {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated,
+              WCSession.default.isPaired, WCSession.default.isWatchAppInstalled else { return }
+        _ = WCSession.default.transferUserInfo(["kind": "revoke", "authorization": authorization.encoded!])
+    }
+
+    private func authorize(scope: String) {
+        guard !authorization.isGranted || authorizationScope != scope else { return }
+        authorization = authorization.successor(granted: true)
+        authorizationScope = scope
+        persistAuthorization()
+        lastCatalogueKey = nil
+        lastCredentials = nil
     }
 
     /// Sends whatever changed since the last time; nothing when no watch is paired.
@@ -49,14 +72,15 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             return
         }
         guard let state = provider?() else {
-            DiagnosticsLog.shared.record("Watch sync skipped: nothing to send yet")
+            if authorization.isGranted { revoke() } else { sendRevocation() }
             return
         }
+        authorize(scope: state.scope)
         let catalogue = state.catalogue
         if let key = catalogue.contentKey, key != lastCatalogueKey, let data = try? JSONEncoder().encode(catalogue) {
             let url = FileManager.default.temporaryDirectory.appending(path: "watch-catalogue-\(UUID().uuidString).json")
             if (try? data.write(to: url)) != nil {
-                _ = session.transferFile(url, metadata: ["kind": "catalogue"])
+                _ = session.transferFile(url, metadata: ["kind": "catalogue", "authorization": authorization.encoded!])
                 lastCatalogueKey = key
                 DiagnosticsLog.shared.record("Watch sync: sent \(catalogue.playlists.count) playlists (\(data.count) bytes)")
             }
@@ -64,6 +88,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         if let credentials = state.credentials, credentials != lastCredentials {
             var payload: [String: Any] = [
                 "kind": "credentials",
+                "authorization": authorization.encoded!,
                 "baseURL": credentials.baseURL.absoluteString,
                 "account": credentials.account,
                 "password": credentials.password,
@@ -119,8 +144,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     private func syncReply() -> [String: Any] {
-        guard let state = provider?() else { return ["status": "notReady"] }
-        var reply: [String: Any] = ["status": "ok"]
+        guard let state = provider?() else {
+            if authorization.isGranted { revoke() }
+            return ["status": "revoked", "authorization": authorization.encoded!]
+        }
+        authorize(scope: state.scope)
+        var reply: [String: Any] = ["status": "ok", "authorization": authorization.encoded!]
         if let data = try? JSONEncoder().encode(state.catalogue),
            let packed = try? (data as NSData).compressed(using: .lzfse) as Data, packed.count <= 60_000 {
             reply["catalogue"] = packed

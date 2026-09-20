@@ -20,6 +20,7 @@ struct CloudAccountState: Codable {
     /// Local profiles known to belong to this account; a different account cannot upload them.
     var profileIDs: Set<String> = []
     var zones: [String: Zone] = [:]
+    var retiredFamilyProfileIDs: Set<String>? = nil
 }
 
 struct CloudPersistence {
@@ -41,6 +42,10 @@ struct CloudPersistence {
         return ["cloud-system-fields.json", "cloud-remote-stamps.json"].contains {
             FileManager.default.fileExists(atPath: directory.appending(path: $0).path)
         }
+    }
+
+    func pendingFamilyRetirements() throws -> Set<String> {
+        try accountSnapshots().reduce(into: Set<String>()) { $0.formUnion($1.retiredFamilyProfileIDs ?? []) }
     }
 
     private func accountSnapshots() throws -> [CloudAccountState] {

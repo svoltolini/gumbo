@@ -2,7 +2,7 @@
 
 This document defines the complete acceptance testing required before making Gumbo 1.0 publicly available. It consolidates requirements from [#12](https://github.com/svoltolini/gumbo/issues/12) and the [release audit](RELEASE-AUDIT-2026-09-14.md).
 
-**Current TestFlight build**: 1.0 (202609151900)  
+**Historical build reference**: 1.0 (202609151900); this is not a verified TestFlight build for the separate Gumbo identity. See [#118](https://github.com/svoltolini/gumbo/issues/118) and [#119](https://github.com/svoltolini/gumbo/issues/119).
 **Audit baseline**: `73f85b74ab60a9707de2f744161b172d21ef5b4e`
 
 ## Testing Layers
@@ -21,7 +21,7 @@ This document defines the complete acceptance testing required before making Gum
 
 These checks run without physical devices or TestFlight and are captured in `scripts/preflight-validation.sh`.
 
-### Package Tests (190+ tests)
+### Package Tests
 
 Run the full GumboCore test suite:
 

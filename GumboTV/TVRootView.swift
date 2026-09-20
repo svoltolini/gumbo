@@ -4,17 +4,20 @@ import SwiftUI
 /// The first-run connection flow, then the tabs, with the profile picker over either until someone is in.
 struct TVRootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(LibraryStore.self) private var library
     @Environment(ProfileStore.self) private var profiles
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            if model.stage == .ready {
+            if model.stage == .ready, !profiles.isLocked {
                 TVMainView()
+                    .id(profiles.sessionID)
+                    .id(library.catalogue.driveID + "|" + library.catalogue.rootPath)
                     .allowsHitTesting(!profiles.isLocked)
                     .accessibilityHidden(profiles.isLocked)
                     .transition(.opacity)
-            } else {
+            } else if model.stage != .ready {
                 ConnectFlowView()
                     .transition(.opacity)
             }
@@ -25,7 +28,7 @@ struct TVRootView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: model.stage == .ready)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: profiles.isLocked)
+        .onChange(of: profiles.sessionID) { _, _ in model.clearProfileNavigation() }
     }
 }
 
@@ -76,7 +79,9 @@ struct TVMainView: View {
         .onChange(of: model.albumNavigationRequest) { _, _ in
             tab = .library
         }
+        .onChange(of: model.playlistNavigationRequest) { _, _ in tab = .playlists }
         .onChange(of: tab) { _, tab in
+            if tab != .playlists { model.cancelPendingPlaylistNavigation() }
             if tab != .library { model.cancelPendingAlbumNavigation() }
         }
         .task {

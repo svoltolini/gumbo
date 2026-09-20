@@ -29,16 +29,16 @@ private struct CoverImage<Placeholder: View>: View {
     let size: ArtworkSize
     let shape: RoundedRectangle
     @ViewBuilder let placeholder: () -> Placeholder
-    @State private var loaded: CGImage?
+    @State private var loaded: (key: String, image: CGImage)?
 
-    private var key: String { "\(album.id)|\(version)|\(size.pixels)" }
+    private var key: String { "\(url.absoluteString)|\(album.id)|\(version)|\(size.pixels)" }
 
     /// A smaller copy already decoded for another screen stands in while the right size loads.
     private var image: CGImage? {
-        if let loaded { return loaded }
+        if let loaded, loaded.key == key { return loaded.image }
         if let exact = CoverImageCache.shared.cached(key) { return exact }
         for pixels in [CoverImageCache.thumbnailPixels, CoverImageCache.rowPixels] where pixels < size.pixels {
-            if let smaller = CoverImageCache.shared.cached("\(album.id)|\(version)|\(pixels)") { return smaller }
+            if let smaller = CoverImageCache.shared.cached("\(url.absoluteString)|\(album.id)|\(version)|\(pixels)") { return smaller }
         }
         return nil
     }
@@ -55,8 +55,14 @@ private struct CoverImage<Placeholder: View>: View {
             }
         }
         .task(id: key) {
-            guard CoverImageCache.shared.cached(key) == nil else { return }
-            loaded = await CoverImageCache.shared.image(url: url, key: key, maxPixelSize: size.pixels)
+            let requestKey = key
+            if let cached = CoverImageCache.shared.cached(requestKey) {
+                loaded = (requestKey, cached)
+                return
+            }
+            let decoded = await CoverImageCache.shared.image(url: url, key: requestKey, maxPixelSize: size.pixels)
+            guard !Task.isCancelled, let decoded else { return }
+            loaded = (requestKey, decoded)
         }
     }
 }

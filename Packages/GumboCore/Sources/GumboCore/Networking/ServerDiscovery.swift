@@ -33,7 +33,9 @@ public final class ServerDiscovery {
     public private(set) var servers: [DiscoveredServer] = []
     public private(set) var isBrowsing = false
     private var browsers: [NWBrowser] = []
-    private var pending: Set<String> = []
+    private var attempts = DiscoveryAttempts()
+    private var resolutions: [String: NWConnection] = [:]
+    private var timeouts: [String: Task<Void, Never>] = [:]
 
     private nonisolated struct Candidate: Sendable {
         let name: String
@@ -45,6 +47,7 @@ public final class ServerDiscovery {
     public func start() {
         stop()
         isBrowsing = true
+        let generation = attempts.generation
         for type in ["_http._tcp", "_smb._tcp"] {
             let parameters = NWParameters.tcp
             parameters.includePeerToPeer = false
@@ -57,7 +60,8 @@ public final class ServerDiscovery {
                     return Candidate(name: name, type: type, endpoint: result.endpoint, txt: txt)
                 }
                 Task { @MainActor [weak self] in
-                    self?.consider(candidates)
+                    guard let self, self.isBrowsing, self.attempts.generation == generation else { return }
+                    self.consider(candidates)
                 }
             }
             browser.start(queue: .main)
@@ -66,6 +70,12 @@ public final class ServerDiscovery {
     }
 
     public func stop() {
+        attempts.reset()
+        for task in timeouts.values { task.cancel() }
+        timeouts = [:]
+        for connection in resolutions.values { connection.cancel() }
+        resolutions = [:]
+        servers = []
         browsers.forEach { $0.cancel() }
         browsers.removeAll()
         isBrowsing = false
@@ -74,9 +84,8 @@ public final class ServerDiscovery {
     private func consider(_ candidates: [Candidate]) {
         for candidate in candidates where looksLikeSynology(candidate) {
             let key = candidate.type + candidate.name
-            guard !pending.contains(key) else { continue }
-            pending.insert(key)
-            resolve(candidate)
+            guard let token = attempts.begin(key) else { continue }
+            resolve(candidate, key: key, token: token)
         }
     }
 
@@ -90,12 +99,13 @@ public final class ServerDiscovery {
     }
 
     /// Opens a short-lived connection to learn the numeric host and port behind a Bonjour name.
-    private func resolve(_ candidate: Candidate) {
+    private func resolve(_ candidate: Candidate, key: String, token: UUID) {
         let parameters = NWParameters.tcp
         if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
             ip.version = .v4
         }
         let connection = NWConnection(to: candidate.endpoint, using: parameters)
+        resolutions[key] = connection
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
@@ -109,12 +119,11 @@ public final class ServerDiscovery {
                     }
                     resolved = (hostText, Int(port.rawValue))
                 }
-                connection.cancel()
                 let model = candidate.txt["model"]
                 let name = candidate.name
                 let type = candidate.type
                 Task { @MainActor [weak self] in
-                    guard let self, let (host, port) = resolved else { return }
+                    guard let self, self.finish(key, token: token), let (host, port) = resolved else { return }
                     // SMB tells us the host only; DSM's web API lives on 5000.
                     let dsmPort = type.hasPrefix("_smb") ? 5000 : port
                     let server = DiscoveredServer(name: model.map { "\(name) (\($0))" } ?? name, host: host.replacingOccurrences(of: "%en0", with: ""), port: dsmPort, model: model)
@@ -123,11 +132,40 @@ public final class ServerDiscovery {
                     }
                 }
             case .failed, .cancelled:
-                connection.cancel()
+                Task { @MainActor [weak self] in _ = self?.finish(key, token: token) }
             default:
                 break
             }
         }
+        timeouts[key] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            _ = self?.finish(key, token: token)
+        }
         connection.start(queue: .main)
+    }
+    @discardableResult
+    private func finish(_ key: String, token: UUID) -> Bool {
+        guard attempts.finish(key, token: token) else { return false }
+        timeouts.removeValue(forKey: key)?.cancel()
+        resolutions.removeValue(forKey: key)?.cancel()
+        return isBrowsing
+    }
+}
+
+/// Failed, timed-out and cancelled resolutions must free their key without affecting a newer retry.
+nonisolated struct DiscoveryAttempts {
+    private(set) var generation = UUID()
+    private var pending: [String: UUID] = [:]
+    mutating func reset() { generation = UUID(); pending = [:] }
+    mutating func begin(_ key: String) -> UUID? {
+        guard pending[key] == nil else { return nil }
+        let token = UUID()
+        pending[key] = token
+        return token
+    }
+    mutating func finish(_ key: String, token: UUID) -> Bool {
+        guard pending[key] == token else { return false }
+        pending[key] = nil
+        return true
     }
 }

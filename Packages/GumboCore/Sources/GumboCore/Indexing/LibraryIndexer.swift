@@ -124,6 +124,7 @@ public final class LibraryIndexer {
         lastProgressPublish = .distantPast
         recordDiagnostics("Scan started at \(rootPath) on \(drive.displayName)")
         if forceMetadataReread { recordDiagnostics("Reading all song tags again was requested") }
+        let sourceCovers = CoverStore.scopedDirectory(driveID: drive.id, rootPath: rootPath)
         task = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -133,6 +134,7 @@ public final class LibraryIndexer {
                     task = nil
                 }
             }
+            await CoverStore.$directoryOverride.withValue(sourceCovers) {
             await CoverStore.$indexingRun.withValue(run) {
                 do {
                     let scan = try await Self.scan(drive: drive, root: rootPath, recordDiagnostics: recordDiagnostics) { [weak self] scanned, found in
@@ -210,6 +212,7 @@ public final class LibraryIndexer {
                     }
                 }
             }
+        }
         }
     }
 
@@ -561,12 +564,6 @@ public final class LibraryIndexer {
     }
 
     nonisolated private static func readFLAC(path: String, drive: any RemoteDrive) async throws -> FLACInfo? {
-        let head = try await drive.read(path, range: 0..<FLACHeader.initialRead)
-        guard let info = FLACHeader.parse(head) else { return nil }
-        if let needed = info.neededPrefix, Int64(needed) > Int64(head.count), Int64(needed) <= FLACHeader.maximumRead {
-            let longer = try await drive.read(path, range: 0..<Int64(needed))
-            return FLACHeader.parse(longer) ?? info
-        }
-        return info
+        try await FLACHeader.read { range in try await drive.read(path, range: range) }
     }
 }

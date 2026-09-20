@@ -47,12 +47,12 @@ struct ScanStatusButton: View {
     }
 
     private var idleIcon: some View {
-        Image(systemName: "checkmark.icloud")
+        Image(systemName: model.indexingFailure != nil ? "exclamationmark.icloud" : (model.scanCompleted ? "checkmark.icloud" : "icloud"))
             .foregroundStyle(.secondary)
     }
 
     private var accessibilityLabel: String {
-        isScanning ? "Library scanning" : "Library up to date"
+        isScanning ? "Library scanning" : model.scanStatusText
     }
 
     private var accessibilityValue: String {
@@ -62,7 +62,7 @@ struct ScanStatusButton: View {
             }
             return "Scanning in progress"
         }
-        return model.lastScanText
+        return model.indexingFailure?.title ?? model.lastScanText
     }
 }
 
@@ -79,6 +79,10 @@ struct ScanDetailSheet: View {
             List {
                 Section {
                     statusRow
+                    if let failure = model.indexingFailure {
+                        Text(failure.title).foregroundStyle(.red)
+                        if let detail = failure.detail { Text(detail).foregroundStyle(.secondary) }
+                    }
                     lastScanRow
                     trackCountRow
                 }
@@ -112,8 +116,8 @@ struct ScanDetailSheet: View {
             Label {
                 Text("Status")
             } icon: {
-                Image(systemName: isScanning ? "arrow.triangle.2.circlepath" : "checkmark.circle")
-                    .foregroundStyle(isScanning ? .orange : .green)
+                Image(systemName: isScanning ? "arrow.triangle.2.circlepath" : (model.indexingFailure != nil ? "exclamationmark.circle" : (model.scanCompleted ? "checkmark.circle" : "clock")))
+                    .foregroundStyle(model.scanCompleted ? Color.green : Color.orange)
             }
             Spacer()
             if isScanning {
@@ -125,7 +129,7 @@ struct ScanDetailSheet: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("Up to date")
+                Text(model.scanStatusText)
                     .foregroundStyle(.secondary)
             }
         }

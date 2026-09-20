@@ -6,26 +6,26 @@ struct LibraryHomeView: View {
     @Environment(LibraryStore.self) private var library
 
     var body: some View {
-        shelfHeader("Recently added", albums: library.recentlyAdded)
+        shelfHeader("Recently added", query: .recentlyAdded)
         AlbumCarousel(albums: Array(library.recentlyAdded.prefix(12)), cardWidth: 164 * Metrics.scale, cornerRadius: 12 * Metrics.scale, spacing: 14 * Metrics.scale, source: "recent")
             .padding(.top, 12)
 
         if !library.recentlyPlayed.isEmpty {
-            shelfHeader("Recently played", albums: library.recentlyPlayed)
+            shelfHeader("Recently played", query: .recentlyPlayed)
                 .padding(.top, 26)
             AlbumCarousel(albums: Array(library.recentlyPlayed.prefix(12)), cardWidth: 136 * Metrics.scale, cornerRadius: 10 * Metrics.scale, spacing: 12 * Metrics.scale, source: "played")
                 .padding(.top, 12)
         }
 
         ForEach(library.genreShelves) { genre in
-            shelfHeader(genre.name, albums: genre.albums)
+            shelfHeader(genre.name, query: .genre(genre.name))
                 .padding(.top, 26)
             AlbumCarousel(albums: Array(genre.albums.prefix(12)), cardWidth: 136 * Metrics.scale, cornerRadius: 10 * Metrics.scale, spacing: 12 * Metrics.scale, source: "genre:\(genre.name)")
                 .padding(.top, 12)
         }
 
         if !library.hiResAlbums.isEmpty {
-            shelfHeader("Lossless, high resolution", albums: library.hiResAlbums)
+            shelfHeader("Lossless, high resolution", query: .highResolution)
                 .padding(.top, 26)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
@@ -46,14 +46,22 @@ struct LibraryHomeView: View {
         }
     }
 
-    private func shelfHeader(_ title: String, albums: [Album]) -> some View {
-        SectionHeader(title: title)
-            .overlay(alignment: .trailing) {
-                NavigationLink("See all", value: AlbumCollection(title: title, albums: albums))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.trailing, 24)
+    private func shelfHeader(_ title: String, query: AlbumCollectionQuery) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(title).font(.title3.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                NavigationLink("See all", value: AlbumCollection(title: title, query: query))
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize()
             }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.title3.weight(.semibold))
+                NavigationLink("See all", value: AlbumCollection(title: title, query: query))
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 24)
     }
 }
 

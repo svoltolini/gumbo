@@ -16,6 +16,7 @@ public final class ProfileStore {
         public nonisolated enum Kind: Equatable, Sendable {
             /// The document could not be read. Its files are untouched and the profile's writes are held.
             case unreadable(profileID: String)
+            case unreadableIndex
             /// A journal write failed, so the edit was not applied.
             case rejectedEdit
             /// A background checkpoint failed; the journal keeps the accepted edits for the next attempt.
@@ -61,12 +62,14 @@ public final class ProfileStore {
     private let storageDirectory: URL
     private let defaults: UserDefaults
     private let log: (String) -> Void
+    private let retirementIntentProvider: () throws -> Set<String>
     private let persistence: ProfilePersistence
     @ObservationIgnored private var persistenceTokens: [String: ProfilePersistenceToken] = [:]
     @ObservationIgnored private var failedSnapshotToken: ProfilePersistenceToken?
     private var authenticationGeneration = UUID()
     /// Profiles whose document could not be read. Their writes are held so the original files
     /// stay exactly as they are until the document reads again or the person sets it aside.
+    public private(set) var isProfileIndexReadable = true
     private var unreadableStateIDs: Set<String> = []
     /// The profile whose opening just failed on an unreadable document, with the authentication
     /// that had already admitted it. It may be opened without that data while the alert is up.
@@ -87,7 +90,7 @@ public final class ProfileStore {
     public var active: Profile? { profiles.first { $0.id == activeID } }
     public var isLocked: Bool { active == nil || sessionID == nil }
     public var owner: Profile? { profiles.first { $0.role == .owner } ?? profiles.first }
-    public var canAddProfile: Bool { profiles.count < Profile.limit }
+    public var canAddProfile: Bool { isProfileIndexReadable && profiles.count < Profile.limit }
 
     /// Managing another person requires the family owner's profile to be open on their device.
     public var canManageProfiles: Bool { !isLocked && active?.role == .owner && (sync?.isOwner ?? true) }
@@ -98,22 +101,33 @@ public final class ProfileStore {
     }
 
     public convenience init() {
-        self.init(directory: Self.directory, defaults: .standard, log: { diagnostics($0) })
+        self.init(directory: Self.directory, defaults: .standard, log: { diagnostics($0) },
+                  retirementIntentProvider: { try CloudPersistence(directory: CloudSync.persistenceDirectory).pendingFamilyRetirements() })
     }
 
     /// Separate storage keeps policy tests away from the person's saved profiles and preferences.
-    init(directory: URL, defaults: UserDefaults, log: @escaping (String) -> Void = { _ in }, persistenceHooks: ProfilePersistenceHooks = .init()) {
+    init(directory: URL, defaults: UserDefaults, log: @escaping (String) -> Void = { _ in }, persistenceHooks: ProfilePersistenceHooks = .init(), retirementIntentProvider: @escaping () throws -> Set<String> = { [] }) {
         storageDirectory = directory
         self.defaults = defaults
         self.log = log
+        self.retirementIntentProvider = retirementIntentProvider
         persistence = ProfilePersistence(directory: directory, hooks: persistenceHooks)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if let stored = loadProfiles() {
-            profiles = stored.isEmpty ? [Self.recoveryProfile(isOwner: true, account: nil)] : stored
-            if stored.isEmpty { saveProfiles() }
-        } else {
-            profiles = [migrateLegacyData()]
-            saveProfiles()
+        do {
+            if let stored = try loadAvailableProfiles() {
+                profiles = stored
+                if stored.isEmpty, try retirementIntentProvider().isEmpty {
+                    profiles = [Self.recoveryProfile(isOwner: true, account: nil)]
+                    saveProfiles()
+                }
+            } else {
+                profiles = [migrateLegacyData()]
+                saveProfiles()
+            }
+        } catch {
+            isProfileIndexReadable = false
+            persistenceFailure = PersistenceFailure(kind: .unreadableIndex, title: "Profiles couldn't be read",
+                message: "The saved profile list could not be read. Its files have been kept unchanged. Restore the profile list from a backup, then try again.")
         }
         lastActiveID = defaults.string(forKey: "profiles.active")
     }
@@ -134,7 +148,7 @@ public final class ProfileStore {
 
     @discardableResult
     public func activate(_ profile: Profile, pin: String? = nil) -> Bool {
-        guard let current = profiles.first(where: { $0.id == profile.id }) else { return false }
+        guard isProfileIndexReadable, let current = profiles.first(where: { $0.id == profile.id }) else { return false }
         if current.id == activeID, sessionID != nil { return true }
         if let record = current.pin {
             guard let pin, record.matches(pin) else { return false }
@@ -251,21 +265,57 @@ public final class ProfileStore {
         updated.name = updated.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !updated.name.isEmpty else { return false }
         // Roles and account ownership belong to the family sync flow, never a form draft.
-        saveUpdated(updated)
-        return true
+        return saveUpdated(updated)
     }
 
-    private func saveUpdated(_ profile: Profile, echo: Bool = true) {
-        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+    @discardableResult
+    private func saveUpdated(_ profile: Profile, echo: Bool = true) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return false }
         var updated = profile
+        updated.updatedAt = .now
+        var candidate = profiles
+        candidate[index] = updated
+        guard saveProfiles(candidate) else { return false }
         if updated.pin != profiles[index].pin {
             defaults.removeObject(forKey: Self.biometricsKey(profile.id))
             authenticationGeneration = UUID()
         }
-        updated.updatedAt = .now
-        profiles[index] = updated
-        saveProfiles()
+        profiles = candidate
         if echo { sync?.profileChanged(updated) }
+        return true
+    }
+
+    /// Retire former-family copies locally, without deleting anything in the family's cloud zone.
+    /// The cloud journal retains the IDs until all file removals succeed, making retries idempotent.
+    func retireFamilyProfiles(_ ids: Set<String>) -> Bool {
+        guard isProfileIndexReadable else { return false }
+        let remaining = profiles.filter { !ids.contains($0.id) }
+        if let activeID, ids.contains(activeID) { lock() }
+        profiles = remaining
+        let retirementURL = storageDirectory.appending(path: "family-retirement.json")
+        do {
+            // A separate durable exclusion also protects relaunch if replacing profiles.json fails.
+            try JSONEncoder().encode(ids).write(to: retirementURL, options: .atomic)
+            guard saveProfiles(remaining) else { return false }
+            for id in ids {
+                try persistence.retire(id: id)
+                let photo = storageDirectory.appending(path: "\(id)-photo.jpg")
+                if FileManager.default.fileExists(atPath: photo.path) { try FileManager.default.removeItem(at: photo) }
+                persistenceTokens[id] = nil
+                unreadableStateIDs.remove(id)
+                defaults.removeObject(forKey: Self.biometricsKey(id))
+            }
+            if let lastActiveID, ids.contains(lastActiveID) {
+                self.lastActiveID = nil
+                defaults.removeObject(forKey: "profiles.active")
+            }
+            try FileManager.default.removeItem(at: retirementURL)
+            return true
+        } catch {
+            persistenceFailure = PersistenceFailure(kind: .incompleteRemoval, title: "Family data couldn't be removed",
+                message: "Some previous family files could not be removed. Sync will retry before continuing.")
+            return false
+        }
     }
 
     /// Removes the profile and its data; the last profile cannot go.
@@ -325,8 +375,7 @@ public final class ProfileStore {
               sync?.containsProfileInCurrentAccount(profile.id) == true,
               var current = profiles.first(where: { $0.id == profile.id }) else { return false }
         current.userRecordName = user
-        saveUpdated(current)
-        return true
+        return saveUpdated(current)
     }
 
     /// Initial account binding during sync applies only to the authenticated active profile.
@@ -349,15 +398,27 @@ public final class ProfileStore {
     public func setPhoto(_ data: Data?, for profile: Profile) -> Bool {
         guard canEdit(profile), var updated = profiles.first(where: { $0.id == profile.id }) else { return false }
         let url = storageDirectory.appending(path: "\(profile.id)-photo.jpg")
-        if let data, let resized = Self.jpeg(from: data, maxPixels: 640) {
-            try? resized.write(to: url, options: .atomic)
-            updated.avatar.photoVersion = (updated.avatar.photoVersion ?? 0) + 1
-        } else {
-            try? FileManager.default.removeItem(at: url)
-            updated.avatar.photoVersion = nil
+        let previous = try? Data(contentsOf: url)
+        do {
+            if let data {
+                guard let resized = Self.jpeg(from: data, maxPixels: 640) else { throw CocoaError(.fileReadCorruptFile) }
+                try resized.write(to: url, options: .atomic)
+                updated.avatar.photoVersion = (updated.avatar.photoVersion ?? 0) + 1
+            } else {
+                if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                updated.avatar.photoVersion = nil
+            }
+            guard saveUpdated(updated) else {
+                if let previous { try previous.write(to: url, options: .atomic) }
+                else if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                return false
+            }
+            return true
+        } catch {
+            persistenceFailure = PersistenceFailure(kind: .rejectedEdit, title: "Photo couldn't be saved",
+                message: "The profile photo could not be saved on this device. Try again when storage is available.")
+            return false
         }
-        saveUpdated(updated)
-        return true
     }
 
     /// A photo that arrived from iCloud for a profile.
@@ -470,6 +531,18 @@ public final class ProfileStore {
               profiles[index].localOrigin == .recovery(account: nil) else { return false }
         var updated = profiles
         updated[index].localOrigin = .recovery(account: account)
+        guard saveProfiles(updated) else { return false }
+        profiles = updated
+        return true
+    }
+
+    /// The departing account can manage its retained personal profile again.
+    func ensurePersonalOwner(in ids: Set<String>) -> Bool {
+        guard !profiles.contains(where: { ids.contains($0.id) && $0.role == .owner }),
+              let index = profiles.firstIndex(where: { ids.contains($0.id) }) else { return true }
+        var updated = profiles
+        updated[index].role = .owner
+        updated[index].updatedAt = .now
         guard saveProfiles(updated) else { return false }
         profiles = updated
         return true
@@ -684,18 +757,43 @@ public final class ProfileStore {
         return decoder
     }
 
-    private func loadProfiles() -> [Profile]? {
-        guard let data = try? Data(contentsOf: profilesURL) else { return nil }
-        return try? Self.decoder.decode([Profile].self, from: data)
+    /// Initialization and recovery consume the same durable exclusions before exposing profiles.
+    private func loadAvailableProfiles() throws -> [Profile]? {
+        var retiring = try retirementIntentProvider()
+        let marker = storageDirectory.appending(path: "family-retirement.json")
+        if FileManager.default.fileExists(atPath: marker.path) {
+            retiring.formUnion(try JSONDecoder().decode(Set<String>.self, from: Data(contentsOf: marker)))
+        }
+        guard let stored = try loadProfiles() else {
+            // A missing index during retirement is not a first launch and must not migrate old data.
+            return retiring.isEmpty ? nil : []
+        }
+        return stored.filter { !retiring.contains($0.id) }
+    }
+
+    private func loadProfiles() throws -> [Profile]? {
+        do { return try Self.decoder.decode([Profile].self, from: Data(contentsOf: profilesURL)) }
+        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
+    }
+
+    public func retryProfileIndex() {
+        guard !isProfileIndexReadable, let stored = try? loadAvailableProfiles() else { return }
+        profiles = stored
+        isProfileIndexReadable = true
+        persistenceFailure = nil
+        openAutomaticallyIfPossible()
     }
 
     @discardableResult
     private func saveProfiles(_ value: [Profile]? = nil) -> Bool {
+        guard isProfileIndexReadable else { return false }
         do {
             try Self.encoder.encode(value ?? profiles).write(to: profilesURL, options: .atomic)
             return true
         } catch {
             log("The profiles could not be saved on this device.")
+            persistenceFailure = PersistenceFailure(kind: .rejectedEdit, title: "Profiles couldn't be saved",
+                message: "The profile change could not be saved on this device. Your previous profile settings are still in use.")
             return false
         }
     }

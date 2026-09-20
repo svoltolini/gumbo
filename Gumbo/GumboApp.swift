@@ -164,6 +164,9 @@ struct GumboApp: App {
         player.streamURLProvider = { [library, model, downloads] track in
             downloads.localURL(for: track) ?? library.streamURL(for: track, quality: model.quality)
         }
+        player.artworkProvider = { [library] album in
+            library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
+        }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
@@ -186,6 +189,7 @@ struct GumboApp: App {
         }
         profiles.onDeactivate = { [model, player, library, downloads, widgetFeed, watchBridge] in
             player.stop()
+            library.metadataWriter.cancel()
             // The picker must not have the player sheet, with its favourite and playlist buttons, over it.
             model.isNowPlayingPresented = false
             downloads.activeProfileID = "locked"
@@ -219,7 +223,7 @@ struct GumboApp: App {
             guard model.stage == .ready, let active = profiles.active else { return nil }
             let profileName = active.name
             let catalogue = library.watchCatalogue(serverName: model.connection?.name ?? "Gumbo", profileName: profileName)
-            return (catalogue, model.watchCredentials())
+            return (catalogue, model.watchCredentials(), "\(profiles.sessionID?.uuidString ?? "locked")|\(library.catalogue.driveID)|\(library.catalogue.rootPath)")
         }
         // Play tapped on a widget cover: the system performs the intent inside the app, in the
         // background when it has to launch it for that.

@@ -6,6 +6,8 @@ This checklist provides concrete validation steps for every App Store submission
 
 ## Quick Reference
 
+These are the identifiers and version configured in the repository. They do not establish a signed archive or TestFlight upload for the new identity; fresh evidence is required in [#118](https://github.com/svoltolini/gumbo/issues/118).
+
 | Platform | Bundle ID | Build |
 | --- | --- | --- |
 | iOS (iPhone/iPad) | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |

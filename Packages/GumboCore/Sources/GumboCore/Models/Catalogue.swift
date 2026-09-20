@@ -249,46 +249,20 @@ public nonisolated struct Catalogue: Codable, Sendable {
         albums = Self.mergingSameTitles(regrouped).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
-    /// Second pass across folders: the same title filed under "Kygo" in one folder and "Kygo & Guest" in
-    /// another is still one album when the credits share an artist. Different artists with a same-named
-    /// album are left alone.
+    /// Cross-folder grouping requires the same album artist identity. Shared title or guest
+    /// credits alone cannot establish that two folders contain the same album.
     public nonisolated static func mergingSameTitles(_ albums: [Album]) -> [Album] {
-        var byTitle: [String: [Int]] = [:]
-        for (index, album) in albums.enumerated() {
-            byTitle[album.title.lowercased(), default: []].append(index)
+        var groups: [String: [Album]] = [:]
+        var order: [String] = []
+        for album in albums {
+            let key = Album.makeID(title: album.title, artist: album.artist)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(album)
         }
-        var result: [Album] = []
-        var consumed = Set<Int>()
-        for (index, album) in albums.enumerated() {
-            guard !consumed.contains(index) else { continue }
-            let peers = byTitle[album.title.lowercased()] ?? [index]
-            consumed.formUnion(peers)
-            guard peers.count > 1 else {
-                result.append(album)
-                continue
-            }
-            let members = peers.map { albums[$0] }
-            let items = members.flatMap { member in member.tracks.map { _ in ArtistClustering.Item(albumArtist: member.artist, artist: nil) } }
-            let assigned = ArtistClustering.assign(items, folderArtist: nil)
-            var groups: [String: [Album]] = [:]
-            var order: [String] = []
-            var offset = 0
-            for member in members {
-                let artist = assigned[offset]
-                offset += member.tracks.count
-                if groups[artist] == nil { order.append(artist) }
-                groups[artist, default: []].append(member)
-            }
-            for artist in order {
-                let group = groups[artist] ?? []
-                if group.count == 1, let only = group.first, only.artist == artist {
-                    result.append(only)
-                } else {
-                    result.append(combine(group, artist: artist))
-                }
-            }
+        return order.compactMap { key in
+            guard let group = groups[key], let first = group.first else { return nil }
+            return group.count == 1 ? first : combine(group, artist: first.artist)
         }
-        return result
     }
 
     /// One album out of several that share a title, filed under `artist`; the biggest one lends its details and cover.

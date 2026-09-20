@@ -38,6 +38,8 @@ struct SetupHintView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                Button("Explore Sample Library") { store.loadSample() }
+                    .font(.caption)
                 Button("Sync now") { store.requestSync() }
                     .font(.caption)
                     .padding(.top, 2)

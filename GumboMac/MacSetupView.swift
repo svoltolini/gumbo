@@ -218,6 +218,10 @@ private struct MacWelcomeStep: View {
                 .frame(maxWidth: 500, alignment: .leading)
             }
         } buttons: {
+            Button("Explore Sample Library") {
+                model.useSampleLibrary()
+                model.openLibrary()
+            }
             if cloud.family?.isReachable != true {
                 Button("Join with a Link…") { isJoiningWithLink = true }
             }

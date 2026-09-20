@@ -52,7 +52,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         let desiredTracks = Set(playlist.tracks.map(\.id))
         let relevantValidated = validatedFiles.intersection(desiredTracks)
         let done = relevantValidated.count
-        let total = playlist.tracks.count
+        let total = desiredTracks.count
 
         if !playlist.tracks.isEmpty, done == total { return .downloaded }
 
@@ -89,6 +89,12 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         return manifest.availableFiles(for: playlist, root: Self.root)
     }
 
+    func allowsPlayback(_ files: [(track: WatchTrack, url: URL)]) -> Bool {
+        guard let currentCatalogue else { return false }
+        let allowed = Set(currentCatalogue.playlists.flatMap { self.files(for: $0).map(\.url) })
+        return !files.isEmpty && files.allSatisfy { allowed.contains($0.url) }
+    }
+
     var bytesOnWatch: Int64 {
         guard let items = FileManager.default.enumerator(at: Self.root, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
         var total: Int64 = 0
@@ -110,7 +116,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         }
         guard expected[key]?.isEmpty != false else { return }
         let have = Set(files(for: playlist).map { $0.track.id })
-        let missing = playlist.tracks.filter { !have.contains($0.id) }
+        let missing = playlist.uniqueTracks.filter { !have.contains($0.id) }
         guard !missing.isEmpty else { return }
         let generation = UUID()
         var manifest = manifests[key] ?? WatchDownloadManifest()

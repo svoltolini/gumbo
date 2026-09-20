@@ -19,6 +19,13 @@ public nonisolated enum CoverStore {
     }
     public static var directory: URL { directoryOverride ?? defaultDirectory }
 
+    static func scopedDirectory(driveID: String, rootPath: String) -> URL {
+        if let directoryOverride { return directoryOverride }
+        let scope = "\(driveID.utf8.count):\(driveID)\(rootPath.utf8.count):\(rootPath)"
+        let digest = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+        return defaultDirectory.appending(path: digest, directoryHint: .isDirectory)
+    }
+
     private static func mutate(_ description: String, _ operation: () throws -> Void) {
         func write() {
             mutationLock.withLock {

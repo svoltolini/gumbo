@@ -220,6 +220,14 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
     /// Nothing answered on any of DSM's usual ports at a public address.
     case noAnswer(host: String)
 
+    public var requiresNewCredentials: Bool {
+        switch self {
+        case .notSignedIn: true
+        case .api(let code, let api): api == "SYNO.API.Auth" && [400, 401, 402].contains(code)
+        default: false
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidAddress:

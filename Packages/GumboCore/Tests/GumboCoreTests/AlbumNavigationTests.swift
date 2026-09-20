@@ -99,3 +99,31 @@ struct AlbumNavigationTests {
         #expect(f.model.albumToOpen == nil)
     }
 }
+
+extension AlbumNavigationTests {
+    @Test func playlistPushRejectsOldSessionAndSourceAndUsesCurrentMembership() throws {
+        let f = try AlbumNavigationFixture(); defer { f.cleanUp() }
+        let playlist = f.library.favouritesPlaylist
+        let pending = try #require(f.model.beginPlaylistNavigation(playlist))
+        let owner = try #require(f.profiles.active)
+        f.profiles.lock()
+        #expect(f.profiles.activate(owner))
+        f.model.finishPlaylistNavigation(pending)
+        #expect(f.model.playlistToOpen == nil)
+        let current = try #require(f.model.beginPlaylistNavigation(playlist))
+        f.model.finishPlaylistNavigation(current)
+        #expect(f.model.playlistToOpen?.id == playlist.id)
+        f.model.playlistToOpen = nil
+        let oldSource = try #require(f.model.beginPlaylistNavigation(playlist))
+        var replacement = SampleLibrary.catalogue
+        replacement.rootPath = "/other"
+        f.library.replace(with: replacement, drive: nil)
+        f.model.finishPlaylistNavigation(oldSource)
+        #expect(f.model.playlistToOpen == nil)
+        let oldTab = try #require(f.model.beginPlaylistNavigation(playlist))
+        f.model.showTab(named: "downloads")
+        f.model.showTab(named: "playlists")
+        f.model.finishPlaylistNavigation(oldTab)
+        #expect(f.model.playlistToOpen == nil)
+    }
+}

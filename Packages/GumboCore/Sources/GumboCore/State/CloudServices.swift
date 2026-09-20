@@ -35,6 +35,9 @@ struct CloudServices {
     var modify: (CloudScope, [CKRecord], [CKRecord.ID]) async throws -> CloudModifyResult
     var log: (String) -> Void = { _ in }
 
+    /// Profile state is a whole document: stale writes must enter CloudSync's merge/retry path.
+    static let recordSavePolicy: CKModifyRecordsOperation.RecordSavePolicy = .ifServerRecordUnchanged
+
     static func live(container: CKContainer) -> CloudServices {
         func database(_ scope: CloudScope) -> CKDatabase {
             scope.isMember ? container.sharedCloudDatabase : container.privateCloudDatabase
@@ -69,7 +72,7 @@ struct CloudServices {
                 )
             },
             modify: { scope, records, deletions in
-                let result = try await database(scope).modifyRecords(saving: records, deleting: deletions, savePolicy: .changedKeys, atomically: false)
+                let result = try await database(scope).modifyRecords(saving: records, deleting: deletions, savePolicy: recordSavePolicy, atomically: false)
                 return CloudModifyResult(saved: result.saveResults, deleted: result.deleteResults)
             },
             log: { diagnostics($0) }

@@ -190,12 +190,7 @@ public nonisolated enum TagWriter {
             guard let media = try await MP4Tags.read(read: read) else { return nil }
             return WrittenTags(title: media.title, artist: media.artist, album: media.album, genre: media.genre, trackNumber: media.trackNumber)
         case "flac":
-            var prefix = try await read(0..<min(size, FLACHeader.initialRead))
-            guard var info = FLACHeader.parse(prefix) else { return nil }
-            if let needed = info.neededPrefix, Int64(needed) > Int64(prefix.count), Int64(needed) <= FLACHeader.maximumRead {
-                prefix = try await read(0..<Int64(needed))
-                info = FLACHeader.parse(prefix) ?? info
-            }
+            guard let info = try await FLACHeader.read(read: read) else { return nil }
             return WrittenTags(title: info.tag("TITLE"), artist: info.tag("ARTIST"), album: info.tag("ALBUM"), genre: info.tag("GENRE"), trackNumber: info.number("TRACKNUMBER"))
         default:
             return nil

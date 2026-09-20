@@ -67,7 +67,12 @@ public nonisolated struct WatchPlaylist: Codable, Hashable, Sendable, Identifiab
         self.profileID = profileID
     }
 
-    public var totalBytes: Int64 { tracks.reduce(0) { $0 + $1.fileSize } }
+    public var uniqueTracks: [WatchTrack] {
+        var seen = Set<String>()
+        return tracks.filter { seen.insert($0.id).inserted }
+    }
+
+    public var totalBytes: Int64 { uniqueTracks.reduce(0) { $0 + $1.fileSize } }
     public var duration: TimeInterval { tracks.reduce(0) { $0 + $1.duration } }
     public var isCut: Bool { totalSongs > tracks.count }
 
@@ -181,7 +186,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
     /// This validates both path format and actual file existence/integrity.
     public func validatedFileIDs(for playlist: WatchPlaylist, root: URL) -> Set<String> {
         guard let key = playlist.cacheID else { return [] }
-        let tracksByID = Dictionary(uniqueKeysWithValues: playlist.tracks.map { ($0.id, $0) })
+        let tracksByID = Dictionary(playlist.tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID],
                   let track = tracksByID[trackID] else { return false }
@@ -193,7 +198,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
     /// These entries should be pruned from the manifest to avoid stale state.
     public func invalidFileIDs(for playlist: WatchPlaylist, root: URL) -> Set<String> {
         guard let key = playlist.cacheID else { return [] }
-        let tracksByID = Dictionary(uniqueKeysWithValues: playlist.tracks.map { ($0.id, $0) })
+        let tracksByID = Dictionary(playlist.tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID] else { return false }
             let track = tracksByID[trackID]

@@ -69,29 +69,11 @@ info() {
 
 section "Version Alignment"
 
-EXPECTED_MARKETING="1.0"
-EXPECTED_BUILD="202609142150"
-
-check_version() {
-    local target=$1
-    local file="$PROJECT_ROOT/project.yml"
-    
-    # Extract versions for the target from project.yml
-    local marketing=$(grep -A 100 "^  $target:" "$file" | grep "MARKETING_VERSION:" | head -1 | sed 's/.*: *"\([^"]*\)".*/\1/')
-    local build=$(grep -A 100 "^  $target:" "$file" | grep "CURRENT_PROJECT_VERSION:" | head -1 | sed 's/.*: *"\([^"]*\)".*/\1/')
-    
-    if [[ "$marketing" == "$EXPECTED_MARKETING" && "$build" == "$EXPECTED_BUILD" ]]; then
-        pass "$target: $marketing ($build)"
-    else
-        fail "$target: expected $EXPECTED_MARKETING ($EXPECTED_BUILD), got $marketing ($build)"
-    fi
-}
-
-check_version "Gumbo"
-check_version "GumboWidgets"
-check_version "GumboWatch"
-check_version "GumboMac"
-check_version "GumboTV"
+if python3 "$SCRIPT_DIR/check-release-versions.py" "$PROJECT_ROOT/project.yml"; then
+    pass "All app and extension versions match Gumbo"
+else
+    fail "App and extension versions are missing or inconsistent"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Privacy Manifest Check

@@ -54,6 +54,9 @@ struct GumboTVApp: App {
         }
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
         player.streamURLProvider = { [library, model] track in library.streamURL(for: track, quality: model.quality) }
+        player.artworkProvider = { [library] album in
+            library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
+        }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
@@ -73,6 +76,7 @@ struct GumboTVApp: App {
         }
         profiles.onDeactivate = { [player, library, downloads] in
             player.stop()
+            library.metadataWriter.cancel()
             downloads.activeProfileID = "locked"
             library.loadProfileState()
         }

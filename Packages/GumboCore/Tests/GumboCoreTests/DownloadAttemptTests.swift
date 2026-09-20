@@ -699,3 +699,28 @@ struct DownloadAttemptTests {
         #expect(harness.manager.state(for: profile2) == .downloaded)
     }
 }
+
+extension DownloadAttemptTests {
+    @Test func duplicatePlaylistCompletesPhysicalDownloadAndWidgetRequiresEveryFile() async throws {
+        let harness = try TransferHarness(); defer { harness.close() }
+        try await harness.restore()
+        var album = transferAlbum(count: 2)
+        album.tracks.append(album.tracks[0])
+        let owner = harness.manager.owner(for: album)
+        harness.queue(owner)
+        #expect(harness.manager.verifiedAlbumsForWidget([album]).isEmpty)
+        try harness.deliver(try harness.startedJob(0))
+        try await drain()
+        #expect(harness.manager.verifiedAlbumsForWidget([album]).isEmpty)
+        try harness.deliver(try harness.startedJob(1))
+        try await drain()
+        let progress = try #require(harness.manager.progressSnapshot(ownerID: owner.id, driveID: "nas-a"))
+        #expect(progress.outcome == .downloaded && progress.done == 2 && progress.total == 2 && progress.fraction == 1)
+        #expect(harness.manager.verifiedAlbumsForWidget([album]).count == 1)
+        #expect(harness.manager.verifiedSongCountForWidget(album.tracks) == 2)
+        let file = try #require(harness.manager.localURL(for: album.tracks[0]))
+        try FileManager.default.removeItem(at: file)
+        #expect(harness.manager.verifiedAlbumsForWidget([album]).isEmpty)
+        #expect(harness.manager.verifiedSongCountForWidget(album.tracks) == 1)
+    }
+}

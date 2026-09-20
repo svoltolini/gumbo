@@ -3,6 +3,10 @@ import Foundation
 import Testing
 @testable import GumboCore
 
+@Test func liveCloudWritesRequireMatchingServerRevision() {
+    #expect(CloudServices.recordSavePolicy == .ifServerRecordUnchanged)
+}
+
 @MainActor
 private final class CloudFixture {
     let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-cloud-\(UUID().uuidString)")
@@ -11,6 +15,8 @@ private final class CloudFixture {
     var profiles: ProfileStore
     let persistence: CloudPersistence
     var account: String? = "A"
+    var suspendIdentity = false
+    var heldIdentity: CheckedContinuation<Void, Never>?
     var owners: [String] = []
     var pages: [CloudChangePage] = []
     var requests: [(CloudScope, Data?)] = []
@@ -33,8 +39,10 @@ private final class CloudFixture {
 
     init() throws {
         defaults = try #require(UserDefaults(suiteName: suite))
-        profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults)
-        persistence = CloudPersistence(directory: directory.appending(path: "cloud"))
+        let localPersistence = CloudPersistence(directory: directory.appending(path: "cloud"))
+        persistence = localPersistence
+        profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults,
+            retirementIntentProvider: { try localPersistence.pendingFamilyRetirements() })
         sync = makeSync()
         sync.profiles = profiles
         profiles.sync = sync
@@ -42,7 +50,10 @@ private final class CloudFixture {
 
     func makeSync() -> CloudSync {
         CloudSync(services: CloudServices(
-            identity: { self.account },
+            identity: {
+                if self.suspendIdentity { await withCheckedContinuation { self.heldIdentity = $0 } }
+                return self.account
+            },
             sharedZones: {
                 if self.failZoneDiscovery { throw CKError(.networkUnavailable) }
                 return self.owners
@@ -91,7 +102,9 @@ private final class CloudFixture {
         if restoreProfiles {
             profiles.sync = nil
             profiles.lock()
-            profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults)
+            let localPersistence = persistence
+            profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults,
+                retirementIntentProvider: { try localPersistence.pendingFamilyRetirements() })
         }
         sync = makeSync()
         sync.profiles = profiles
@@ -686,4 +699,137 @@ private final class CloudFixture {
     fixture.account = "A"
     await fixture.sync.refresh(reason: "A completes the durable local binding")
     #expect(fixture.profiles.owner?.localOrigin == .recovery(account: "A"))
+}
+
+@Test @MainActor func leavingFamilyRetiresPeerProfilesBeforePrivateUploadsAndAcrossRelaunch() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.owners = ["family-owner"]
+    let mine = f.profileRecord("mine", owner: "family-owner"); mine["userRecordName"] = "A"
+    let peer = f.profileRecord("peer", owner: "family-owner"); peer["userRecordName"] = "someone-else"
+    f.pages = [.init(records: [.success(mine), .success(peer)], token: nil)]
+    await f.sync.refresh(reason: "joined family")
+    #expect(f.profiles.profiles.contains { $0.id == "peer" })
+    f.owners = []
+    f.modifications = []
+    try await f.sync.stopSharing()
+    #expect(f.sync.membership == .owner)
+    #expect(f.profiles.profiles.first { $0.id == "mine" }?.role == .owner)
+    #expect(f.profiles.profiles.contains { $0.id == "mine" })
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    #expect(!f.modifications.contains { $0.1.contains("peer") || $0.1.contains("state-peer") })
+    f.relaunch(restoreProfiles: true)
+    await f.sync.refresh(reason: "relaunch")
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    #expect(!f.modifications.contains { $0.0.isMember == false && ($0.1.contains("peer") || $0.1.contains("state-peer")) })
+}
+
+@Test @MainActor func replacingFamilyRetiresOldPeersWithoutChangingOtherAccountProfiles() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    await f.sync.refresh(reason: "account A")
+    let accountA = try #require(f.profiles.active)
+    f.profiles.updateSettings { $0.shuffle = true }
+    f.profiles.lock()
+    await f.profiles.drainPersistence()
+    let stateA = f.profiles.storedState(id: accountA.id)
+    let photoA = f.directory.appending(path: "profiles/\(accountA.id)-photo.jpg")
+    try Data("account A photo".utf8).write(to: photoA)
+    f.account = "B"
+    f.sync.accountChanged()
+    f.owners = ["family-one"]
+    let mine = f.profileRecord("mine", owner: "family-one"); mine["userRecordName"] = "B"
+    let peer = f.profileRecord("peer", owner: "family-one"); peer["userRecordName"] = "other"
+    f.pages = [.init(records: [.success(mine), .success(peer)], token: nil)]
+    await f.sync.refresh(reason: "first family")
+    f.modifications = []
+    try f.sync.join(zoneOwnerName: "family-two")
+    await f.sync.refresh(reason: "next family")
+    #expect(f.profiles.profiles.contains { $0.id == "mine" })
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    #expect(!f.modifications.contains { $0.1.contains("peer") || $0.1.contains("state-peer") })
+    #expect(f.profiles.profiles.first { $0.id == accountA.id } == accountA)
+    #expect(f.profiles.storedState(id: accountA.id) == stateA)
+    #expect(try Data(contentsOf: photoA) == Data("account A photo".utf8))
+    #expect(!f.modifications.contains { $0.1.contains(accountA.id) || $0.1.contains("state-" + accountA.id) })
+
+}
+
+@Test @MainActor func failedFamilyRetirementRemainsExcludedAcrossRelaunchAndRetriesBeforeUploads() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.owners = ["family-owner"]
+    let mine = f.profileRecord("mine", owner: "family-owner"); mine["userRecordName"] = "A"
+    let peer = f.profileRecord("peer", owner: "family-owner"); peer["userRecordName"] = "other"
+    f.pages = [.init(records: [.success(mine), .success(peer)], token: nil)]
+    await f.sync.refresh(reason: "joined")
+    let index = f.directory.appending(path: "profiles/profiles.json")
+    let saved = try Data(contentsOf: index)
+    try FileManager.default.removeItem(at: index)
+    try FileManager.default.createDirectory(at: index, withIntermediateDirectories: false)
+    f.owners = []
+    do { try await f.sync.stopSharing(); Issue.record("Failed local retirement must be reported") } catch {}
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    let state = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(!state.profileIDs.contains("peer"))
+    #expect(state.retiredFamilyProfileIDs?.contains("peer") == true)
+    try FileManager.default.removeItem(at: index)
+    try saved.write(to: index) // the old index survived a failed replacement
+    f.relaunch(restoreProfiles: true)
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    f.modifications = []
+    await f.sync.refresh(reason: "retry cleanup")
+    #expect(!f.modifications.contains { $0.1.contains("peer") || $0.1.contains("state-peer") })
+    #expect(try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName).retiredFamilyProfileIDs == nil)
+}
+
+@Test @MainActor func markerFailureRevokesActivePeerAndOfflineRelaunchReadsCloudRetirementIntent() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.owners = ["family-one"]
+    let mine = f.profileRecord("mine", owner: "family-one"); mine["userRecordName"] = "A"
+    let peer = f.profileRecord("peer", owner: "family-one"); peer["userRecordName"] = "other"
+    f.pages = [.init(records: [.success(mine), .success(peer)], token: nil)]
+    await f.sync.refresh(reason: "first family")
+    #expect(f.profiles.activate(try #require(f.profiles.profiles.first { $0.id == "peer" })))
+    let marker = f.directory.appending(path: "profiles/family-retirement.json")
+    try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: false)
+    do { try f.sync.join(zoneOwnerName: "family-two"); Issue.record("Marker failure must be reported") } catch {}
+    #expect(f.profiles.isLocked)
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    // Model inability to create a marker: it is absent at the next offline launch.
+    try FileManager.default.removeItem(at: marker)
+    f.relaunch(restoreProfiles: true)
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    #expect(f.profiles.profiles.contains { $0.id == "mine" })
+    #expect(f.requests.last?.0.owner == "family-one", "No network refresh is needed to enforce the local journal")
+}
+
+@Test @MainActor func queuedAndSuspendedShareActionsCannotBorrowANewProfileSession() async throws {
+    for createsShare in [false, true] {
+        for transition in ["lock", "reopen", "switch"] {
+            let f = try CloudFixture()
+            let owner = try #require(f.profiles.owner)
+            #expect(f.profiles.activate(owner))
+            let other = try #require(f.profiles.create(name: "Other", avatar: .random(), pin: nil))
+            await f.sync.refresh(reason: "ready")
+            let authorization = try #require(f.sync.sharingAuthorization())
+            f.suspendIdentity = true
+            let task = Task { () -> Bool in
+                do {
+                    if createsShare { _ = try await f.sync.share(authorization: authorization) }
+                    else { try await f.sync.stopSharing(authorization: authorization) }
+                    return true
+                } catch { return false }
+            }
+            for _ in 0..<200 where f.heldIdentity == nil { try await Task.sleep(for: .milliseconds(2)) }
+            #expect(f.heldIdentity != nil)
+            f.profiles.lock()
+            if transition == "reopen" { #expect(f.profiles.activate(owner)) }
+            if transition == "switch" { #expect(f.profiles.activate(other)) }
+            f.suspendIdentity = false
+            f.heldIdentity?.resume(); f.heldIdentity = nil
+            #expect(await task.value == false)
+            #expect(!f.modifications.contains { $0.1.contains(CKRecordNameZoneWideShare) || $0.2.contains(CKRecordNameZoneWideShare) })
+            do { try await f.sync.stopSharing(authorization: authorization); Issue.record("Queued action must reject its stale session") } catch {}
+            f.cleanUp()
+        }
+    }
 }

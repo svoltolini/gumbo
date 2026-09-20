@@ -46,6 +46,7 @@ public final class AppModel {
         indexer = LibraryIndexer()
         self.defaults = defaults
         self.services = services
+        library.onMetadataWriteWillBegin = { [weak self] in self?.indexer.cancel() }
         loadSettings()
         if let data = defaults.data(forKey: "family.access.v2"),
            let records = try? JSONDecoder().decode([String: FamilyAccessRecord].self, from: data) {
@@ -197,6 +198,10 @@ public final class AppModel {
             guard isCurrent(generation) else { return }
             pendingReconnectPassword = password
             requestReauthentication(connection, needsOTP: true)
+        } catch let error as SynologyError where error.requiresNewCredentials {
+            guard isCurrent(generation) else { return }
+            requestReauthentication(saved, needsOTP: false)
+            signInError = error.localizedDescription
         } catch let error as NASTransportError {
             guard isCurrent(generation) else { return }
             requestReauthentication(saved, needsOTP: false)
@@ -247,7 +252,7 @@ public final class AppModel {
 
     /// Records the folder to index and starts indexing.
     public func chooseMusicFolder(path: String, showsProgress: Bool) {
-        guard var connection, let drive = library.drive else { return }
+        guard profiles?.isLocked != true, var connection, let drive = library.drive else { return }
         beginConnectionChange()
         let changed = connection.musicPath != path
         connection.musicPath = path
@@ -285,16 +290,24 @@ public final class AppModel {
     public var isIndexed: Bool {
         isDemo ? demoCount >= SampleLibrary.displayedTrackTotal : indexer.structureReady && !library.isEmpty
     }
+    public var scanCompleted: Bool { isDemo ? !demoScanning : indexer.phase == .done }
+    public var scanStatusText: String {
+        if isScanning { return "Scanning…" }
+        if indexingFailure != nil { return "Scan failed" }
+        return scanCompleted ? "Up to date" : "Not scanned this session"
+    }
     public var isScanning: Bool { isDemo ? demoScanning : indexer.isRunning }
     private var demoScanning = false
 
     private func startIndexing(showsProgress: Bool, forceMetadataReread: Bool = false) {
-        guard let drive = library.drive, let connection, let path = connection.musicPath else { return }
+        guard !library.metadataWriter.isWriting, let drive = library.drive, let connection, let path = connection.musicPath else { return }
         if showsProgress { stage = .indexing }
         let existing = library.catalogue.isEmpty ? nil : library.catalogue
         let generation = connectionGeneration
+        let metadataRevision = library.metadataMutationRevision
         indexer.start(drive: drive, rootPath: path, serverName: connection.name, existing: existing, forceMetadataReread: forceMetadataReread) { [weak self] catalogue in
             guard let self, generation == connectionGeneration,
+                  metadataRevision == library.metadataMutationRevision,
                   self.connection == connection, library.drive?.id == drive.id else { return }
             library.replace(with: catalogue, drive: drive)
             library.saveCatalogue()
@@ -502,6 +515,10 @@ public final class AppModel {
                 guard isCurrent(generation) else { return }
                 pendingReconnectPassword = password
                 requestReauthentication(saved, needsOTP: true)
+            } catch let error as SynologyError where error.requiresNewCredentials {
+                guard isCurrent(generation) else { return }
+                requestReauthentication(saved, needsOTP: false)
+                signInError = error.localizedDescription
             } catch let error as NASTransportError {
                 guard isCurrent(generation) else { return }
                 requestReauthentication(saved, needsOTP: false)
@@ -529,7 +546,10 @@ public final class AppModel {
     // MARK: Browsing
 
     public var selectedTab: AppTab = .library {
-        didSet { if selectedTab != .library { cancelPendingAlbumNavigation() } }
+        didSet {
+            if selectedTab != .library { cancelPendingAlbumNavigation() }
+            if selectedTab != .playlists { cancelPendingPlaylistNavigation() }
+        }
     }
     public var facet: LibraryFacet = .recentlyAdded
     /// Set to push an album onto the Library tab from outside it, for example from the player sheet.
@@ -585,17 +605,58 @@ public final class AppModel {
     }
 
     public var playlistToOpen: Playlist?
+    public private(set) var playlistNavigationRequest = 0
+    private var playlistNavigationCommand = UUID()
 
-    /// Switches to the Playlists tab and opens the playlist there.
+    struct PendingPlaylistNavigation {
+        let command: UUID
+        let playlistID: String
+        let sourceID: String
+        let rootPath: String
+        let connection: UUID
+        let profileSession: UUID?
+    }
+
+    public func cancelPendingPlaylistNavigation() { playlistNavigationCommand = UUID() }
+
+    func beginPlaylistNavigation(_ playlist: Playlist) -> PendingPlaylistNavigation? {
+        guard profiles?.isLocked != true, library.contentSourceID == library.catalogue.driveID,
+              library.playlist(id: playlist.id) != nil else { return nil }
+        playlistNavigationCommand = UUID()
+        playlistNavigationRequest += 1
+        selectedTab = .playlists
+        return PendingPlaylistNavigation(command: playlistNavigationCommand, playlistID: playlist.id,
+            sourceID: library.catalogue.driveID, rootPath: library.catalogue.rootPath,
+            connection: connectionGeneration, profileSession: profiles?.sessionID)
+    }
+
+    func finishPlaylistNavigation(_ request: PendingPlaylistNavigation) {
+        guard request.command == playlistNavigationCommand, selectedTab == .playlists,
+              connectionGeneration == request.connection, profiles?.isLocked != true,
+              profiles?.sessionID == request.profileSession,
+              library.catalogue.driveID == request.sourceID, library.contentSourceID == request.sourceID,
+              library.catalogue.rootPath == request.rootPath,
+              let playlist = library.playlist(id: request.playlistID) else { return }
+        playlistToOpen = playlist
+    }
+
+    public func clearProfileNavigation() {
+        cancelPendingAlbumNavigation()
+        cancelPendingPlaylistNavigation()
+        albumToOpen = nil
+        playlistToOpen = nil
+    }
+
+    /// Switches to the Playlists tab and opens its current contents in the same authenticated session.
     public func showPlaylist(_ playlist: Playlist) {
         leaveNowPlaying()
-        selectedTab = .playlists
+        guard let request = beginPlaylistNavigation(playlist) else { return }
         #if os(macOS)
-        playlistToOpen = playlist
+        finishPlaylistNavigation(request)
         #else
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
-            self?.playlistToOpen = playlist
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            self?.finishPlaylistNavigation(request)
         }
         #endif
     }
@@ -658,6 +719,7 @@ public final class AppModel {
 
     public var watchFolder = true {
         didSet {
+            guard profiles?.isLocked != true else { watchFolder = oldValue; return }
             defaults.set(watchFolder, forKey: "watchFolder")
             if watchFolder { refreshIfStale(olderThan: 10 * 60) }
         }
@@ -741,7 +803,7 @@ public final class AppModel {
 
     private func checkFamilyContext(_ expected: FamilyContext, sourceID: String) throws {
         guard isCurrent(expected.connection), connection?.sourceID == sourceID,
-              profiles?.sessionID == expected.profileSession else { throw CancellationError() }
+              profiles?.sessionID == expected.profileSession, profiles?.isLocked != true else { throw CancellationError() }
     }
 
     private var musicShareName: String? {
@@ -751,6 +813,7 @@ public final class AppModel {
     /// Makes the family account on the NAS with a long random password and read-only access to the
     /// music share. Returns what went wrong, if anything; the owner's account must be an administrator.
     public func setUpFamilyAccess() async -> String? {
+        guard profiles?.canManageProfiles != false else { return "Open the owner profile before changing family access." }
         guard !isChangingFamilyAccess else { return "Wait for the current family access change to finish." }
         isChangingFamilyAccess = true
         defer { isChangingFamilyAccess = false }
@@ -779,7 +842,7 @@ public final class AppModel {
     /// calls from a session that did the full sign-in handshake. The work is tried on the session
     /// that is already open, then on a dedicated DSM session that has both.
     private func withAdministrator(_ body: (DSMSession, String?) async throws -> Void) async throws {
-        guard let session, let connection else { throw SynologyError.notSignedIn }
+        guard profiles?.canManageProfiles != false, let session, let connection else { throw SynologyError.notSignedIn }
         // Only the session that is already open is used. Signing in again to gain more rights fails
         // on any account with two-factor authentication, and repeated tries make DSM mail its owner
         // emergency codes and eventually block the device, so the app never does that on its own.
@@ -799,6 +862,7 @@ public final class AppModel {
 
     /// An account the owner made by hand; checked with a sign-in before it is kept.
     public func useFamilyAccess(account: String, password: String) async -> String? {
+        guard profiles?.canManageProfiles != false else { return "Open the owner profile before changing family access." }
         guard !isChangingFamilyAccess else { return "Wait for the current family access change to finish." }
         isChangingFamilyAccess = true
         defer { isChangingFamilyAccess = false }
@@ -849,6 +913,7 @@ public final class AppModel {
 
     /// Keep the local recovery details until the NAS confirms deletion.
     public func removeFamilyAccess() async -> String? {
+        guard profiles?.canManageProfiles != false else { return "Open the owner profile before changing family access." }
         guard !isChangingFamilyAccess else { return "Wait for the current family access change to finish." }
         isChangingFamilyAccess = true
         defer { isChangingFamilyAccess = false }
@@ -866,7 +931,9 @@ public final class AppModel {
     }
 
     /// Revocation is complete only after CloudKit confirms removal and the NAS password changes.
-    public func stopFamilySharing(using cloud: CloudSync) async -> String? {
+    public func stopFamilySharing(using cloud: CloudSync, authorization supplied: CloudSync.SharingAuthorization? = nil) async -> String? {
+        guard let authorization = supplied ?? cloud.sharingAuthorization() else { return "Open your own profile before changing family sharing." }
+        do { try cloud.checkSharingAuthorization(authorization) } catch { return "The profile changed. Try again from your current profile." }
         guard !isChangingFamilyAccess else { return "Wait for the current family access change to finish." }
         isChangingFamilyAccess = true
         defer { isChangingFamilyAccess = false }
@@ -886,7 +953,7 @@ public final class AppModel {
                 familyAccessRecords[source] = record
                 try persistFamilyRecords()
             }
-            try await cloud.stopSharing()
+            try await cloud.stopSharing(authorization: authorization)
             guard wasOwner else { return nil }
             guard let source else {
                 return hadNASAccess ? "iCloud sharing has stopped. Reconnect to the original NAS and revoke its family account in DSM; NAS access has not been confirmed as revoked." : nil
@@ -954,6 +1021,13 @@ public final class AppModel {
             } else {
                 stage = .chooseFolder
             }
+        } catch let error as SynologyError where error.requiresNewCredentials {
+            guard isCurrent(generation) else { return }
+            if let url = try? familyURL(info) {
+                select(DiscoveredServer(name: info.serverName, baseURL: url, model: nil))
+                joiningFamily = info
+            }
+            signInError = error.localizedDescription
         } catch let error as NASTransportError {
             guard isCurrent(generation) else { return }
             if let url = try? familyURL(info) {

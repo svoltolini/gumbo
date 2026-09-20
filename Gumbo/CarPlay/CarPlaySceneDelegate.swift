@@ -273,12 +273,13 @@ final class CarPlayController {
             guard let current = controller.library.playlist(id: playlist.id) else { return }
             await controller.start(current.tracks.shuffled(), from: 0, title: current.name)
         }
-        let songs = playlist.tracks.prefix(max(0, Self.listLimit - 2)).map { track -> CPListItem in
+        let songs = playlist.entries.prefix(max(0, Self.listLimit - 2)).map { entry -> CPListItem in
+            let track = entry.track
             let album = library.album(id: track.albumID)
             let item = CPListItem(text: track.title, detailText: track.artist ?? album?.artist ?? "", image: album.map(cover(for:)))
             handle(item) { controller in
                 guard let current = controller.library.playlist(id: playlist.id),
-                      let index = current.tracks.firstIndex(where: { $0.id == track.id }) else { return }
+                      let index = current.entries.firstIndex(where: { $0.id == entry.id }) else { return }
                 await controller.start(current.tracks, from: index, title: current.name)
             }
             return item
@@ -338,7 +339,7 @@ final class CarPlayController {
     /// The cached cover, or the album's own gradient until the real one arrives.
     private func cover(for album: Album) -> UIImage {
         let version = library.coverVersion(for: album)
-        let key = "\(album.id)|\(version)|\(CoverImageCache.thumbnailPixels)"
+        let key = "\(library.coverURL(for: album)?.absoluteString ?? "")|\(album.id)|\(version)|\(CoverImageCache.thumbnailPixels)"
         if let cached = CoverImageCache.shared.cached(key) { return UIImage(cgImage: cached) }
         let size = CGSize(width: 180, height: 180)
         return UIGraphicsImageRenderer(size: size).image { context in
@@ -352,7 +353,7 @@ final class CarPlayController {
     /// Fetches the real cover from the server for a list item still showing its gradient.
     private func loadCover(for album: Album, into item: CPListItem) {
         let version = library.coverVersion(for: album)
-        let key = "\(album.id)|\(version)|\(CoverImageCache.thumbnailPixels)"
+        let key = "\(library.coverURL(for: album)?.absoluteString ?? "")|\(album.id)|\(version)|\(CoverImageCache.thumbnailPixels)"
         guard CoverImageCache.shared.cached(key) == nil, let url = library.coverURL(for: album) else { return }
         Task {
             if let image = await CoverImageCache.shared.image(url: url, key: key, maxPixelSize: CoverImageCache.thumbnailPixels) {

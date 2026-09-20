@@ -22,6 +22,7 @@ public final class WidgetFeed {
         public let albumCount: Int
         public let downloadOwners: [String]
         public let downloadedSongs: Int
+        public let downloadRevision: UInt64
         public let playlists: [String]
 
         public init(library: LibraryStore, player: PlayerModel, downloads: DownloadManager) {
@@ -36,6 +37,7 @@ public final class WidgetFeed {
             albumCount = library.albums.count
             downloadOwners = downloads.listedOwnerIDs.sorted() + [downloads.activeProfileID]
             downloadedSongs = downloads.records.count
+            downloadRevision = downloads.stateRevision
             playlists = ([library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist] + library.playlists).map { $0.id + $0.summary }
         }
     }
@@ -114,8 +116,7 @@ public final class WidgetFeed {
         let lead = player.album
         let played = Array(library.recentlyPlayed.prefix(8))
         let added = Array(library.recentlyAdded.prefix(8))
-        let listed = downloads.listedOwnerIDs
-        let kept = Array(library.recentlyAdded.filter { listed.contains(downloads.owner(for: $0).id) }.prefix(12))
+        let kept = Array(downloads.verifiedAlbumsForWidget(library.recentlyAdded).prefix(12))
         let playlists = [library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist, library.libraryShufflePlaylist] + library.playlists.prefix(8)
         // Albums not played lately, in an order that stays put for the day and changes overnight.
         let day = Date.now.formatted(.iso8601.year().month().day())
@@ -133,7 +134,7 @@ public final class WidgetFeed {
             recentlyPlayed: played.map(describe),
             recentlyAdded: added.map(describe),
             downloads: kept.map(describe),
-            downloadedSongCount: downloads.records.count,
+            downloadedSongCount: downloads.verifiedSongCountForWidget(library.tracks),
             playlists: playlists.map(describe),
             rediscover: Array(rediscover),
             updated: .now
@@ -157,8 +158,8 @@ public final class WidgetFeed {
 
     /// File stem for an album's cover copies, changing when the cover itself is replaced.
     public static func coverKey(for album: Album, in library: LibraryStore) -> String? {
-        guard library.coverURL(for: album) != nil else { return nil }
-        let digest = SHA256.hash(data: Data(album.id.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        guard let url = library.coverURL(for: album) else { return nil }
+        let digest = SHA256.hash(data: Data((url.absoluteString + "|" + album.id).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         return "\(digest)-v\(library.coverVersion(for: album))"
     }
 

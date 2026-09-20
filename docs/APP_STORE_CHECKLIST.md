@@ -2,9 +2,13 @@
 
 This checklist documents the remaining App Store Connect (ASC) configuration steps required before public release. These items must be completed in the ASC web interface—they cannot be configured in the repository.
 
-## In-repo packaging validation — COMPLETE
+## Current Gumbo identity — acceptance pending
 
-The following items are verified in the repository and signed builds:
+The September 20 rename created a separate app identity. Source configuration and unsigned builds have been checked, but the new IDs still require Apple registration, provisioning, signed archives, provider checks and fresh TestFlight acceptance. Track those gates in [#118](https://github.com/svoltolini/gumbo/issues/118) and evidence reconciliation in [#119](https://github.com/svoltolini/gumbo/issues/119).
+
+## Historical checklist entries — previous app identity
+
+The entries below are the prior release record, not verification of the new Gumbo identity. Historical evidence is preserved through [immutable references](evidence/README.md). Its external state was not reverified during the September 20 source remediation.
 
 - [x] **Privacy manifests** — All 5 targets (iOS, Widgets, Watch, Mac, TV) include `PrivacyInfo.xcprivacy`
 - [x] **Export compliance** — `ITSAppUsesNonExemptEncryption: false` in all Info.plist configurations
@@ -18,7 +22,7 @@ The following items are verified in the repository and signed builds:
 - [x] **App Groups** — Configured for widget data sharing
 - [x] **Archive validation** — iOS/Watch/Widgets, Mac, and TV Release archives pass export validation
 - [x] **TestFlight upload** — All platforms verified as VALID / IN_BETA_TESTING (build 202609142150)
-- [x] **App Review demo mode** — Sample library available for testing without NAS hardware
+- [ ] **App Review demo mode** — A visible sample-library entry is implemented in the September 20 remediation. Signed screen validation remains pending; see `APP_REVIEW_NOTES.md`.
 
 ## App Store Connect — REQUIRED BEFORE PUBLIC RELEASE
 
