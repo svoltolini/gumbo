@@ -20,6 +20,8 @@ From this folder, run `python3 -m http.server 8000`, then open `http://localhost
 - **Screenshots:** replace each entire decorative mockup `<div>` with `<img class="desktop-preview product-screenshot">` for Mac or `<img class="phone-preview product-screenshot">` for iPhone. Add `src`, descriptive `alt`, and natural `width`/`height`. Update the preview caption. HTML comments mark both slots; current mockups are not screenshots.
 - **Social image:** replace `assets/og-image.png` (**1200 × 630**). Its editable source is `assets/og-image.svg`. `assets/logo.svg` is the supplied logo.
 
+Use **Gumbo** and **Gumbo Music** with this exact casing in visible branding. Domain names and technical identifiers stay lowercase. The current beta supports Synology DSM/File Station only; general NAS wording must keep that requirement clear.
+
 The beta's limited-first-batch/free-year-at-launch offer is supplied by the owner. Keep privacy wording precise: no separate Gumbo account or music upload to a Gumbo cloud library; audio streams/downloads to devices, while iCloud syncs profiles and listening data. Remote streaming needs configured NAS access. This page does not replace the final app privacy policy.
 
 ## Vercel (current host)
