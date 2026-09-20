@@ -51,7 +51,7 @@ struct SettingsView: View {
     @State private var isShowingRemoteAccessHelp = false
 
     private var permissions: Permissions { Permissions(profiles: profiles, cloud: cloud) }
-    private var canScan: Bool { model.isConnected && !model.isScanning && !model.isDemo }
+    private var canScan: Bool { model.isConnected && !model.isScanning && !model.isDemo && !library.metadataWriter.isWriting && !library.isDeletingFiles }
 
     var body: some View {
         Form {
@@ -83,7 +83,9 @@ struct SettingsView: View {
         .sheet(isPresented: $isShowingRemoteAccessHelp) { RemoteAccessGuide() }
         #endif
         .confirmationDialog("Refresh song information?", isPresented: $isConfirmingTagRead, titleVisibility: .visible) {
-            Button("Refresh Song Information") { model.rereadMetadata() }
+            NavigationLink { MissingGenresView() } label: { Text("Find Missing Genres") }
+                NavigationLink { ProblemFilesView() } label: { Text("Problem Files") }
+                Button("Refresh Song Information") { model.rereadMetadata() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Gumbo will read album and song information from your music files again. This may take a while. Your favourites and playlists stay in place.")
@@ -234,6 +236,8 @@ struct SettingsView: View {
         @Bindable var library = library
         return Group {
             Section {
+                NavigationLink { MissingGenresView() } label: { Text("Find Missing Genres") }
+                NavigationLink { ProblemFilesView() } label: { Text("Problem Files") }
                 Button("Refresh Song Information") { isConfirmingTagRead = true }
                     .disabled(!canScan)
                 if model.indexer.isEnriching {

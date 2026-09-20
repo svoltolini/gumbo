@@ -151,10 +151,10 @@ struct SmartPlaylistCover: View {
 
     private var colors: [Color] {
         switch kind {
-        case .favourites: [Palette.brand, Palette.black, Palette.silver]
-        case .mix: [Palette.silver, Palette.brand, Palette.black]
-        case .recentlyPlayed: [Palette.black, Palette.brand, Palette.silver]
-        case .shuffle: [Palette.brand, Palette.silver, Palette.black]
+        case .favourites: [Color(red: 0.86, green: 0.20, blue: 0.38), Color(red: 0.35, green: 0.09, blue: 0.30), Color(red: 0.98, green: 0.58, blue: 0.43)]
+        case .mix: [Color(red: 0.50, green: 0.26, blue: 0.75), Color(red: 0.18, green: 0.10, blue: 0.39), Color(red: 0.95, green: 0.50, blue: 0.34)]
+        case .recentlyPlayed: [Color(red: 0.10, green: 0.49, blue: 0.48), Color(red: 0.06, green: 0.23, blue: 0.34), Color(red: 0.51, green: 0.74, blue: 0.66)]
+        case .shuffle: [Color(red: 0.80, green: 0.42, blue: 0.12), Color(red: 0.31, green: 0.23, blue: 0.13), Color(red: 0.92, green: 0.71, blue: 0.36)]
         }
     }
 
@@ -172,10 +172,18 @@ struct SmartPlaylistCover: View {
             let side = min(geometry.size.width, geometry.size.height)
             ZStack {
                 DriftingLightTile(colors: colors.map { PlatformColor($0) }, cornerRadius: cornerRadius)
+                // Quiet concentric grooves give each tile depth without competing with its symbol.
+                ForEach(0..<5) { ring in
+                    Circle()
+                        .stroke(.white.opacity(0.07), lineWidth: max(1, side * 0.005))
+                        .frame(width: side * (0.48 + Double(ring) * 0.19))
+                        .offset(x: side * 0.18, y: side * 0.13)
+                }
                 symbol(size: side)
             }
         }
         .aspectRatio(1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .accessibilityHidden(true)
     }
 

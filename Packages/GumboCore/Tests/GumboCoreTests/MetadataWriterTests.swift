@@ -17,6 +17,7 @@ private actor WriterFixtureDrive: WritableRemoteDrive {
         self.files = files
     }
 
+    func setFile(_ path: String, _ data: Data) { files[path] = data }
     func setUploadError(_ error: (any Error)?) { uploadError = error }
     func setOnInfo(_ hook: (@Sendable () async -> Void)?) { onInfo = hook }
     func setOnUpload(_ hook: (@Sendable () async -> Void)?) { onUpload = hook }
@@ -189,19 +190,19 @@ private nonisolated func readTags(_ drive: WriterFixtureDrive, _ path: String) a
         #expect(after == before)
     }
 
-    @Test func stoppingFinishesTheCurrentSongAndLeavesTheRestUntouched() async throws {
+    @Test func stoppingDuringUploadPreservesTheOriginalAndLeavesTheRestUntouched() async throws {
         let drive = fixtureDrive()
         let writer = MetadataWriter()
         await drive.setOnUpload { await writer.cancel() }
         let before = await drive.files
         let report = await writer.write(TagEdits(genre: "Ambient"), to: [track(mp3Path, title: "Morning"), track(flacPath, title: "Second Light")], drive: drive)
         #expect(report.wasCancelled)
-        #expect(report.written.map(\.id) == [mp3Path])
+        #expect(report.written.isEmpty)
         #expect(report.failures.isEmpty)
         let mp3Tags = try await readTags(drive, mp3Path)
         let after = await drive.files
-        #expect(mp3Tags?.genre == "Ambient")
-        #expect(after[flacPath] == before[flacPath])
+        #expect(mp3Tags?.genre == "Rock")
+        #expect(after == before)
         #expect(!writer.isWriting)
     }
 
@@ -325,7 +326,7 @@ private nonisolated func readTags(_ drive: WriterFixtureDrive, _ path: String) a
 }
 
 extension MetadataWriterTests {
-    @Test func lockingDuringUploadFinishesTheCurrentSwapAndDoesNotStartAnotherSong() async throws {
+    @Test func lockingDuringUploadPreventsTheSwapAndDoesNotStartAnotherSong() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "writer-late-lock-\(UUID())")
         let suite = "writer-late-lock-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -340,9 +341,9 @@ extension MetadataWriterTests {
         await drive.setOnUpload { await profiles.lock() }
         let report = await library.writeTags(TagEdits(genre: "Ambient"), to: [track(mp3Path, title: "Morning"), track(flacPath, title: "Second Light")])
         #expect(profiles.isLocked && report.wasCancelled)
-        #expect(report.written.map(\.id) == [mp3Path])
+        #expect(report.written.isEmpty)
         #expect(await drive.calls.count == 1)
-        #expect(try await readTags(drive, mp3Path)?.genre == "Ambient")
+        #expect(try await readTags(drive, mp3Path)?.genre == "Rock")
         #expect(await drive.files[flacPath] == original[flacPath])
         #expect(await drive.files.keys.sorted() == original.keys.sorted())
     }
@@ -373,5 +374,64 @@ extension MetadataWriterTests {
         #expect(profiles.activate(try #require(profiles.owner)))
         let valid = await library.writeTags(TagEdits(album: "Allowed"), to: [try #require(library.tracks.first)])
         #expect(valid.isComplete && valid.written.count == 1)
+    }
+}
+
+
+extension MetadataWriterTests {
+    @Test func fillingMissingGenresReadsExistingTagsInsteadOfTrustingAStaleCache() async throws {
+        let drive = fixtureDrive()
+        var cached = track(mp3Path, title: "Morning")
+        cached.genreTag = nil
+        let original = await drive.files
+        let report = await MetadataWriter().write(TagEdits(genre: "Dance"), to: [cached], drive: drive, onlyIfGenreMissing: true)
+        #expect(report.written.isEmpty && report.failures.isEmpty)
+        #expect(report.unchanged.first?.genreTag == "Rock")
+        #expect(await drive.files == original)
+        #expect(await drive.calls.isEmpty)
+    }
+
+    @Test func missingGenreIsWrittenWhileAudioBytesAndOtherTagsStayIntact() async throws {
+        let noGenre = Data(mp3Bytes).replacingRockWithBlank()
+        let drive = WriterFixtureDrive(files: [mp3Path: noGenre])
+        let report = await MetadataWriter().write(TagEdits(genre: "Dance"), to: [track(mp3Path, title: "Morning")], drive: drive, onlyIfGenreMissing: true)
+        #expect(report.written.count == 1 && report.failures.isEmpty)
+        #expect(try await readTags(drive, mp3Path)?.genre == "Dance")
+        #expect(try await readTags(drive, mp3Path)?.title == "Morning")
+        #expect(await drive.files[mp3Path]?.suffix(417) == noGenre.suffix(417))
+    }
+
+    @Test func anotherClientsEditDuringUploadIsPreservedAndStagedCopyIsRemoved() async throws {
+        let drive = fixtureDrive()
+        let changed = Data(mp3Bytes) + Data([1, 2, 3])
+        await drive.setOnUpload { await drive.setFile(mp3Path, changed) }
+        let report = await MetadataWriter().write(TagEdits(genre: "Dance"), to: [track(mp3Path, title: "Morning")], drive: drive)
+        #expect(report.written.isEmpty)
+        #expect(report.failures.first?.message == RemoteWriteError.changed.localizedDescription)
+        #expect(await drive.files[mp3Path] == changed)
+        #expect(await drive.files.keys.allSatisfy { !$0.contains(".gumbo-") })
+    }
+}
+
+private nonisolated extension Data {
+    func replacingRockWithBlank() -> Data {
+        var result = self
+        if let range = result.range(of: Data("Rock".utf8)) { result.replaceSubrange(range, with: Data("    ".utf8)) }
+        return result
+    }
+}
+
+extension MetadataWriterTests {
+    @Test func aGenreSuggestionForAnOlderFileVersionCannotChangeItsReplacement() async throws {
+        let drive = fixtureDrive()
+        var reviewed = track(mp3Path, title: "Morning")
+        reviewed.genreTag = nil
+        reviewed.sourceModifiedAt = 1_699_999_999
+        let original = await drive.files
+        let report = await MetadataWriter().write(TagEdits(genre: "Dance"), to: [reviewed], drive: drive, onlyIfGenreMissing: true)
+        #expect(report.written.isEmpty)
+        #expect(report.failures.first?.message == RemoteWriteError.changed.localizedDescription)
+        #expect(await drive.files == original)
+        #expect(await drive.calls.isEmpty)
     }
 }

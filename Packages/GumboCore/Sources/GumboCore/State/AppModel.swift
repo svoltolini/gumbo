@@ -300,7 +300,7 @@ public final class AppModel {
     private var demoScanning = false
 
     private func startIndexing(showsProgress: Bool, forceMetadataReread: Bool = false) {
-        guard !library.metadataWriter.isWriting, let drive = library.drive, let connection, let path = connection.musicPath else { return }
+        guard !library.isDeletingFiles, !library.metadataWriter.isWriting, let drive = library.drive, let connection, let path = connection.musicPath else { return }
         if showsProgress { stage = .indexing }
         let existing = library.catalogue.isEmpty ? nil : library.catalogue
         let generation = connectionGeneration

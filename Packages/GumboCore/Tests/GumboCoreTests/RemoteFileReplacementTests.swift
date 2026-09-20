@@ -13,12 +13,18 @@ private actor ReplacementFixtureDrive: WritableRemoteDrive {
     var failingRenameTarget: String?
     /// Bytes to drop from every upload, to simulate a transfer that did not arrive whole.
     var uploadShortfall = 0
+    var replaceBeforeRename = false
+    var failRollback = false
+    var loseRenameResponse = false
 
     init(files: [String: Data]) {
         self.files = files
     }
 
     func setFailingRenameTarget(_ name: String?) { failingRenameTarget = name }
+    func setLoseRenameResponse() { loseRenameResponse = true }
+    func setRace() { replaceBeforeRename = true }
+    func setFailRollback() { failRollback = true }
     func setUploadShortfall(_ bytes: Int) { uploadShortfall = bytes }
 
     func roots() async throws -> [RemoteEntry] { [] }
@@ -48,6 +54,8 @@ private actor ReplacementFixtureDrive: WritableRemoteDrive {
 
     func rename(_ path: String, to name: String) async throws {
         calls.append("rename \(path) -> \(name)")
+        if path == songPath, replaceBeforeRename { files[path] = Data([9, 8, 7]); replaceBeforeRename = false }
+        if failRollback, path.contains(".gumbo-backup") { throw RemoteWriteError.readOnly }
         if name == failingRenameTarget {
             failingRenameTarget = nil
             throw SynologyError.api(code: 1200, api: "SYNO.FileStation.Rename")
@@ -57,6 +65,7 @@ private actor ReplacementFixtureDrive: WritableRemoteDrive {
         guard files[target] == nil else { throw SynologyError.api(code: 414, api: "SYNO.FileStation.Rename") }
         files[path] = nil
         files[target] = data
+        if loseRenameResponse { loseRenameResponse = false; throw URLError(.networkConnectionLost) }
     }
 
     func delete(_ path: String) async throws {
@@ -90,14 +99,14 @@ private nonisolated func withLocalFile(_ data: Data, _ body: (URL) async throws 
         let files = await drive.files
         #expect(files == [songPath: newBytes])
         let calls = await drive.calls
-        #expect(calls == [
-            "upload /music/Halden Vey/Nocturne Drift/.03 Morning.mp3.gumbo-upload",
-            "info \(temporaryPath)",
-            "info \(backupPath)",
-            "rename \(songPath) -> .03 Morning.mp3.gumbo-backup",
-            "rename \(temporaryPath) -> 03 Morning.mp3",
-            "delete \(backupPath)",
-        ])
+        let temporary = try #require(calls.first?.replacingOccurrences(of: "upload ", with: ""))
+        let suffix = String(temporary.dropFirst(temporaryPath.count))
+        #expect(UUID(uuidString: String(suffix.dropFirst())) != nil)
+        let backup = backupPath + suffix
+        #expect(calls == ["upload \(temporary)", "info \(temporary)",
+            "rename \(songPath) -> \((backup as NSString).lastPathComponent)",
+            "rename \(temporary) -> 03 Morning.mp3", "delete \(backup)"])
+
     }
 
     @Test func failedSwapPutsTheOriginalBackAndRemovesTheCopy() async throws {
@@ -113,7 +122,9 @@ private nonisolated func withLocalFile(_ data: Data, _ body: (URL) async throws 
         #expect(files[temporaryPath] == nil)
         #expect(files[backupPath] == nil)
         let calls = await drive.calls
-        #expect(calls.suffix(2) == ["rename \(backupPath) -> 03 Morning.mp3", "delete \(temporaryPath)"])
+        #expect(files == [songPath: oldBytes])
+        #expect(calls.suffix(2).first?.hasPrefix("rename " + backupPath + "-") == true)
+        #expect(calls.last?.hasPrefix("delete " + temporaryPath + "-") == true)
     }
 
     @Test func shortUploadIsDiscardedAndTheOriginalKept() async throws {
@@ -130,13 +141,13 @@ private nonisolated func withLocalFile(_ data: Data, _ body: (URL) async throws 
         #expect(!calls.contains { $0.hasPrefix("rename") })
     }
 
-    @Test func staleBackupFromAnEarlierAttemptIsClearedFirst() async throws {
+    @Test func unrelatedBackupFromAnEarlierAttemptIsPreserved() async throws {
         let drive = ReplacementFixtureDrive(files: [songPath: oldBytes, backupPath: Data([1, 2, 3])])
         try await withLocalFile(newBytes) { url in
             try await drive.replaceFile(at: songPath, with: url, expectedSize: Int64(newBytes.count), modified: nil)
         }
         let files = await drive.files
-        #expect(files == [songPath: newBytes])
+        #expect(files == [songPath: newBytes, backupPath: Data([1, 2, 3])])
     }
 
     @Test func temporaryAndBackupNamesAreNeverIndexedAsMusic() {
@@ -145,6 +156,44 @@ private nonisolated func withLocalFile(_ data: Data, _ body: (URL) async throws 
             #expect(!entry.isAudio)
             #expect(!entry.isImage)
             #expect(name.hasPrefix("."))
+        }
+    }
+
+    @Test func aChangeBetweenVersionCheckAndRenameIsRestoredInsteadOfOverwritten() async throws {
+        let drive = ReplacementFixtureDrive(files: [songPath: oldBytes])
+        let original = try await drive.info(songPath)
+        await drive.setRace()
+        await #expect(throws: RemoteWriteError.changed) {
+            try await withLocalFile(newBytes) { url in
+                try await drive.replaceFile(at: songPath, with: url, expectedSize: Int64(newBytes.count), modified: nil, expectedOriginal: original)
+            }
+        }
+        #expect(await drive.files == [songPath: Data([9, 8, 7])])
+    }
+
+    @Test func aLostAcknowledgementAfterMovingTheOriginalStillRestoresIt() async throws {
+        let drive = ReplacementFixtureDrive(files: [songPath: oldBytes])
+        await drive.setLoseRenameResponse()
+        await #expect(throws: URLError.self) {
+            try await withLocalFile(newBytes) { url in
+                try await drive.replaceFile(at: songPath, with: url, expectedSize: Int64(newBytes.count), modified: nil)
+            }
+        }
+        #expect(await drive.files == [songPath: oldBytes])
+    }
+
+    @Test func failedRollbackKeepsTheBackupAndReportsItsLocation() async throws {
+        let drive = ReplacementFixtureDrive(files: [songPath: oldBytes])
+        await drive.setFailingRenameTarget("03 Morning.mp3")
+        await drive.setFailRollback()
+        do {
+            try await withLocalFile(newBytes) { url in
+                try await drive.replaceFile(at: songPath, with: url, expectedSize: Int64(newBytes.count), modified: nil)
+            }
+            Issue.record("Expected an interrupted swap")
+        } catch RemoteWriteError.recoveryNeeded(let path) {
+            #expect(path.hasPrefix(backupPath + "-"))
+            #expect(await drive.files == [path: oldBytes])
         }
     }
 

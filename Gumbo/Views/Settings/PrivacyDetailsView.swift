@@ -12,6 +12,10 @@ struct PrivacyDetailsView: View {
         ("Album artwork", [
             Self.artworkDisclosure
         ]),
+        ("Optional genre lookup and file maintenance", [
+            "When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for genres. It does not send audio, file paths or NAS sign-in details. You can enter genres yourself without using online lookup.",
+            "Saving reviewed genres writes tags into the original NAS music files. Problem Files can permanently delete selected, rechecked damaged files after confirmation. These changes affect everyone using that NAS; they are different from removing a download from your device."
+        ]),
         ("iCloud and family sharing", [
             "When iCloud is available, Gumbo syncs profile names, chosen profile photos, favourites, playlists, recent plays, searches and settings through Apple's CloudKit service. It also syncs the information needed to reconcile your changes between devices.",
             "People with your family invitation link can join and receive shared profiles and server details. Gumbo shares the NAS credentials you choose for Family Access, with the password in an encrypted CloudKit field. Use a separate read-only NAS account for your family.",
