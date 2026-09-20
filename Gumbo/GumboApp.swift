@@ -265,6 +265,9 @@ struct GumboApp: App {
             // These arguments have no effect in device or Release builds.
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("--ui-preview") {
+                if arguments.contains("--preview-slow-scan") {
+                    model.sampleScanDuration = .seconds(60)
+                }
                 profiles.openAutomaticallyIfPossible()
                 if let index = arguments.firstIndex(of: "--preview-tab"), index + 1 < arguments.count {
                     switch arguments[index + 1] {

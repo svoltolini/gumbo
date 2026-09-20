@@ -63,9 +63,9 @@ struct LibraryView: View {
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : .easeInOut(duration: 0.25), value: model.facet)
             }
             .pullToRefresh { [model] in
-                // Pull down to scan the folder again; the shelf shows progress from here on.
+                // Release the pull gesture immediately. The toolbar owns scan progress so the
+                // scroll view can settle and remain usable even on a slow connection.
                 await model.rescan()
-                try? await Task.sleep(for: .seconds(1))
             }
             .gumboBackground(player.tint)
             .navigationTitle("Library")

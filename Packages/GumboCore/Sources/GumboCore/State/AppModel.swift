@@ -65,6 +65,9 @@ public final class AppModel {
         isJoiningFamily = false
         pendingReconnectPassword = nil
         indexer.cancel()
+        demoTask?.cancel()
+        demoTask = nil
+        demoScanning = false
         // Tag writes belong to the connection they started on; the song being written finishes, the rest stop.
         library.metadataWriter.cancel()
         return connectionGeneration
@@ -298,6 +301,12 @@ public final class AppModel {
     }
     public var isScanning: Bool { isDemo ? demoScanning : indexer.isRunning }
     private var demoScanning = false
+    #if DEBUG && targetEnvironment(simulator)
+    /// Simulator-only fixture for gestures and navigation while a refresh remains in progress.
+    public var sampleScanDuration: Duration = .seconds(2.4)
+    #else
+    private let sampleScanDuration: Duration = .seconds(2.4)
+    #endif
 
     private func startIndexing(showsProgress: Bool, forceMetadataReread: Bool = false) {
         guard !library.isDeletingFiles, !library.metadataWriter.isWriting, let drive = library.drive, let connection, let path = connection.musicPath else { return }
@@ -395,11 +404,17 @@ public final class AppModel {
     }
 
     public func rescan() {
+        // Repeated pulls join the scan already in progress rather than restarting it.
+        guard !isScanning else { return }
         if isDemo {
             demoScanning = true
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2.4))
+            demoTask?.cancel()
+            let duration = sampleScanDuration
+            demoTask = Task { [weak self] in
+                do { try await Task.sleep(for: duration) }
+                catch { return }
                 self?.demoScanning = false
+                self?.demoTask = nil
             }
         } else {
             startIndexing(showsProgress: false)

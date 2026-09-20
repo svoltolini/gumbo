@@ -4,10 +4,11 @@ import XCTest
 nonisolated final class ReleaseSmokeTests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    @MainActor private func launch(tab: String = "settings", query: String? = nil) -> XCUIApplication {
+    @MainActor private func launch(tab: String = "settings", query: String? = nil, slowScan: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--sample-library", "--ui-preview", "--preview-tab", tab]
         if let query { app.launchArguments += ["--preview-query", query] }
+        if slowScan { app.launchArguments += ["--preview-slow-scan"] }
         app.launch()
         XCTAssertTrue(app.navigationBars[tab.capitalized].waitForExistence(timeout: 15))
         return app
@@ -121,6 +122,40 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
 
 
 extension ReleaseSmokeTests {
+    @MainActor func testLibraryPullSettlesAndScrollingWorksDuringSlowScan() {
+        let app = launch(tab: "library", slowScan: true)
+        let header = app.staticTexts["Recently added"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        let restingY = header.frame.minY
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let scanning = app.buttons["Library scanning"]
+        XCTAssertTrue(scanning.waitForExistence(timeout: 5))
+        let settled = NSPredicate { _, _ in abs(header.frame.minY - restingY) < 8 }
+        expectation(for: settled, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        capture(app, name: "Pull settled while scan continues")
+
+        // A repeated pull must also settle, with the existing catalogue still available.
+        start.press(forDuration: 0.05, thenDragTo: end)
+        expectation(for: settled, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        app.swipeUp()
+        XCTAssertLessThan(header.frame.minY, restingY - 40, "The library must scroll while scanning")
+        XCTAssertTrue(scanning.exists)
+        app.swipeDown()
+        XCTAssertTrue(app.staticTexts["Recently added"].firstMatch.isHittable)
+        // Opening scan details and dismissing them must not leave a blocking overlay.
+        scanning.tap()
+        XCTAssertTrue(app.navigationBars["Library Scan"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(scanning.waitForExistence(timeout: 5))
+        app.buttons["See all"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Recently added"].waitForExistence(timeout: 5))
+        capture(app, name: "Browsing albums during scan")
+    }
+
     @MainActor func testMaintenanceScreensRequireARealLibraryBeforeChangingFiles() {
         let app = launch()
         tapSettingsRow(app.buttons["settings.advanced"], in: app)
