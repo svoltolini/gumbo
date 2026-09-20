@@ -18,6 +18,8 @@ Controls are black in light appearance and off-white (`#F4F4F2`) in dark appeara
 
 - 464 Release shared-package tests passed across 28 suites, including nine new missing-record/conflict scenarios. These cover current edits, relaunch after an offline retry, cloud deletion, account changes, newer cloud records, bounded retries, ordinary network failures, encrypted family fields and cleared fields.
 - Signed Release archives passed for iOS (including Watch/widgets), universal macOS and tvOS.
+- All 11 offline iPhone interface journeys passed, covering search, scanning/scrolling, playback presentation, profile photos and Settings navigation. Settings was also visually checked in light and dark appearance, and the light player was inspected.
+- Exported distribution bundles passed signature, version, provisioning and privacy-manifest checks. iOS retains the CarPlay audio entitlement and scene; iOS, macOS and tvOS use the production Gumbo CloudKit container.
 - Release version is `1.0`; every target uses build `202609202055`.
 
 Automated CloudKit tests use injected provider outcomes and make no live cloud mutations. Actual recovery of the reported iPhone profile must be confirmed after installing the new TestFlight build. Track that device result in [#123](https://github.com/svoltolini/gumbo/issues/123).
