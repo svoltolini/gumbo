@@ -15,39 +15,55 @@ final class WatchStore: NSObject, WCSessionDelegate {
     private(set) var catalogue: WatchCatalogue?
     private(set) var hasCredentials = false
     private(set) var isSample = false
-    /// The timestamp of the last revocation applied, to reject stale catalogues/credentials that
-    /// arrive out of order after a queued revocation.
-    private var lastRevocationTimestamp: TimeInterval = 0
+    private var authorization = WatchAuthorization(revision: 0, isGranted: false)
+    private static let authorizationKey = "watch.authorization"
+    private static let catalogueRevisionKey = "watch.catalogueRevision"
+    private static let credentialsRevisionKey = "watch.credentialsRevision"
 
     private static let catalogueURL = AppDirectories.support.appending(path: "Gumbo/watch-catalogue.json")
     private static let accountKey = "watch.account"
     private static let baseURLKey = "watch.baseURL"
     private static let driveIDKey = "watch.driveID"
-    private static let revocationTimestampKey = "watch.revocationTimestamp"
 
     override init() {
         super.init()
-        lastRevocationTimestamp = UserDefaults.standard.double(forKey: Self.revocationTimestampKey)
-        if let data = try? Data(contentsOf: Self.catalogueURL), let saved = try? JSONDecoder().decode(WatchCatalogue.self, from: data) {
+        authorization = WatchAuthorization.decode(UserDefaults.standard.data(forKey: Self.authorizationKey)) ?? authorization
+        WatchPlayer.shared.setAuthorization(authorization)
+        guard authorization.isGranted else {
+            clearAccess()
+            activateConnectivity()
+            return
+        }
+        if UserDefaults.standard.string(forKey: Self.catalogueRevisionKey) == String(authorization.revision),
+           let data = try? Data(contentsOf: Self.catalogueURL), let saved = try? JSONDecoder().decode(WatchCatalogue.self, from: data) {
             catalogue = saved
             WatchDownloads.shared.reconcile(saved)
         }
         hasCredentials = credentials() != nil
+        activateConnectivity()
+    }
+
+    private func activateConnectivity() {
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
     }
 
-    /// Clears all cached credentials, catalogue, and downloaded files. Called when the phone
-    /// sends a revocation message due to profile lock or switch.
-    func revoke(timestamp: TimeInterval) {
-        guard timestamp > lastRevocationTimestamp else {
-            DiagnosticsLog.shared.record("Watch: ignoring stale revocation (timestamp \(timestamp) <= \(lastRevocationTimestamp))")
-            return
+    /// A new authorization clears both halves of the previous grant before either is applied.
+    @discardableResult
+    private func accept(_ data: Data?) -> Bool {
+        guard let incoming = WatchAuthorization.decode(data), authorization.accepts(incoming) else { return false }
+        if incoming != authorization {
+            authorization = incoming
+            UserDefaults.standard.set(incoming.encoded, forKey: Self.authorizationKey)
+            clearAccess()
+            WatchPlayer.shared.setAuthorization(incoming)
         }
-        lastRevocationTimestamp = timestamp
-        UserDefaults.standard.set(timestamp, forKey: Self.revocationTimestampKey)
+        return incoming.isGranted
+    }
 
+    private func clearAccess() {
+        WatchPlayer.shared.stop()
         let defaults = UserDefaults.standard
         if let account = defaults.string(forKey: Self.accountKey) {
             KeychainStore.delete(account: "watch|\(account)")
@@ -55,6 +71,8 @@ final class WatchStore: NSObject, WCSessionDelegate {
         defaults.removeObject(forKey: Self.accountKey)
         defaults.removeObject(forKey: Self.baseURLKey)
         defaults.removeObject(forKey: Self.driveIDKey)
+        defaults.removeObject(forKey: Self.credentialsRevisionKey)
+        defaults.removeObject(forKey: Self.catalogueRevisionKey)
         hasCredentials = false
 
         try? FileManager.default.removeItem(at: Self.catalogueURL)
@@ -63,7 +81,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
         isSample = false
 
         WatchDownloads.shared.clearAll()
-        DiagnosticsLog.shared.record("Watch: revoked credentials, catalogue, and downloads (timestamp \(timestamp))")
+        DiagnosticsLog.shared.record("Watch: cleared previous authorization")
 
         if let previous = previousCatalogue {
             WatchDownloads.shared.reconcile(WatchCatalogue(serverName: previous.serverName, profileName: nil, playlists: []))
@@ -73,7 +91,9 @@ final class WatchStore: NSObject, WCSessionDelegate {
     /// The server sign-in the phone handed over, or nil until it has.
     func credentials() -> WatchCredentials? {
         let defaults = UserDefaults.standard
-        guard let account = defaults.string(forKey: Self.accountKey),
+        guard authorization.isGranted,
+              defaults.string(forKey: Self.credentialsRevisionKey) == String(authorization.revision),
+              let account = defaults.string(forKey: Self.accountKey),
               let base = defaults.string(forKey: Self.baseURLKey), let url = URL(string: base),
               let password = KeychainStore.password(for: "watch|\(account)") else { return nil }
         return WatchCredentials(baseURL: url, account: account, password: password, driveID: defaults.string(forKey: Self.driveIDKey))
@@ -85,6 +105,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
         guard WCSession.isSupported(), WCSession.default.isReachable else { return }
         // These run on WatchConnectivity's own queue, so they must not be tied to the main actor.
         WCSession.default.sendMessage(["kind": "requestSync"], replyHandler: { @Sendable reply in
+            let authorizationData = reply["authorization"] as? Data
             let packed = reply["catalogue"] as? Data
             let status = reply["status"] as? String ?? "?"
             let base = reply["baseURL"] as? String
@@ -92,6 +113,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
             let password = reply["password"] as? String
             let driveID = reply["driveID"] as? String
             Task { @MainActor in
+                guard self.accept(authorizationData) else { return }
                 DiagnosticsLog.shared.record("Watch: sync answered, status \(status), \(packed?.count ?? 0) bytes")
                 if let packed, let data = try? (packed as NSData).decompressed(using: .lzfse) as Data {
                     self.apply(catalogueData: data)
@@ -141,7 +163,9 @@ final class WatchStore: NSObject, WCSessionDelegate {
         try? FileManager.default.createDirectory(at: Self.catalogueURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Persist normalized colours and their policy marker after receiving an older catalogue.
         if let normalized = try? JSONEncoder().encode(received) {
-            try? normalized.write(to: Self.catalogueURL, options: .atomic)
+            if (try? normalized.write(to: Self.catalogueURL, options: .atomic)) != nil {
+                UserDefaults.standard.set(String(authorization.revision), forKey: Self.catalogueRevisionKey)
+            }
         }
     }
 
@@ -154,6 +178,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
         defaults.set(credentials.baseURL.absoluteString, forKey: Self.baseURLKey)
         defaults.set(credentials.driveID, forKey: Self.driveIDKey)
         KeychainStore.save(password: credentials.password, for: "watch|\(credentials.account)")
+        defaults.set(String(authorization.revision), forKey: Self.credentialsRevisionKey)
         hasCredentials = true
     }
 
@@ -165,11 +190,12 @@ final class WatchStore: NSObject, WCSessionDelegate {
 
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
         // The file lives only for the length of this call: read it here, decode on the main actor.
+        let authorizationData = file.metadata?["authorization"] as? Data
         let kind = file.metadata?["kind"] as? String ?? "?"
         let data = try? Data(contentsOf: file.fileURL)
         Task { @MainActor in
             DiagnosticsLog.shared.record("Watch: file arrived, kind \(kind), \(data?.count ?? -1) bytes")
-            guard kind == "catalogue", let data else { return }
+            guard kind == "catalogue", let data, self.accept(authorizationData) else { return }
             self.apply(catalogueData: data)
         }
     }
@@ -177,21 +203,24 @@ final class WatchStore: NSObject, WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         guard session.isReachable else { return }
         Task { @MainActor in
-            if self.catalogue == nil { self.requestSync() }
+            self.requestSync()
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        let authorizationData = userInfo["authorization"] as? Data
         let kind = userInfo["kind"] as? String
         if kind == "revoke" {
-            let timestamp = userInfo["timestamp"] as? TimeInterval ?? Date.now.timeIntervalSince1970
-            Task { @MainActor in self.revoke(timestamp: timestamp) }
+            Task { @MainActor in _ = self.accept(authorizationData) }
             return
         }
         guard kind == "credentials",
               let base = userInfo["baseURL"] as? String, let url = URL(string: base),
               let account = userInfo["account"] as? String, let password = userInfo["password"] as? String else { return }
         let credentials = WatchCredentials(baseURL: url, account: account, password: password, driveID: userInfo["driveID"] as? String)
-        Task { @MainActor in self.apply(credentials: credentials) }
+        Task { @MainActor in
+            guard self.accept(authorizationData) else { return }
+            self.apply(credentials: credentials)
+        }
     }
 }

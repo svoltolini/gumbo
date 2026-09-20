@@ -498,3 +498,25 @@ private func multiTrackPlaylist(driveID: String = "nas-a", profileID: String = "
     #expect(decoded.validatedFileIDs(for: playlist, root: directory) == manifest.validatedFileIDs(for: playlist, root: directory))
     #expect(decoded.outstandingTrackIDs(for: playlist, root: directory) == manifest.outstandingTrackIDs(for: playlist, root: directory))
 }
+
+@Test func repeatedWatchSongsShareOneFileAndKeepAllQueueOccurrencesAcrossRelaunch() throws {
+    var playlist = watchPlaylist()
+    playlist.tracks += playlist.tracks
+    playlist.totalSongs = 2
+    let job = try #require(WatchDownloadJob(playlist: playlist, track: playlist.tracks[0], generation: UUID()))
+    let directory = try downloadTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let destination = job.destination(in: directory)
+    try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try watchAudioFixture.write(to: destination)
+    var manifest = WatchDownloadManifest()
+    manifest.desired = [job.trackID]
+    manifest.files[job.trackID] = job.generation.uuidString + "/" + job.fileName
+    let restored = try JSONDecoder().decode(WatchDownloadManifest.self, from: JSONEncoder().encode(manifest))
+    #expect(restored.validatedFileIDs(for: playlist, root: directory) == [job.trackID])
+    #expect(restored.invalidFileIDs(for: playlist, root: directory).isEmpty)
+    #expect(restored.outstandingTrackIDs(for: playlist, root: directory).isEmpty)
+    #expect(restored.availableFiles(for: playlist, root: directory).map { $0.track.id } == playlist.tracks.map(\.id))
+    #expect(playlist.uniqueTracks.count == 1)
+    #expect(playlist.totalBytes == Int64(watchAudioFixture.count))
+}

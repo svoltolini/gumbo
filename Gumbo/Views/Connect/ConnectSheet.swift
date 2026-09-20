@@ -132,7 +132,10 @@ private struct ProfileSaveErrorAlert: ViewModifier {
             get: { profiles.persistenceFailure != nil },
             set: { if !$0 { profiles.dismissPersistenceError() } }
         )) {
-            if profiles.canOpenWithoutSavedData {
+            if !profiles.isProfileIndexReadable {
+                Button("Try Again") { Task { profiles.retryProfileIndex() } }
+                Button("Not Now", role: .cancel) { profiles.dismissPersistenceError() }
+            } else if profiles.canOpenWithoutSavedData {
                 Button("Open Without Saved Data", role: .destructive) {
                     // After the alert has let go of its binding, so a failure here is reported.
                     Task { profiles.openWithoutSavedData() }

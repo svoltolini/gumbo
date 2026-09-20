@@ -95,6 +95,7 @@ public nonisolated struct SearchResults: Sendable {
 @Observable
 public final class LibraryStore {
     public private(set) var catalogue: Catalogue = .empty
+    private var artworkDirectory: URL { CoverStore.scopedDirectory(driveID: catalogue.driveID, rootPath: catalogue.rootPath) }
 
     public init() {}
     public var drive: (any RemoteDrive)?
@@ -145,6 +146,9 @@ public final class LibraryStore {
 
     /// Writes tag changes into the files on the server and reports progress to the screen that asked.
     public let metadataWriter = MetadataWriter()
+    public private(set) var metadataMutationRevision = 0
+    private var catalogueRevision = 0
+    public var onMetadataWriteWillBegin: (() -> Void)?
     /// Called when writing a new title gave an album another identity: the old album id, then the new.
     public var onAlbumRenamed: ((String, String) -> Void)?
 
@@ -173,13 +177,20 @@ public final class LibraryStore {
     // MARK: Catalogue
 
     public func replace(with catalogue: Catalogue, drive: (any RemoteDrive)?) {
+        catalogueRevision += 1
         let previous = self.catalogue
         let firstLoad = albums.isEmpty
         let driveChanged = catalogue.driveID != previous.driveID
+        let artworkScopeChanged = driveChanged || catalogue.rootPath != previous.rootPath
+        if artworkScopeChanged {
+            palettes = [:]
+            coveredAlbumIDs = []
+            coverVersions = [:]
+        }
         if driveChanged || catalogue.rootPath != previous.rootPath {
             CatalogueCache.shared.invalidatePendingWrites()
         }
-        let sameAlbums = !firstLoad && !driveChanged && catalogue.albums == previous.albums
+        let sameAlbums = !firstLoad && !artworkScopeChanged && catalogue.albums == previous.albums
         self.catalogue = catalogue
         self.drive = drive
         if firstLoad || driveChanged {
@@ -192,7 +203,10 @@ public final class LibraryStore {
             derivationGeneration &+= 1
             derivationTask?.cancel()
             derivationTask = nil
-            apply(DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hidesBracketedTitleParts, genreAliases: genreAliases, knownPalettes: palettes, includeFolders: true))
+            let derived = CoverStore.$directoryOverride.withValue(artworkDirectory) {
+                DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hidesBracketedTitleParts, genreAliases: genreAliases, knownPalettes: palettes, includeFolders: true)
+            }
+            apply(derived)
         } else {
             // Later catalogues (refreshes, tags settling) are derived in the background so the screen
             // never waits; when nothing changed only the cover index is looked at again.
@@ -227,11 +241,14 @@ public final class LibraryStore {
         let hides = hidesBracketedTitleParts
         let aliases = genreAliases
         let known = palettes
+        let coverDirectory = artworkDirectory
         derivationTask = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let started = ContinuousClock.now
             let derived = await Task.detached(priority: .userInitiated) {
-                DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hides, genreAliases: aliases, knownPalettes: known, includeFolders: includeFolders)
+                CoverStore.$directoryOverride.withValue(coverDirectory) {
+                    DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hides, genreAliases: aliases, knownPalettes: known, includeFolders: includeFolders)
+                }
             }.value
             guard let self, !Task.isCancelled, generation == derivationGeneration else { return }
             apply(derived)
@@ -277,9 +294,12 @@ public final class LibraryStore {
 
     /// Reads colours for covers saved before palettes existed, off the main thread, then refreshes the albums.
     private func readPalettes(for albumIDs: Set<String>) {
+        let coverDirectory = artworkDirectory
         Task { [weak self] in
-            let found = await Task.detached(priority: .utility) { CoverStore.computePalettes(for: albumIDs) }.value
-            guard let self, !found.isEmpty else { return }
+            let found = await Task.detached(priority: .utility) {
+                CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.computePalettes(for: albumIDs) }
+            }.value
+            guard let self, self.artworkDirectory == coverDirectory, !found.isEmpty else { return }
             palettes.merge(found) { _, new in new }
             rebuildDerived()
         }
@@ -290,6 +310,7 @@ public final class LibraryStore {
     /// Shows every album whose genre currently reads `name` under `newName` instead. Picking the name
     /// of another genre merges the two; typing a tag's original name undoes its rename.
     public func renameGenre(_ name: String, to newName: String) {
+        guard profiles?.isLocked != true else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != name else { return }
         let tags = Set(catalogue.albums.map(\.genre)).filter { (genreAliases[$0] ?? $0) == name }
@@ -308,12 +329,14 @@ public final class LibraryStore {
 
     /// Shows the tag under its original name again.
     public func resetGenre(tag: String) {
+        guard profiles?.isLocked != true else { return }
         genreAliases[tag] = nil
         saveGenreAliases()
         rebuildDerived()
     }
 
     public func resetGenreNames() {
+        guard profiles?.isLocked != true else { return }
         genreAliases = [:]
         saveGenreAliases()
         rebuildDerived()
@@ -328,7 +351,7 @@ public final class LibraryStore {
     // MARK: Writing tags
 
     /// Whether edits can reach the files themselves: a signed-in server that accepts uploads.
-    public var canWriteTags: Bool { !isDemo && (drive as? any WritableRemoteDrive) != nil }
+    public var canWriteTags: Bool { profiles?.isLocked != true && !isDemo && (drive as? any WritableRemoteDrive) != nil }
 
     /// Every song shown under the genre `name`: those whose own tag reads it, plus tagless songs of
     /// albums filed there. Songs not yet read are left alone, since their real tag is unknown.
@@ -363,9 +386,10 @@ public final class LibraryStore {
         // Files the catalogue already knows to carry the name are not fetched just to find that out.
         let pending = affected.filter { $0.genreTag.nonEmpty != target }
         let sourceID = catalogue.driveID
+        let session = profiles?.sessionID
         var report = await writeTags(TagEdits(genre: target), to: pending)
         report.unchanged += affected.filter { $0.genreTag.nonEmpty == target }
-        guard catalogue.driveID == sourceID else { return report }
+        guard catalogue.driveID == sourceID, profiles?.isLocked != true, profiles?.sessionID == session else { return report }
         // Failed songs, and songs never tried when the job was stopped, keep showing the asked-for
         // name through an alias of the tag their file still carries.
         var untouched = Set(report.failures.map(\.trackID))
@@ -426,19 +450,33 @@ public final class LibraryStore {
     /// Writes `edits` into the given songs' files on the server, then folds the written tags into the
     /// catalogue and regroups albums by them. Songs that could not be written are listed in the report.
     public func writeTags(_ edits: TagEdits, to tracks: [Track]) async -> MetadataWriteReport {
+        guard profiles?.isLocked != true else {
+            var report = MetadataWriteReport()
+            report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notAuthorized.localizedDescription) }
+            return report
+        }
         guard let drive = drive as? any WritableRemoteDrive, !isDemo else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notConnected.localizedDescription) }
             return report
         }
         let sourceID = catalogue.driveID
-        let report = await metadataWriter.write(edits, to: tracks, drive: drive)
-        guard catalogue.driveID == sourceID, !report.written.isEmpty else { return report }
+        let rootPath = catalogue.rootPath
+        let session = profiles?.sessionID
+        metadataMutationRevision += 1
+        onMetadataWriteWillBegin?()
+        let report = await metadataWriter.write(edits, to: tracks, drive: drive) { [weak self] in
+            guard let self else { return false }
+            return self.profiles?.isLocked != true && self.profiles?.sessionID == session
+                && self.catalogue.driveID == sourceID && self.catalogue.rootPath == rootPath
+        }
+        guard catalogue.driveID == sourceID, catalogue.rootPath == rootPath, !report.written.isEmpty else { return report }
         let before = catalogue
+        let revision = catalogueRevision
         var patched = before
         for track in report.written { patched.apply(track) }
         // Regrouping walks the whole library; off the main thread like the indexer does it.
-        let coverDirectory = CoverStore.directory
+        let coverDirectory = artworkDirectory
         var regrouped = await Task.detached(priority: .userInitiated) { [patched] in
             CoverStore.$directoryOverride.withValue(coverDirectory) {
                 var catalogue = patched
@@ -446,8 +484,8 @@ public final class LibraryStore {
                 return catalogue
             }
         }.value
-        guard catalogue.driveID == sourceID else { return report }
-        if catalogue.indexedAt != before.indexedAt {
+        guard catalogue.driveID == sourceID, catalogue.rootPath == rootPath else { return report }
+        if catalogueRevision != revision {
             // A scan published while regrouping ran; fold the written tags into that newer catalogue instead.
             regrouped = catalogue
             for track in report.written { regrouped.apply(track) }
@@ -515,7 +553,7 @@ public final class LibraryStore {
     // MARK: Media
 
     public func coverURL(for album: Album) -> URL? {
-        coveredAlbumIDs.contains(album.id) ? CoverStore.fileURL(for: album.id) : nil
+        coveredAlbumIDs.contains(album.id) ? CoverStore.$directoryOverride.withValue(artworkDirectory) { CoverStore.fileURL(for: album.id) } : nil
     }
 
     public private(set) var coverVersions: [String: Int] = [:]
@@ -527,17 +565,18 @@ public final class LibraryStore {
     public func refreshCover(for album: Album) async -> String {
         guard let drive else { return "Not connected to the server." }
         let sourceID = catalogue.driveID
-        CoverStore.remove(for: album.id)
+        let coverDirectory = artworkDirectory
+        CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.remove(for: album.id) }
         coveredAlbumIDs.remove(album.id)
         palettes[album.id] = nil
         let chosen = await LibraryIndexer.fetchCover(for: album, drive: drive)
-        guard !Task.isCancelled, catalogue.driveID == sourceID, self.drive?.id == drive.id else {
+        guard !Task.isCancelled, catalogue.driveID == sourceID, artworkDirectory == coverDirectory, self.drive?.id == drive.id else {
             return "The library changed before the cover finished loading."
         }
         if let (data, source) = chosen {
-            CoverStore.save(data, for: album.id)
+            CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.save(data, for: album.id) }
             coveredAlbumIDs.insert(album.id)
-            palettes[album.id] = CoverStore.palette(for: album.id)
+            palettes[album.id] = CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.palette(for: album.id) }
             coverVersions[album.id, default: 0] += 1
             rebuildDerived()
             DiagnosticsLog.shared.record("Refreshed cover for “\(album.title)”: \(source)")

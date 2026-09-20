@@ -180,6 +180,20 @@ private struct WelcomeContent: View {
                 .buttonStyle(.glass)
                 .controlSize(.extraLarge)
             }
+            Button("Explore Sample Library") {
+                model.useSampleLibrary()
+                model.openLibrary()
+            }
+            .font(.subheadline)
+            .buttonStyle(.borderless)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 14)
+            Text("Browse a demo with simulated playback. No account needed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .padding(.top, 4)
             #if !os(tvOS)
             if cloud.family?.isReachable != true {
                 // Invited people whose link opened in a browser paste it here instead.

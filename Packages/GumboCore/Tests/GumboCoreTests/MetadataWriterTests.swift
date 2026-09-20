@@ -10,6 +10,7 @@ private actor WriterFixtureDrive: WritableRemoteDrive {
     var files: [String: Data]
     var calls: [String] = []
     var uploadError: (any Error)?
+    var onInfo: (@Sendable () async -> Void)?
     var onUpload: (@Sendable () async -> Void)?
 
     init(files: [String: Data]) {
@@ -17,6 +18,7 @@ private actor WriterFixtureDrive: WritableRemoteDrive {
     }
 
     func setUploadError(_ error: (any Error)?) { uploadError = error }
+    func setOnInfo(_ hook: (@Sendable () async -> Void)?) { onInfo = hook }
     func setOnUpload(_ hook: (@Sendable () async -> Void)?) { onUpload = hook }
 
     func roots() async throws -> [RemoteEntry] { [] }
@@ -30,6 +32,7 @@ private actor WriterFixtureDrive: WritableRemoteDrive {
     }
 
     func info(_ path: String) async throws -> RemoteEntry {
+        if let onInfo { await onInfo() }
         guard let data = files[path] else { throw SynologyError.api(code: 408, api: "SYNO.FileStation.List") }
         return RemoteEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: false, size: Int64(data.count), modified: Date(timeIntervalSince1970: 1_700_000_000))
     }
@@ -318,5 +321,57 @@ private nonisolated func readTags(_ drive: WriterFixtureDrive, _ path: String) a
         var renamed = after
         renamed.album = "Concert (Disc 2)"
         #expect(throws: Never.self) { try MetadataWriter.verify(before: after, after: renamed, edits: TagEdits(album: "Concert")) }
+    }
+}
+
+extension MetadataWriterTests {
+    @Test func lockingDuringUploadFinishesTheCurrentSwapAndDoesNotStartAnotherSong() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "writer-late-lock-\(UUID())")
+        let suite = "writer-late-lock-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let profiles = ProfileStore(directory: directory, defaults: defaults)
+        let drive = fixtureDrive()
+        let library = await self.library(over: drive)
+        library.profiles = profiles
+        profiles.onDeactivate = { library.metadataWriter.cancel() }
+        #expect(profiles.activate(try #require(profiles.owner)))
+        let original = await drive.files
+        await drive.setOnUpload { await profiles.lock() }
+        let report = await library.writeTags(TagEdits(genre: "Ambient"), to: [track(mp3Path, title: "Morning"), track(flacPath, title: "Second Light")])
+        #expect(profiles.isLocked && report.wasCancelled)
+        #expect(report.written.map(\.id) == [mp3Path])
+        #expect(await drive.calls.count == 1)
+        #expect(try await readTags(drive, mp3Path)?.genre == "Ambient")
+        #expect(await drive.files[flacPath] == original[flacPath])
+        #expect(await drive.files.keys.sorted() == original.keys.sorted())
+    }
+
+    @Test func lockedProfileAndLockDuringReadCannotReplaceNASFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "writer-auth-\(UUID())")
+        let suite = "writer-auth-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let profiles = ProfileStore(directory: directory, defaults: defaults)
+        let drive = fixtureDrive()
+        let library = await self.library(over: drive)
+        library.profiles = profiles
+        let original = await drive.files
+        let locked = await library.writeTags(TagEdits(album: "Rejected"), to: library.tracks)
+        #expect(!locked.isComplete && locked.written.isEmpty)
+        #expect(await drive.calls.isEmpty)
+        #expect(profiles.activate(try #require(profiles.owner)))
+        var invalidatedScan = false
+        library.onMetadataWriteWillBegin = { invalidatedScan = library.metadataMutationRevision > 0 }
+        await drive.setOnInfo { await profiles.lock() }
+        let suspended = await library.writeTags(TagEdits(album: "Also rejected"), to: library.tracks)
+        #expect(invalidatedScan)
+        #expect(!suspended.isComplete && suspended.written.isEmpty)
+        #expect(await drive.calls.isEmpty)
+        #expect(await drive.files == original)
+        await drive.setOnInfo(nil)
+        #expect(profiles.activate(try #require(profiles.owner)))
+        let valid = await library.writeTags(TagEdits(album: "Allowed"), to: [try #require(library.tracks.first)])
+        #expect(valid.isComplete && valid.written.count == 1)
     }
 }

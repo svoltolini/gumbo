@@ -804,6 +804,29 @@ public final class DownloadManager {
         return state
     }
 
+    /// Widget membership requires complete local audio, including files restored from disk.
+    public func verifiedAlbumsForWidget(_ albums: [Album]) -> [Album] {
+        let listed = listedOwnerIDs
+        return albums.filter { album in
+            listed.contains(owner(for: album).id) && !album.tracks.isEmpty
+                && album.tracks.allSatisfy { verifiedLocalFile(for: $0) }
+        }
+    }
+
+    public func verifiedSongCountForWidget(_ tracks: [Track]) -> Int {
+        Set(tracks.filter { verifiedLocalFile(for: $0) }.map(\.id)).count
+    }
+
+    private func verifiedLocalFile(for track: Track) -> Bool {
+        guard let record = record(for: track),
+              record.owners.contains(where: { $0.hasPrefix(DownloadOwner.scope(activeProfileID)) }),
+              let url = localURL(for: track),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.int64Value else { return false }
+        return size > 0 && size == record.bytes
+    }
+
     public var totalBytes: Int64 { records.values.reduce(0) { $0 + $1.bytes } }
 
     /// A song that is queued but whose file has not started coming down yet.
@@ -821,7 +844,7 @@ public final class DownloadManager {
         guard let session else { return }
         let requestID = requestKey(ownerID: owner.id, driveID: driveID)
         requests[requestID] = OwnerRequest(ownerID: owner.id, driveID: driveID, title: owner.title, subtitle: owner.subtitle,
-                                          keys: Set(owner.tracks.map { Self.cacheKey(trackID: $0.id, driveID: driveID) }), total: owner.tracks.count)
+                                          keys: Set(owner.tracks.map { Self.cacheKey(trackID: $0.id, driveID: driveID) }), total: Set(owner.tracks.map(\.id)).count)
         var pending = pendingByOwner[owner.id] ?? []
         var shared = 0
         var attached = 0
@@ -1266,7 +1289,7 @@ public final class DownloadManager {
         }.count
         let pending = (pendingByOwner[ownerID] ?? []).intersection(request.keys)
         let inFlight = pending.reduce(0.0) { $0 + (progressByKey[$1] ?? 0) }
-        let total = request.total
+        let total = request.keys.count
         let outcome: DownloadOutcome
         if done == total && total > 0 { outcome = .downloaded }
         else if !pending.isEmpty { outcome = .downloading }

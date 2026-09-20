@@ -10,9 +10,16 @@ import GumboCore
 @Observable
 @MainActor
 final class WatchPlayer {
+    static let shared = WatchPlayer()
+    private var authorization = WatchAuthorization(revision: 0, isGranted: false)
+    private var intent = PlaybackIntentRevision()
+    private var pendingActivation = false
+    private var itemPositions: [ObjectIdentifier: Int] = [:]
+
     private(set) var current: WatchTrack?
     private(set) var isPlaying = false
     private(set) var queueTitle: String?
+    private(set) var lastError: String?
 
     private let player = AVQueuePlayer()
     private var queue: [(track: WatchTrack, url: URL)] = []
@@ -27,9 +34,8 @@ final class WatchPlayer {
             Task { @MainActor in self?.currentItemChanged(item) }
         })
         observers.append(player.observe(\.timeControlStatus, options: [.new]) { @Sendable [weak self] player, _ in
-            let playing = player.timeControlStatus == .playing
             Task { @MainActor in
-                self?.isPlaying = playing
+                self?.isPlaying = self?.player.timeControlStatus == .playing
                 self?.updateNowPlaying()
             }
         })
@@ -37,49 +43,116 @@ final class WatchPlayer {
 
     /// Starts the playlist from a song, in order or shuffled.
     func play(_ files: [(track: WatchTrack, url: URL)], title: String, startingAt index: Int = 0, shuffled: Bool = false) async {
-        guard !files.isEmpty else { return }
+        guard authorization.isGranted, !files.isEmpty,
+              WatchDownloads.shared.allowsPlayback(files) else { return }
+        let command = intent.advance()
+        pendingActivation = true
+        lastError = nil
         var order = files
         if shuffled {
             order.shuffle()
         } else if index > 0, index < order.count {
             order = Array(order[index...]) + Array(order[..<index])
         }
-        queue = order
-        queueTitle = title
         setupRemoteCommands()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
-            _ = try await session.activate(options: [])
+            guard try await session.activate(options: []) else {
+                if intent.accepts(command) {
+                    pendingActivation = false
+                    if !Task.isCancelled { lastError = "Audio couldn't start. Connect your headphones and try again." }
+                }
+                return
+            }
         } catch {
+            if intent.accepts(command) {
+                pendingActivation = false
+                if !Task.isCancelled { lastError = "Audio couldn't start. \(error.localizedDescription)" }
+            }
             return
         }
+        guard intent.accepts(command) else { return }
+        pendingActivation = false
+        guard !Task.isCancelled, authorization.isGranted,
+              WatchDownloads.shared.allowsPlayback(order) else { return }
+        queue = order
+        queueTitle = title
         player.removeAllItems()
         itemTracks = [:]
-        for entry in order {
+        itemPositions = [:]
+        for (position, entry) in order.enumerated() {
             let item = AVPlayerItem(url: entry.url)
             itemTracks[ObjectIdentifier(item)] = entry.track
+            itemPositions[ObjectIdentifier(item)] = position
             player.insert(item, after: nil)
         }
         player.play()
     }
 
-    func togglePlayPause() {
-        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+    func setAuthorization(_ value: WatchAuthorization) {
+        if authorization != value { stop() }
+        authorization = value
     }
 
-    func next() { player.advanceToNextItem() }
+    func stop() {
+        intent.advance()
+        pendingActivation = false
+        player.pause()
+        player.removeAllItems()
+        queue = []
+        itemTracks = [:]
+        itemPositions = [:]
+        current = nil
+        queueTitle = nil
+        isPlaying = false
+        lastError = nil
+        updateNowPlaying()
+    }
+
+    func dismissPlaybackError() { lastError = nil }
+
+    private func pause() {
+        intent.advance()
+        pendingActivation = false
+        player.pause()
+    }
+
+    private func resume() {
+        guard authorization.isGranted, player.currentItem != nil else { return }
+        intent.advance()
+        pendingActivation = false
+        player.play()
+    }
+
+    func togglePlayPause() {
+        if pendingActivation || player.timeControlStatus == .playing { pause() } else { resume() }
+    }
+
+    func next() {
+        intent.advance()
+        pendingActivation = false
+        player.advanceToNextItem()
+    }
 
     func previous() {
-        guard let track = current, let index = queue.firstIndex(where: { $0.track.id == track.id }) else { return }
+        guard authorization.isGranted, let item = player.currentItem, let index = itemPositions[ObjectIdentifier(item)] else { return }
+        let command = intent.advance()
+        pendingActivation = false
         if player.currentTime().seconds > 3 || index == 0 {
             player.seek(to: .zero)
         } else {
-            Task { await play(queue, title: queueTitle ?? "", startingAt: index - 1) }
+            let files = queue
+            let title = queueTitle ?? ""
+            Task {
+                guard intent.accepts(command) else { return }
+                await play(files, title: title, startingAt: index - 1)
+            }
         }
     }
 
     private func currentItemChanged(_ item: AVPlayerItem?) {
+        guard item === player.currentItem else { return }
         current = item.flatMap { itemTracks[ObjectIdentifier($0)] }
         updateNowPlaying()
     }
@@ -88,11 +161,21 @@ final class WatchPlayer {
         guard !commandsReady else { return }
         commandsReady = true
         let centre = MPRemoteCommandCenter.shared()
-        centre.playCommand.addTarget { [weak self] _ in self?.player.play(); return .success }
-        centre.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); return .success }
-        centre.togglePlayPauseCommand.addTarget { [weak self] _ in self?.togglePlayPause(); return .success }
-        centre.nextTrackCommand.addTarget { [weak self] _ in self?.next(); return .success }
-        centre.previousTrackCommand.addTarget { [weak self] _ in self?.previous(); return .success }
+        // Remote command callbacks may arrive on a system queue, as with the shared player.
+        func onMain(_ action: @escaping @MainActor (WatchPlayer) -> Void) -> @Sendable (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus {
+            { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    action(self)
+                }
+                return .success
+            }
+        }
+        centre.playCommand.addTarget(handler: onMain { $0.resume() })
+        centre.pauseCommand.addTarget(handler: onMain { $0.pause() })
+        centre.togglePlayPauseCommand.addTarget(handler: onMain { $0.togglePlayPause() })
+        centre.nextTrackCommand.addTarget(handler: onMain { $0.next() })
+        centre.previousTrackCommand.addTarget(handler: onMain { $0.previous() })
     }
 
     private func updateNowPlaying() {

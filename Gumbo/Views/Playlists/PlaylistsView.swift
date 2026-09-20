@@ -152,13 +152,20 @@ struct PlaylistDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     /// The playlist as it is right now, since favourites and contents change while the page is open.
-    private var live: Playlist { library.playlist(id: playlist.id) ?? playlist }
+    private var live: Playlist? { library.playlist(id: playlist.id) }
     private var isLocal: Bool { library.isLocalPlaylist(playlist.id) }
     /// Your own lists and Favourites can be kept on the iPhone; the mixes change on their own, so they cannot.
     private var canDownload: Bool { playlist.kind == .local || playlist.id == Playlist.favouritesID }
 
     var body: some View {
-        let playlist = live
+        if let playlist = live {
+            content(playlist)
+        } else {
+            ContentUnavailableView("Playlist Unavailable", systemImage: "music.note.list", description: Text("Choose a playlist from your current profile."))
+        }
+    }
+
+    private func content(_ playlist: Playlist) -> some View {
         ScrollView {
             VStack(spacing: 0) {
                 DetailHeader(coverSize: 200) {

@@ -9,7 +9,7 @@ nonisolated enum LibraryRoute: Hashable {
 /// A titled list of albums, used by "See all" and genre drill-downs.
 nonisolated struct AlbumCollection: Hashable {
     let title: String
-    let albums: [Album]
+    let query: AlbumCollectionQuery
 }
 
 struct LibraryView: View {
@@ -219,10 +219,11 @@ struct FacetPicker: View {
 
 struct AlbumCollectionView: View {
     let collection: AlbumCollection
+    @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
 
     var body: some View {
-        List(collection.albums) { album in
+        List(library.albums(matching: collection.query)) { album in
             let destination = AlbumDestination(album, source: "collection")
             NavigationLink(value: destination) {
                 AlbumRow(album: album, detail: "\(album.artist)\(album.year > 0 ? " · \(String(album.year))" : "")", destination: destination)

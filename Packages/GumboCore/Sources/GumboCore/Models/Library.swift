@@ -61,7 +61,7 @@ public nonisolated struct Track: Identifiable, Hashable, Codable, Sendable {
     public var enrichAttemptedAt: Date? = nil
 
     /// Bump when tag reading improves so already indexed tracks pick up the change.
-    public nonisolated static let currentTagVersion = 2
+    public nonisolated static let currentTagVersion = 3
 
     public var fileName: String {
         if let path, let last = path.split(separator: "/").last { return String(last) }

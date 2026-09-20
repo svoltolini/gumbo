@@ -5,8 +5,21 @@ import WatchKit
 /// Playlists on one page, the system's Now Playing on the next, the way music apps read on the wrist.
 struct WatchRootView: View {
     @Environment(WatchStore.self) private var store
+    @Environment(WatchPlayer.self) private var player
 
     var body: some View {
+        content
+            .alert("Playback couldn't start", isPresented: Binding(
+                get: { player.lastError != nil },
+                set: { if !$0 { player.dismissPlaybackError() } }
+            )) {
+                Button("OK") { player.dismissPlaybackError() }
+            } message: {
+                Text(player.lastError ?? "")
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         if store.catalogue == nil {
             SetupHintView()
         } else {
@@ -38,6 +51,8 @@ struct SetupHintView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                Button("Explore Sample Library") { store.loadSample() }
+                    .font(.caption)
                 Button("Sync now") { store.requestSync() }
                     .font(.caption)
                     .padding(.top, 2)

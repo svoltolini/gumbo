@@ -6,7 +6,7 @@ import WatchKit
 struct GumboWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchDelegate.self) private var delegate
     @State private var store = WatchStore()
-    @State private var player = WatchPlayer()
+    @State private var player = WatchPlayer.shared
 
     var body: some Scene {
         WindowGroup {

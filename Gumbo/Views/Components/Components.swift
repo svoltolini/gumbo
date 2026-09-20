@@ -497,7 +497,7 @@ nonisolated struct FlowLayout: Layout {
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: width.isFinite ? max(0, width) : nil, height: nil))
             if x > 0, x + size.width > width {
                 x = 0
                 y += rowHeight + spacing
@@ -514,7 +514,7 @@ nonisolated struct FlowLayout: Layout {
         var y = bounds.minY
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: max(0, bounds.width), height: nil))
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing

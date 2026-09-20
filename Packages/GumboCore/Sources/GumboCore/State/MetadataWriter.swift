@@ -40,6 +40,7 @@ public nonisolated struct MetadataWriteReport: Sendable {
 /// Why a song was skipped before or after the file itself was handled.
 public nonisolated enum MetadataWriteError: LocalizedError, Sendable, Equatable {
     case notConnected
+    case notAuthorized
     case noFile
     case busy
     /// The rewritten file did not read back with the expected tags, so it never left the device.
@@ -47,6 +48,7 @@ public nonisolated enum MetadataWriteError: LocalizedError, Sendable, Equatable 
 
     public var errorDescription: String? {
         switch self {
+        case .notAuthorized: "Open your profile again before changing music files."
         case .notConnected: "Not connected to the server."
         case .noFile: "This song has no file on the server."
         case .busy: "Another tag change is still being written."
@@ -75,7 +77,7 @@ public final class MetadataWriter {
         job?.cancel()
     }
 
-    public func write(_ edits: TagEdits, to tracks: [Track], drive: any WritableRemoteDrive) async -> MetadataWriteReport {
+    public func write(_ edits: TagEdits, to tracks: [Track], drive: any WritableRemoteDrive, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async -> MetadataWriteReport {
         guard !isWriting else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.busy.localizedDescription) }
@@ -89,14 +91,14 @@ public final class MetadataWriter {
             isWriting = false
             currentTitle = nil
         }
-        let job = Task { await run(edits, tracks: tracks, drive: drive) }
+        let job = Task { await run(edits, tracks: tracks, drive: drive, authorized: authorized) }
         self.job = job
         let report = await job.value
         if self.job == job { self.job = nil }
         return report
     }
 
-    private func run(_ edits: TagEdits, tracks: [Track], drive: any WritableRemoteDrive) async -> MetadataWriteReport {
+    private func run(_ edits: TagEdits, tracks: [Track], drive: any WritableRemoteDrive, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async -> MetadataWriteReport {
         var report = MetadataWriteReport()
         guard !edits.isEmpty else { return report }
         let scratch = FileManager.default.temporaryDirectory.appending(path: "gumbo-tag-writes-\(UUID().uuidString)")
@@ -116,7 +118,8 @@ public final class MetadataWriter {
                 continue
             }
             do {
-                if let written = try await Self.rewrite(track: track, edits: edits, drive: drive, scratch: scratch) {
+                guard authorized() else { throw MetadataWriteError.notAuthorized }
+                if let written = try await Self.rewrite(track: track, edits: edits, drive: drive, scratch: scratch, authorized: authorized) {
                     report.written.append(written)
                 } else {
                     report.unchanged.append(track)
@@ -141,7 +144,7 @@ public final class MetadataWriter {
 
     /// One song, start to finish. Returns the track as it now stands, or nil when the file already
     /// held the values. Anything thrown means the file on the server is exactly as it was.
-    @concurrent nonisolated static func rewrite(track: Track, edits: TagEdits, drive: any WritableRemoteDrive, scratch: URL) async throws -> Track? {
+    @concurrent nonisolated static func rewrite(track: Track, edits: TagEdits, drive: any WritableRemoteDrive, scratch: URL, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> Track? {
         guard let path = track.path else { throw MetadataWriteError.noFile }
         let name = (path as NSString).lastPathComponent
         let ext = (name as NSString).pathExtension.lowercased()
@@ -168,6 +171,8 @@ public final class MetadataWriter {
         // A second later than before: every device notices the changed file on its next scan, while
         // the album keeps its place in Recently Added.
         let modified = Date(timeIntervalSince1970: ((remote.modified ?? .now).timeIntervalSince1970 + 1).rounded(.down))
+        guard await authorized() else { throw MetadataWriteError.notAuthorized }
+        try Task.checkCancellation()
         try await drive.replaceFile(at: path, with: patched, expectedSize: newSize, modified: modified)
         var updated = track
         if let genre = edits.genre { updated.genreTag = genre }

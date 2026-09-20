@@ -295,3 +295,22 @@ import Testing
     model.cancelSignIn()
     #expect(model.pendingReconnectPassword == nil, "Pending password should be cleared when sign-in is cancelled")
 }
+
+@Test @MainActor func rejectedSavedPasswordRequestsLoginWithCachedLibraryOnRestoreAndReconnect() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    let saved = ServerConnection(name: "NAS", baseURL: URL(string: "https://nas.example:5001")!, account: "listener", musicPath: "/music")
+    try f.save(saved)
+    var catalogue = SampleLibrary.catalogue
+    catalogue.driveID = saved.sourceID
+    catalogue.rootPath = "/music"
+    f.services.loadCatalogue = { catalogue }
+    f.services.login = { _, _, _, _ in throw SynologyError.api(code: 400, api: "SYNO.API.Auth") }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    #expect(model.stage == .ready && model.pendingServer?.host == saved.host && !model.needsOTP)
+    #expect(f.library.catalogue.trackCount == catalogue.trackCount)
+    model.cancelSignIn()
+    await model.reconnect()
+    #expect(model.pendingServer?.host == saved.host)
+    #expect(f.library.catalogue.trackCount == catalogue.trackCount)
+}

@@ -87,7 +87,7 @@ public final class CloudSync {
     }
 
     public convenience init() {
-        self.init(services: .live(container: CKContainer(identifier: Self.containerID)), persistence: CloudPersistence(directory: Self.directory))
+        self.init(services: .live(container: CKContainer(identifier: Self.containerID)), persistence: CloudPersistence(directory: Self.persistenceDirectory))
     }
 
     init(services: CloudServices, persistence: CloudPersistence,
@@ -218,6 +218,11 @@ public final class CloudSync {
             // Identity discovery itself may have invalidated a missed account change.
             expected = generation
             status = .syncing
+            guard profiles?.isProfileIndexReadable != false else {
+                throw SyncFailure.message("Restore the saved profile list before syncing with iCloud.")
+            }
+            try finishFamilyRetirement()
+            try reconcileFamilyRoles()
             try await adoptSharedZoneIfPresent(expected)
             expected = generation
             if membership == .owner {
@@ -264,23 +269,60 @@ public final class CloudSync {
         services.log("Following the shared family")
     }
 
-    private func join(zoneOwnerName: String) throws {
+    func join(zoneOwnerName: String) throws {
         try persistState()
         guard var snapshot = accountState else { throw CKError(.notAuthenticated) }
+        if membership == .member, self.zoneOwnerName != zoneOwnerName {
+            excludeFormerFamily(from: &snapshot)
+        }
         snapshot.membership = Membership.member.rawValue
         snapshot.zoneOwner = zoneOwnerName
+        try installFamilyScope(snapshot)
         guard profiles?.markAllAsMembers(in: snapshot.profileIDs) != false else {
             throw SyncFailure.message("The family membership could not be saved to the profiles on this device.")
         }
+    }
+
+    private func excludeFormerFamily(from snapshot: inout CloudAccountState) {
+        let own = Set((profiles?.profiles ?? []).filter { $0.userRecordName == snapshot.account }.map(\.id))
+        let retired = snapshot.profileIDs.subtracting(own)
+        snapshot.profileIDs.subtract(retired)
+        snapshot.retiredFamilyProfileIDs = (snapshot.retiredFamilyProfileIDs ?? []).union(retired)
+    }
+
+    private func installFamilyScope(_ snapshot: CloudAccountState) throws {
+        // Save the exclusion and pending cleanup before exposing the destination zone.
         try persistence.save(snapshot)
         generation = UUID()
         for task in uploads.values { task.cancel() }
         uploads = [:]
-        membership = .member
-        self.zoneOwnerName = zoneOwnerName
+        membership = Membership(rawValue: snapshot.membership) ?? .owner
+        zoneOwnerName = snapshot.zoneOwner
         accountState = snapshot
         loadZoneState()
-        // In someone else's family this device's profiles are members, whatever they were before.
+        do {
+            try finishFamilyRetirement()
+            try reconcileFamilyRoles()
+        }
+        catch { status = .failed(Self.describe(error)); throw error }
+    }
+
+    private func reconcileFamilyRoles() throws {
+        guard let profiles, let snapshot = accountState else { return }
+        let saved = membership == .member
+            ? profiles.markAllAsMembers(in: snapshot.profileIDs)
+            : profiles.ensurePersonalOwner(in: snapshot.profileIDs)
+        guard saved else { throw SyncFailure.message("The family membership could not be saved on this device.") }
+    }
+
+    private func finishFamilyRetirement() throws {
+        guard var snapshot = accountState, let ids = snapshot.retiredFamilyProfileIDs, !ids.isEmpty else { return }
+        guard let profiles, profiles.retireFamilyProfiles(ids) else {
+            throw SyncFailure.message("Previous family data could not be removed on this device. Try syncing again.")
+        }
+        snapshot.retiredFamilyProfileIDs = nil
+        try persistence.save(snapshot)
+        accountState = snapshot
     }
 
     private func ensureSubscriptions(_ expected: UUID) async throws {
@@ -926,9 +968,33 @@ public final class CloudSync {
 
     // MARK: Sharing
 
+    public struct SharingAuthorization {
+        fileprivate let session: UUID?
+        fileprivate let isOwner: Bool
+    }
+
+    /// Capture in the button action, before scheduling any unstructured task.
+    public func sharingAuthorization() -> SharingAuthorization? {
+        if let profiles {
+            guard !profiles.isLocked else { return nil }
+            let permitted = isOwner ? profiles.canManageProfiles
+                : profiles.active?.userRecordName == currentUserRecordName && currentUserRecordName != nil
+            guard permitted else { return nil }
+        }
+        return SharingAuthorization(session: profiles?.sessionID, isOwner: isOwner)
+    }
+
+    func checkSharingAuthorization(_ authorization: SharingAuthorization) throws {
+        guard let current = sharingAuthorization(), current.session == authorization.session,
+              current.isOwner == authorization.isOwner else { throw CancellationError() }
+    }
+
     /// The share for the family zone, made on first use. Only the owner can call this.
-    public func share() async throws -> CKShare {
+    public func share(authorization supplied: SharingAuthorization? = nil) async throws -> CKShare {
+        guard let authorization = supplied ?? sharingAuthorization(), authorization.isOwner else { throw CKError(.permissionFailure) }
+        try checkSharingAuthorization(authorization)
         try await verifyIdentity(generation)
+        try checkSharingAuthorization(authorization)
         let expected = generation
         _ = try scope(expected)
         guard membership == .owner else { throw CKError(.permissionFailure) }
@@ -936,6 +1002,7 @@ public final class CloudSync {
         let recordID = shareRecordID
         let existing = try? await database.record(for: recordID) as? CKShare
         try check(expected)
+        try checkSharingAuthorization(authorization)
         let share = existing ?? CKShare(recordZoneID: zoneID)
         let title = familyTitle
         if existing != nil, share.publicPermission == .readWrite, share.url != nil, share[CKShare.SystemFieldKey.title] as? String == title {
@@ -948,8 +1015,10 @@ public final class CloudSync {
         }
         // The app hands the link out itself, so anyone who opens it may join and write their own profile.
         share.publicPermission = .readWrite
+        try checkSharingAuthorization(authorization)
         let result = try await database.modifyRecords(saving: [share], deleting: [], savePolicy: .changedKeys, atomically: true)
         try check(expected)
+        try checkSharingAuthorization(authorization)
         guard case .success(let saved) = result.saveResults[share.recordID], let savedShare = saved as? CKShare else {
             throw CKError(.internalError)
         }
@@ -1043,7 +1112,9 @@ public final class CloudSync {
     }
 
     /// Returns only after CloudKit acknowledges removal; callers must surface failures.
-    public func stopSharing() async throws {
+    public func stopSharing(authorization supplied: SharingAuthorization? = nil) async throws {
+        guard let authorization = supplied ?? sharingAuthorization() else { throw CKError(.permissionFailure) }
+        try checkSharingAuthorization(authorization)
         let expected = generation
         guard let requestedScope = sharingScopeIdentifier else { throw CKError(.notAuthenticated) }
         do {
@@ -1052,6 +1123,7 @@ public final class CloudSync {
             guard sharingScopeIdentifier == requestedScope else { throw CancellationError() }
             let context = try scope(expected)
             let id = shareRecordID
+            try checkSharingAuthorization(authorization)
             let result = try await services.modify(context, [], [id])
             try check(expected)
             guard let acknowledgement = result.deleted[id] else { throw CKError(.internalError) }
@@ -1065,16 +1137,10 @@ public final class CloudSync {
             if membership == .member {
                 try persistState()
                 guard var snapshot = accountState else { throw CKError(.notAuthenticated) }
+                excludeFormerFamily(from: &snapshot)
                 snapshot.membership = Membership.owner.rawValue
                 snapshot.zoneOwner = CKCurrentUserDefaultName
-                try persistence.save(snapshot)
-                generation = UUID()
-                for task in uploads.values { task.cancel() }
-                uploads = [:]
-                membership = .owner
-                zoneOwnerName = CKCurrentUserDefaultName
-                accountState = snapshot
-                loadZoneState()
+                try installFamilyScope(snapshot)
                 services.log("Left the family")
                 await refresh(reason: "left family")
             } else {
@@ -1105,7 +1171,7 @@ public final class CloudSync {
         accountState = snapshot
     }
 
-    private static let directory: URL = {
+    static let persistenceDirectory: URL = {
         let base = AppDirectories.support
             .appending(path: "Gumbo/cloud", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

@@ -5,17 +5,20 @@ import SwiftUI
 /// Switches between the first-run connection flow and the main tabbed app.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(LibraryStore.self) private var library
     @Environment(ProfileStore.self) private var profiles
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            if model.stage == .ready {
+            if model.stage == .ready, !profiles.isLocked {
                 MainTabView()
+                    .id(profiles.sessionID)
+                    .id(library.catalogue.driveID + "|" + library.catalogue.rootPath)
                     .allowsHitTesting(!profiles.isLocked)
                     .accessibilityHidden(profiles.isLocked)
                     .transition(.blurReplace)
-            } else {
+            } else if model.stage != .ready {
                 ConnectFlowView()
                     .transition(.blurReplace)
             }
@@ -26,7 +29,7 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: model.stage == .ready)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: profiles.isLocked)
+        .onChange(of: profiles.sessionID) { _, _ in model.clearProfileNavigation() }
     }
 }
 #endif

@@ -525,11 +525,12 @@ struct ManageProfilesView: View {
 
     /// The owner's invitation link, through the system share sheet.
     private func invite() {
+        guard let authorization = cloud.sharingAuthorization() else { return }
         isPreparingShare = true
         problem = nil
         Task {
             do {
-                share = ShareItem(share: try await cloud.share())
+                share = ShareItem(share: try await cloud.share(authorization: authorization))
             } catch {
                 problem = error.localizedDescription
             }

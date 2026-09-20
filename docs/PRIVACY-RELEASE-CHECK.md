@@ -4,6 +4,8 @@ This is an engineering inventory and publication checklist, not a claim that App
 
 ## Previously verified store state (batch 4)
 
+This section records the previous app identity. It was not refreshed during the September 20 remediation and does not establish the current Gumbo App Store record or published privacy state. New-identity verification is tracked in [#119](https://github.com/svoltolini/gumbo/issues/119).
+
 App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b91431c1962`, en-GB localization `4f44c0ad-b6c9-47e9-85cb-cae23e2c7bb2`. `privacyPolicyUrl`, `privacyChoicesUrl` and `privacyPolicyText` were all null. The owner confirmed there is no public website or support contact yet. The API record is a preparation-for-submission record; this batch does not submit a public release.
 
 ## Data flow inventory

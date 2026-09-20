@@ -10,7 +10,8 @@ public nonisolated struct FLACInfo: Sendable {
     public var tags: [String: String] = [:]
     public var picture: Data?
     public var pictureMIME: String?
-    /// When the buffer ended inside a block, the prefix length that would contain it.
+    public var isComplete = false
+    /// The prefix length needed for the next incomplete block or header.
     public var neededPrefix: Int?
 
     public var duration: TimeInterval? {
@@ -54,11 +55,6 @@ public nonisolated enum FLACHeader {
             let start = offset + 4
             let end = start + length
             if end > bytes.count {
-                // Skip a picture we don't need; otherwise ask for a longer prefix.
-                if type == 6, info.picture != nil {
-                    offset = end
-                    if isLast { break } else { continue }
-                }
                 info.neededPrefix = end
                 break
             }
@@ -84,9 +80,28 @@ public nonisolated enum FLACHeader {
                 break
             }
             offset = end
-            if isLast { break }
+            if isLast { info.isComplete = true; break }
         }
+        if !info.isComplete, info.neededPrefix == nil { info.neededPrefix = offset + 4 }
         return info
+    }
+
+    /// Read complete metadata with bounded, monotonically increasing prefixes. A partial header
+    /// must not become a successful enrichment or tag-write verification.
+    public static func read(read: (Range<Int64>) async throws -> Data) async throws -> FLACInfo? {
+        var length = initialRead
+        var previousCount = 0
+        while length <= maximumRead {
+            try Task.checkCancellation()
+            let data = try await read(0..<length)
+            guard data.count > previousCount, let info = parse(data) else { return nil }
+            if info.isComplete { return info }
+            guard let needed = info.neededPrefix, needed > data.count, Int64(needed) <= maximumRead else { return nil }
+            previousCount = data.count
+            // Include space for following blocks, rather than making a request per tiny header.
+            length = min(maximumRead, max(Int64(needed), min(maximumRead, length * 2)))
+        }
+        return nil
     }
 
     private static func parseVorbisComments(_ block: [UInt8]) -> [String: String] {

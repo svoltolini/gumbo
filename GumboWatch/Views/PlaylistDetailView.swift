@@ -165,12 +165,12 @@ struct PlaylistDetailView: View {
 
     private var songs: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(playlist.tracks.enumerated()), id: \.element.id) { index, track in
+            ForEach(Array(playlist.tracks.enumerated()), id: \.offset) { index, track in
                 Button {
                     guard isOnWatch else { return }
                     let files = downloads.files(for: playlist)
-                    guard let playableIndex = files.firstIndex(where: { $0.track.id == track.id }) else { return }
-                    Task { await player.play(files, title: playlist.name, startingAt: playableIndex) }
+                    guard files.indices.contains(index), files[index].track == track else { return }
+                    Task { await player.play(files, title: playlist.name, startingAt: index) }
                 } label: {
                     HStack(spacing: 8) {
                         if player.current?.id == track.id {

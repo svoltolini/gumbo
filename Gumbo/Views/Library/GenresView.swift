@@ -14,7 +14,7 @@ struct GenresView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 10) {
                     ForEach(library.decades) { decade in
-                        let destination = CollectionDestination(AlbumCollection(title: decade.label, albums: decade.albums), source: "decades")
+                        let destination = CollectionDestination(AlbumCollection(title: decade.label, query: .decade(decade.label)), source: "decades")
                         NavigationLink(value: destination) {
                             DecadeTile(decade: decade)
                                 .zoomSource(id: destination.sourceID, shape: .rounded(14))
@@ -34,7 +34,7 @@ struct GenresView: View {
             .padding(.top, library.decades.isEmpty ? 0 : 26)
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(library.genres) { genre in
-                let destination = CollectionDestination(AlbumCollection(title: genre.name, albums: genre.albums), source: "genres")
+                let destination = CollectionDestination(AlbumCollection(title: genre.name, query: .genre(genre.name)), source: "genres")
                 NavigationLink(value: destination) {
                     GenreCard(genre: genre)
                         .zoomSource(id: destination.sourceID, shape: .rounded(14))

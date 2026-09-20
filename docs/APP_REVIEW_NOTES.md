@@ -12,10 +12,11 @@ Gumbo includes a built-in **sample library** with 12 demonstration albums contai
 
 ### Enabling the sample library
 
-The sample library activates automatically when:
-1. Launch the app on any platform (iPhone, iPad, Mac, Apple TV, or Apple Watch)
-2. On the Welcome/connection screen, the sample library option is available
-3. The UI displays fully rendered album art, track lists, playlists, and playback controls
+1. Launch a fresh installation on iPhone, iPad, Mac or Apple TV.
+2. On Welcome, choose **Explore Sample Library**. On Apple Watch, choose the same button below the phone-sync instructions.
+3. Browse the demonstration albums and playlists. No NAS, login or developer launch arguments are required.
+
+On Apple Watch the sample supports browsing only; playback requires downloaded audio. Phone, Mac and TV sample playback is simulated.
 
 **Note:** The sample library simulates playback (progress bar, time display, transport controls) but does not produce audio output because no actual audio files are bundled. This is expected behavior for review purposes.
 
@@ -39,7 +40,7 @@ The sample library activates automatically when:
 
 If App Review has access to a Synology NAS or wishes to test full functionality:
 
-1. **NAS requirement:** Synology DiskStation running DSM 7.x or later with Audio Station installed
+1. **NAS requirement:** Synology DiskStation running DSM 7.x or later with File Station enabled
 2. **Network:** The review device and NAS must be on the same local network, or accessible via Tailscale
 3. **Credentials:** A standard DSM user account with read access to the music folder
 
@@ -50,7 +51,7 @@ The owner can provide temporary demo NAS credentials upon request. Contact infor
 ### iOS/iPadOS
 - Standard library navigation and playback
 - Widgets: Now Playing and Recently Played
-- Live Activities during playback (simulated with sample library)
+- Live Activities track downloads; actual download verification requires a NAS
 
 ### macOS
 - Native Mac app (not iPad-on-Mac)

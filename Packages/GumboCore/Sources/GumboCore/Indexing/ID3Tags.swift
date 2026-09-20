@@ -48,6 +48,11 @@ public nonisolated enum ID3Tags {
     // MARK: Frames
 
     private static func parseFrames(_ b: [UInt8], major: UInt8, tagFlags: UInt8, end: Int, into media: inout ProbedMedia) {
+        // ID3v2.3 frame lengths are measured before whole-tag byte stuffing. Undo that
+        // transformation before traversing headers; audioStart still uses the on-disk size.
+        let b = major == 3 && tagFlags & 0x80 != 0
+            ? Array(b.prefix(10)) + unsynchronised(Array(b[10..<end])) : b
+        let end = major == 3 && tagFlags & 0x80 != 0 ? b.count : end
         var position = 10
         if tagFlags & 0x40 != 0 {
             guard MediaBounds.contains(position, 4, end: end) else { return }
@@ -70,7 +75,7 @@ public nonisolated enum ID3Tags {
             let encrypted = major == 4 ? frameFlags & 0x0004 != 0 : frameFlags & 0x0040 != 0
             if compressed || encrypted { continue }
             var payload = Array(b[start..<frameEnd])
-            if (major == 4 && frameFlags & 0x0002 != 0) || (major == 3 && tagFlags & 0x80 != 0) {
+            if major == 4 && (frameFlags & 0x0002 != 0 || tagFlags & 0x80 != 0) {
                 payload = unsynchronised(payload)
             }
             let groupLength = (major == 3 ? frameFlags & 0x0020 : frameFlags & 0x0040) != 0 ? 1 : 0

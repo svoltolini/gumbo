@@ -66,6 +66,8 @@ public final class PlayerModel {
     public var streamURLProvider: ((Track) -> URL?)?
     /// Whether a track without a URL may pretend to play (the sample library) instead of reporting an error.
     public var allowsSimulation: (() -> Bool)?
+    public var artworkProvider: ((Album) -> (url: URL, version: Int)?)?
+    private var artworkCacheKey: String?
     public var albumProvider: ((Track) -> Album?)?
     public var didStartAlbum: ((Album) -> Void)?
     public var didStartTrack: ((Track) -> Void)?
@@ -530,18 +532,23 @@ public final class PlayerModel {
         guard let album else {
             nowPlayingArtwork = nil
             artworkAlbumID = nil
+            artworkCacheKey = nil
             return
         }
-        guard artworkAlbumID != album.id else { return }
+        let artwork: (url: URL, version: Int)?
+        if let artworkProvider { artwork = artworkProvider(album) }
+        else { artwork = CoverStore.hasCover(for: album.id) ? (CoverStore.fileURL(for: album.id), 0) : nil }
+        guard let artwork else { nowPlayingArtwork = nil; artworkAlbumID = nil; artworkCacheKey = nil; return }
+        let url = artwork.url
+        let key = "\(url.absoluteString)|\(artwork.version)|lockscreen"
+        guard artworkCacheKey != key else { return }
         nowPlayingArtwork = nil
         artworkAlbumID = album.id
-        guard CoverStore.hasCover(for: album.id) else { return }
-        let url = CoverStore.fileURL(for: album.id)
-        let key = "\(album.id)|lockscreen"
+        artworkCacheKey = key
         let generation = playbackGeneration
         Task { [weak self] in
             guard let image = await CoverImageCache.shared.image(url: url, key: key, maxPixelSize: CoverImageCache.largePixels) else { return }
-            guard let self, playbackGeneration == generation, artworkAlbumID == album.id else { return }
+            guard let self, playbackGeneration == generation, artworkAlbumID == album.id, artworkCacheKey == key else { return }
             let size = CGSize(width: image.width, height: image.height)
             // Requested on a background thread by the system; only the CGImage crosses into the closure.
             nowPlayingArtwork = MPMediaItemArtwork(boundsSize: size) { @Sendable _ in

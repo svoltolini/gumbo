@@ -115,7 +115,7 @@ private struct MacGenresList: View {
         List {
             Section("Genres") {
                 ForEach(genres) { genre in
-                    NavigationLink(value: AlbumCollection(title: genre.name, albums: genre.albums)) {
+                    NavigationLink(value: AlbumCollection(title: genre.name, query: .genre(genre.name))) {
                         HStack {
                             Label(genre.name, systemImage: "guitars")
                             Spacer()
@@ -133,7 +133,7 @@ private struct MacGenresList: View {
             if !decades.isEmpty {
                 Section("Decades") {
                     ForEach(decades) { decade in
-                        NavigationLink(value: AlbumCollection(title: decade.label, albums: decade.albums)) {
+                        NavigationLink(value: AlbumCollection(title: decade.label, query: .decade(decade.label))) {
                             HStack {
                                 Label(decade.label, systemImage: "calendar")
                                 Spacer()

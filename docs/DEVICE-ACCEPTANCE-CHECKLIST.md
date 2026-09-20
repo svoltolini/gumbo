@@ -1,10 +1,12 @@
 # Gumbo 1.0 — Device Acceptance Checklist
 
 **For: Tester/Sam**  
-**Build**: 1.0 (202609142150)  
+**Build**: Record the exact new Gumbo build below.
 **Date**: _______________
 
 This is the manual testing checklist for TestFlight device acceptance. Complete this **after** running `scripts/preflight-validation.sh` which verifies all automated checks.
+
+The previous app's build 202609142150 does not validate the new Gumbo identity. Record signed-device evidence in [#118](https://github.com/svoltolini/gumbo/issues/118) and [#119](https://github.com/svoltolini/gumbo/issues/119); leave unexecuted checks pending.
 
 ---
 
@@ -25,7 +27,7 @@ This is the manual testing checklist for TestFlight device acceptance. Complete 
 
 | Item | Value |
 | --- | --- |
-| TestFlight build | 1.0 (202609142150) |
+| TestFlight build and bundle ID | |
 | DSM version | |
 | iPhone model / iOS version | |
 | iPad model / iPadOS version | |
