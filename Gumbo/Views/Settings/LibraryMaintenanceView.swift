@@ -20,7 +20,10 @@ struct MissingGenresView: View {
     @State private var job: Task<Void, Never>?
     @State private var isWorking = false
     @State private var isSaving = false
+    @State private var isStopping = false
     @State private var progress = ""
+    @State private var currentAlbum: String?
+    @State private var lookupProgress: Double = 0
     @State private var summary: String?
     @State private var failures: [MetadataWriteFailure] = []
     @State private var confirmingSave = false
@@ -46,11 +49,21 @@ struct MissingGenresView: View {
             }
             if isWorking {
                 Section {
-                    ProgressView(progress)
-                    if isSaving { TagWriteProgressView(writer: library.metadataWriter, title: "Saving song tags") }
-                    Button("Stop") { stop() }
+                    if isSaving {
+                        TagWriteProgressView(writer: library.metadataWriter, title: "Saving genres", subtitle: progress, isStopping: isStopping, onStop: stop)
+                    } else {
+                        OperationProgressView(title: "Finding genres", subtitle: progress, currentItem: currentAlbum,
+                                              fractionCompleted: lookupProgress, isStopping: isStopping, onStop: stop)
+                    }
                 }
             }
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--sample-library"),
+               ProcessInfo.processInfo.arguments.contains("--ui-preview"),
+               ProcessInfo.processInfo.arguments.contains("--preview-genre-progress") {
+                Section { GenreProgressPreview() }
+            }
+            #endif
             if let summary { Section { Text(summary) } }
             if rows.isEmpty && !isWorking {
                 Section { Text("No editable songs with missing genres were found.") }
@@ -120,6 +133,8 @@ struct MissingGenresView: View {
     }
 
     private func stop() {
+        guard isWorking else { return }
+        isStopping = true
         job?.cancel()
         if isSaving { library.metadataWriter.cancel() }
     }
@@ -128,14 +143,20 @@ struct MissingGenresView: View {
         guard canStart else { return }
         let scope = context
         isWorking = true
+        isStopping = false
+        progress = ""
+        currentAlbum = nil
+        lookupProgress = 0
         failures = []
         summary = nil
         job = Task { @MainActor in
-            defer { isWorking = false; job = nil; if context != scope { loadAlbums() } }
+            defer { isWorking = false; isStopping = false; job = nil; if context != scope { loadAlbums() } }
             for index in rows.indices {
                 guard !Task.isCancelled, context == scope else { break }
-                progress = "Checking album \(index + 1) of \(rows.count)…"
+                progress = "Album \(index + 1) of \(rows.count)"
+                lookupProgress = Double(index) / Double(rows.count)
                 let album = rows[index]
+                currentAlbum = album.album
                 // Preserve manual edits and previously reviewed choices when lookup is repeated.
                 guard GenreLookup.isMissing(album.genre) else { continue }
                 do {
@@ -159,16 +180,18 @@ struct MissingGenresView: View {
         let scope = context
         isWorking = true
         isSaving = true
+        isStopping = false
+        progress = ""
         failures = []
         summary = nil
         job = Task { @MainActor in
-            defer { isWorking = false; isSaving = false; job = nil; if context != scope { loadAlbums() } }
+            defer { isWorking = false; isSaving = false; isStopping = false; job = nil; if context != scope { loadAlbums() } }
             var saved = 0
             var kept = 0
             var stopped = false
             for (index, choice) in choices.enumerated() {
                 guard !Task.isCancelled, context == scope else { stopped = true; break }
-                progress = "Saving album \(index + 1) of \(choices.count)…"
+                progress = "Album \(index + 1) of \(choices.count) · \(choice.album)"
                 let result = await library.fillMissingGenre(choice.genre, trackIDs: choice.trackIDs)
                 guard context == scope else { return }
                 saved += result.written.count
@@ -208,7 +231,11 @@ struct ProblemFilesView: View {
     @State private var selected: Set<String> = []
     @State private var job: Task<Void, Never>?
     @State private var isWorking = false
+    @State private var isStopping = false
+    @State private var isDeleting = false
     @State private var progress = ""
+    @State private var currentFile: String?
+    @State private var checkedProgress: Double?
     @State private var summary: String?
     @State private var failures: [MetadataWriteFailure] = []
     @State private var confirmingDelete = false
@@ -226,8 +253,10 @@ struct ProblemFilesView: View {
             }
             if isWorking {
                 Section {
-                    ProgressView(progress)
-                    Button("Stop") { job?.cancel() }
+                    OperationProgressView(title: isDeleting ? "Deleting files" : "Checking files",
+                                          currentItem: currentFile, fractionCompleted: checkedProgress,
+                                          counter: progress.isEmpty ? nil : progress,
+                                          isStopping: isStopping, onStop: stop)
                 }
             }
             if let summary { Section { Text(summary) } }
@@ -260,8 +289,8 @@ struct ProblemFilesView: View {
         .groupedForm()
         .navigationTitle("Problem Files")
         .inlineTitle()
-        .onChange(of: context) { _, _ in job?.cancel(); findings = []; selected = []; summary = nil; failures = [] }
-        .onDisappear { job?.cancel() }
+        .onChange(of: context) { _, _ in stop(); findings = []; selected = []; summary = nil; failures = [] }
+        .onDisappear { stop() }
         .confirmationDialog("Permanently delete \(chosen.count) files?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete from NAS", role: .destructive) { deleteChosen() }
             Button("Cancel", role: .cancel) { }
@@ -270,20 +299,33 @@ struct ProblemFilesView: View {
         }
     }
 
+    private func stop() {
+        guard isWorking else { return }
+        isStopping = true
+        job?.cancel()
+    }
+
     private func inspectFiles() {
         guard canStart, let drive = library.drive as? any WritableRemoteDrive else { return }
         let candidates = library.tracks.filter(MusicFileInspector.needsInspection)
         let scope = context
         findings = []; selected = []; failures = []; summary = nil
         isWorking = true
+        isStopping = false
+        isDeleting = false
+        checkedProgress = 0
+        currentFile = nil
+        progress = "0 of \(candidates.count) files"
         job = Task { @MainActor in
-            defer { isWorking = false; job = nil }
+            defer { isWorking = false; isStopping = false; job = nil }
             for (index, track) in candidates.enumerated() {
                 guard !Task.isCancelled, context == scope else { break }
-                progress = "Checking file \(index + 1) of \(candidates.count)…"
+                currentFile = track.title
                 let finding = await MusicFileInspector.inspect(track, drive: drive)
                 guard !Task.isCancelled, context == scope else { break }
                 findings.append(finding)
+                progress = "\(index + 1) of \(candidates.count) files"
+                checkedProgress = Double(index + 1) / Double(candidates.count)
             }
             guard context == scope else { return }
             let damaged = findings.filter(\.canDelete).count
@@ -298,9 +340,13 @@ struct ProblemFilesView: View {
         let review = chosen
         let scope = context
         isWorking = true
-        progress = "Checking and deleting selected files…"
+        isStopping = false
+        isDeleting = true
+        progress = "Rechecking selected files before deleting"
+        currentFile = nil
+        checkedProgress = nil
         job = Task { @MainActor in
-            defer { isWorking = false; job = nil }
+            defer { isWorking = false; isStopping = false; isDeleting = false; job = nil }
             let report = await library.deleteReviewedFiles(review)
             guard context == scope else { return }
             let removed = Set(report.deleted.map(\.id))
@@ -313,6 +359,21 @@ struct ProblemFilesView: View {
         }
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+/// Layout-only sample: never starts a metadata writer or changes the sample-library permission gates.
+private struct GenreProgressPreview: View {
+    @State private var isStopping = false
+
+    var body: some View {
+        OperationProgressView(title: "Saving genres", subtitle: "Album 1 of 2 · Parallel Lives",
+                              currentItem: "A Song with a Longer Name (Live at the Evening Sessions)",
+                              fractionCompleted: 4.0 / 15, counter: "4 of 15 songs", isStopping: isStopping) {
+            isStopping = true
+        }
+    }
+}
+#endif
 
 private struct MaintenanceFailures: View {
     let failures: [MetadataWriteFailure]

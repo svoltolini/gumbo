@@ -252,6 +252,7 @@ struct AlbumRenameSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var isWriting = false
+    @State private var isStopping = false
     @State private var writtenTitle = ""
     @State private var report: MetadataWriteReport?
     @FocusState private var isEditingTitle: Bool
@@ -273,7 +274,10 @@ struct AlbumRenameSheet: View {
                     resultSections(report)
                 } else if isWriting {
                     Section {
-                        TagWriteProgressView(writer: library.metadataWriter, title: "Writing “\(writtenTitle)”")
+                        TagWriteProgressView(writer: library.metadataWriter, title: "Renaming album", subtitle: writtenTitle, isStopping: isStopping) {
+                            isStopping = true
+                            library.metadataWriter.cancel()
+                        }
                     } footer: {
                         Text("Each song is downloaded, its album tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
                             .fixedSize(horizontal: false, vertical: true)
@@ -308,9 +312,7 @@ struct AlbumRenameSheet: View {
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if isWriting {
-                        Button("Stop") { library.metadataWriter.cancel() }
-                    } else if report == nil {
+                    if !isWriting && report == nil {
                         Button("Cancel") { dismiss() }
                     }
                 }
@@ -362,10 +364,12 @@ struct AlbumRenameSheet: View {
         let newTitle = trimmedTitle
         isEditingTitle = false
         writtenTitle = newTitle
+        isStopping = false
         isWriting = true
         Task { @MainActor in
             let outcome = await library.renameAlbum(album, to: newTitle)
             isWriting = false
+            isStopping = false
             onRenamed(outcome.albumID)
             if outcome.report.isComplete {
                 dismiss()
