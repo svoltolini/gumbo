@@ -132,6 +132,24 @@ struct FadingText: View {
     }
 }
 
+/// List rows keep their compact fade normally, but never hide names at accessibility text sizes.
+struct LibraryRowText: View {
+    let text: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            FadingText(text)
+        }
+    }
+}
+
 /// Trailing disclosure chevron for card rows.
 struct DisclosureChevron: View {
     var body: some View {
@@ -419,12 +437,12 @@ struct PlayActions: View {
             Button(action: play) {
                 Label("Play", systemImage: "play.fill")
                     .font(.headline)
-                    .foregroundStyle(Palette.onInk)
+                    .foregroundStyle(Palette.onBrand)
                     .frame(maxWidth: stretches ? .infinity : nil)
                     .padding(.horizontal, stretches ? 0 : 12)
             }
             .buttonStyle(.glassProminent)
-            .tint(Palette.ink)
+            .tint(Palette.brand)
 
             Button(action: shuffle) {
                 Label("Shuffle", systemImage: "shuffle")

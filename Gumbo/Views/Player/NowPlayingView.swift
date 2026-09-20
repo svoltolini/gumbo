@@ -213,17 +213,7 @@ struct NowPlayingView: View {
             .symbolEffectsRemoved(reduceMotion)
             .presentationDragIndicator(.visible)
             .presentationBackground {
-                ZStack {
-                    Palette.paper.mix(with: player.tint, by: colorScheme == .dark ? 0.35 : 0.3)
-                    RadialGradient(
-                        colors: [player.tint.opacity(0.5), .clear],
-                        center: UnitPoint(x: 0.5, y: 0.35),
-                        startRadius: 0,
-                        endRadius: 420
-                    )
-                    .blur(radius: 60)
-                }
-                .ignoresSafeArea()
+                Palette.paper.ignoresSafeArea()
             }
         }
     }

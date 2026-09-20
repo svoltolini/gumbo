@@ -5,6 +5,11 @@ import WidgetKit
 
 // Building blocks shared by every Gumbo widget.
 
+enum WidgetPalette {
+    static let blue = Color(red: 8 / 255, green: 38 / 255, blue: 1)
+    static let silver = Color(red: 212 / 255, green: 213 / 255, blue: 214 / 255)
+}
+
 nonisolated enum WidgetImages {
     static func cover(for album: WidgetSnapshot.Album, pixels: Int) -> UIImage? {
         guard let key = album.coverKey else { return nil }
@@ -400,7 +405,7 @@ struct EmptyFace: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .foregroundStyle(.white)
         .containerBackground(for: .widget) {
-            LinearGradient(colors: [Color(red: 0.36, green: 0.31, blue: 0.62), Color(red: 0.11, green: 0.09, blue: 0.24)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [WidgetPalette.blue, .black], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 }

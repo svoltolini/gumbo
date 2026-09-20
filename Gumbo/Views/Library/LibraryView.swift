@@ -197,7 +197,7 @@ struct FacetPicker: View {
             Text(facet.rawValue)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(isSelected ? Palette.onInk : .primary)
+                .foregroundStyle(isSelected ? Palette.onBrand : .primary)
                 // Flip the label colour in a short window centred on the moment the ink is half way,
                 // so it is never light-on-light or dark-on-dark.
                 .animation(.easeInOut(duration: 0.05).delay(0.055), value: isSelected)
@@ -205,7 +205,7 @@ struct FacetPicker: View {
                 .padding(.vertical, 8)
                 .background {
                     Capsule()
-                        .fill(Palette.ink)
+                        .fill(Palette.brand)
                         .opacity(isSelected ? 1 : 0)
                         .animation(.easeInOut(duration: 0.22), value: isSelected)
                 }
@@ -253,9 +253,9 @@ struct AlbumRow: View {
             }
             .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 2) {
-                FadingText(album.title)
+                LibraryRowText(album.title)
                     .font(.body.weight(.medium))
-                FadingText(detail)
+                LibraryRowText(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

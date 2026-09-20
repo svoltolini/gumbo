@@ -189,6 +189,7 @@ struct GumboMacApp: App {
             .environment(profiles)
             .environment(cloud)
             .environment(navigation)
+            .tint(Palette.accent)
             .preferredColorScheme(model.appearance.colorScheme)
     }
 }

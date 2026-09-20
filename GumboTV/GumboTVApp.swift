@@ -117,6 +117,7 @@ struct GumboTVApp: App {
                 .environment(downloads)
                 .environment(profiles)
                 .environment(cloud)
+                .tint(Palette.accent)
                 .preferredColorScheme(model.appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
                     model.scenePhaseChanged(phase)

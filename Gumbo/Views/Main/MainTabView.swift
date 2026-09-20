@@ -1,10 +1,9 @@
 import GumboCore
 import SwiftUI
 
-/// Library, Playlists and Search tabs with the mini player docked above the tab bar.
+/// Main destinations with the mini player docked above a stable tab bar.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
-    @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
     @Environment(\.colorScheme) private var colorScheme
 
@@ -23,18 +22,14 @@ struct MainTabView: View {
             Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
                 SettingsTabView()
             }
-            Tab("Search", systemImage: "magnifyingglass", value: AppTab.search, role: .search) {
+            Tab("Search", systemImage: "magnifyingglass", value: AppTab.search) {
                 SearchView()
             }
         }
         .adaptiveTabs()
-        // The Search tab's field is the tab view's to place, not the tab's. Paired with the tab's search
-        // role, iOS turns the tab bar into the field the moment Search is chosen, as Music does, so it is
-        // on screen at once. Inside the tab's own navigation stack it would fall into the bar's drawer
-        // and stay hidden under the large title until a pull down.
-        .searchable(text: $model.searchQuery, prompt: SearchView.prompt)
-        .onSubmit(of: .search) { library.noteSearch(model.searchQuery) }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        // Keep navigation and the player steady while scrolling. Search owns its own field;
+        // putting it on TabView also exposes it over tabs that do not display search results.
+        .tabBarMinimizeBehavior(.never)
         // Pin the tab bar and its accessory to the app's own light or dark look. Left to itself, the glass
         // flips its label colour to match whatever scrolls underneath, which can leave white text on a
         // pale bar while a dark cover passes by.

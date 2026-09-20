@@ -137,13 +137,13 @@ struct OnboardingView: View {
         } label: {
             Text(isLast ? "Find servers" : "Continue")
                 .font(.headline)
-                .foregroundStyle(Palette.onInk)
+                .foregroundStyle(Palette.onBrand)
                 .frame(maxWidth: .infinity)
                 .contentTransition(.opacity)
         }
         .buttonStyle(.glassProminent)
         .controlSize(.extraLarge)
-        .tint(Palette.ink)
+        .tint(Palette.brand)
     }
 
     /// The quiet way out, like "Enter an address" under the welcome button.

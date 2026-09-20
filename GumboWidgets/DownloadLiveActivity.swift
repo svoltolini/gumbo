@@ -22,8 +22,9 @@ struct DownloadLiveActivity: Widget {
                 Spacer(minLength: 0)
             }
             .padding(16)
-            .activityBackgroundTint(Color(red: 0.11, green: 0.106, blue: 0.102))
-            .activitySystemActionForegroundColor(.white)
+            .foregroundStyle(WidgetPalette.silver)
+            .activityBackgroundTint(.black)
+            .activitySystemActionForegroundColor(WidgetPalette.silver)
             .widgetURL(context.attributes.openURL)
         } dynamicIsland: { context in
             DynamicIsland {
@@ -63,7 +64,7 @@ struct DownloadLiveActivity: Widget {
             } minimal: {
                 DownloadRing(state: context.state, size: 18, lineWidth: 2.5)
             }
-            .keylineTint(.white)
+            .keylineTint(WidgetPalette.blue)
             // The one link for the compact, minimal and expanded island alike.
             .widgetURL(context.attributes.openURL)
         }

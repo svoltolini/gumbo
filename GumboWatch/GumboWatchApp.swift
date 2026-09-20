@@ -11,6 +11,7 @@ struct GumboWatchApp: App {
     var body: some Scene {
         WindowGroup {
             WatchRootView()
+                .tint(Palette.accent)
                 .environment(store)
                 .environment(WatchDownloads.shared)
                 .environment(player)

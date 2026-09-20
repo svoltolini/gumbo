@@ -1,25 +1,12 @@
 import GumboCore
 import SwiftUI
 
-/// Paper background mixed with the current accent colour, with a soft glow near the top.
+/// Stable neutral canvas keeps artwork and blue actions distinct while the library scrolls.
 struct TintedBackground: View {
     var tint: Color
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            Palette.paper.mix(with: tint, by: colorScheme == .dark ? 0.22 : 0.14)
-            RadialGradient(
-                colors: [tint.opacity(0.38), .clear],
-                center: UnitPoint(x: 0.5, y: 0.08),
-                startRadius: 0,
-                endRadius: 460
-            )
-            .blur(radius: 40)
-        }
-        .ignoresSafeArea()
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: tint)
+        Palette.paper.ignoresSafeArea()
     }
 }
 
@@ -36,7 +23,7 @@ private struct GumboBackground: ViewModifier {
             .background(TintedBackground(tint: tint))
             .toolbarColorScheme(colorScheme, for: .navigationBar)
         #elseif os(macOS)
-        content.background(Color(nsColor: .windowBackgroundColor))
+        content.background(Palette.paper)
         #else
         content
             .background(TintedBackground(tint: tint))

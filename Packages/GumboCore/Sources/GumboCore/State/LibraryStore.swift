@@ -4,13 +4,12 @@ import SwiftUI
 /// Built off the main thread whenever the library is already on screen.
 public nonisolated struct DerivedLibrary: Sendable {
     public var sourceID: String
+    public var rootPath: String
     public var albums: [Album]
     public var albumsByID: [String: Album]
     public var tracksByID: [String: Track]
     public var allTracks: [Track]
-    /// Lowercased "title artist" per album and title per track, parallel to `albums` and `allTracks`.
-    public var albumSearchKeys: [String]
-    public var trackSearchKeys: [String]
+    public var searchIndex: LibrarySearchIndex
     public var artists: [Artist]
     public var genres: [Genre]
     public var genreShelves: [Genre]
@@ -51,17 +50,18 @@ public nonisolated struct DerivedLibrary: Sendable {
         let genres = Dictionary(grouping: albums, by: \.genre)
             .map { Genre(name: $0.key, albums: $0.value.sorted(by: byRecency)) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let artists = Dictionary(grouping: albums, by: \.artist)
+            .map { Artist(name: $0.key, albums: $0.value.sorted { $0.year < $1.year }) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         return DerivedLibrary(
             sourceID: catalogue.driveID,
+            rootPath: catalogue.rootPath,
             albums: albums,
             albumsByID: Dictionary(uniqueKeysWithValues: albums.map { ($0.id, $0) }),
             tracksByID: Dictionary(allTracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
             allTracks: allTracks,
-            albumSearchKeys: albums.map { ($0.title + " " + $0.artist).lowercased() },
-            trackSearchKeys: allTracks.map { $0.title.lowercased() },
-            artists: Dictionary(grouping: albums, by: \.artist)
-                .map { Artist(name: $0.key, albums: $0.value.sorted { $0.year < $1.year }) }
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending },
+            searchIndex: LibrarySearchIndex(albums: albums, artists: artists),
+            artists: artists,
             genres: genres,
             genreShelves: Array(
                 genres
@@ -81,7 +81,7 @@ public nonisolated struct DerivedLibrary: Sendable {
     }
 }
 
-/// Artists, albums and songs whose names contain a query.
+/// Ranked artists, albums and songs matching a query across their searchable metadata.
 public nonisolated struct SearchResults: Sendable {
     public var artists: [Artist] = []
     public var albums: [Album] = []
@@ -108,6 +108,7 @@ public final class LibraryStore {
     public var onContentChanged: (() -> Void)?
     /// The NAS whose derived rows are on screen. A replacement catalogue can be waiting for its
     /// background derivation, so its source must not be assigned to the preceding source's rows.
+    public private(set) var contentRootPath = ""
     public private(set) var contentSourceID: String?
     public private(set) var artists: [Artist] = []
     public private(set) var genres: [Genre] = []
@@ -120,8 +121,7 @@ public final class LibraryStore {
     private var albumsByID: [String: Album] = [:]
     private var tracksByID: [String: Track] = [:]
     private var allTracks: [Track] = []
-    private var albumSearchKeys: [String] = []
-    private var trackSearchKeys: [String] = []
+    public private(set) var searchIndex = LibrarySearchIndex()
     private var coveredAlbumIDs: Set<String> = []
     /// Colours read from the covers on disk, by album id.
     private var palettes: [String: CoverPalette.Pair] = [:]
@@ -261,15 +261,14 @@ public final class LibraryStore {
 
     /// Stores the derived data, touching only what actually changed so screens showing the rest stay put.
     private func apply(_ derived: DerivedLibrary) {
-        let sourceChanged = contentSourceID != derived.sourceID
+        let sourceChanged = contentSourceID != derived.sourceID || contentRootPath != derived.rootPath
         let albumsChanged = albums != derived.albums
         if albumsChanged || sourceChanged {
             albums = derived.albums
             albumsByID = derived.albumsByID
             tracksByID = derived.tracksByID
             allTracks = derived.allTracks
-            albumSearchKeys = derived.albumSearchKeys
-            trackSearchKeys = derived.trackSearchKeys
+            searchIndex = derived.searchIndex
             hiResAlbums = derived.hiResAlbums
             recentlyAdded = derived.recentlyAdded
             if artists != derived.artists { artists = derived.artists }
@@ -281,7 +280,10 @@ public final class LibraryStore {
         if coveredAlbumIDs != derived.coveredAlbumIDs { coveredAlbumIDs = derived.coveredAlbumIDs }
         if palettes != derived.palettes { palettes = derived.palettes }
         if let root = derived.folderRoot { folderRoot = root }
-        if sourceChanged { contentSourceID = derived.sourceID }
+        if sourceChanged {
+            contentSourceID = derived.sourceID
+            contentRootPath = derived.rootPath
+        }
         if albumsChanged || sourceChanged {
             shuffleDay = ""
             rebuildPlaylists()
@@ -595,24 +597,9 @@ public final class LibraryStore {
 
     // MARK: Search
 
-    /// Artists, albums and songs whose names contain the query; matched against lowercased keys built with the library.
+    /// Synchronous access for small consumers; views query the immutable index off the UI actor.
     public func searchResults(_ query: String) -> SearchResults {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return SearchResults() }
-        var results = SearchResults()
-        for artist in artists where artist.name.lowercased().contains(needle) {
-            results.artists.append(artist)
-            if results.artists.count == 20 { break }
-        }
-        for (album, key) in zip(albums, albumSearchKeys) where key.contains(needle) {
-            results.albums.append(album)
-            if results.albums.count == 30 { break }
-        }
-        for (track, key) in zip(allTracks, trackSearchKeys) where key.contains(needle) {
-            results.tracks.append(track)
-            if results.tracks.count == 50 { break }
-        }
-        return results
+        searchIndex.results(for: query)
     }
 
     public func search(_ query: String) -> [Album] {

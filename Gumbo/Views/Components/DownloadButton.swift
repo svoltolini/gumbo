@@ -39,7 +39,7 @@ struct DownloadButton: View {
                 case .downloaded:
                     Image(systemName: "checkmark")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(Palette.onInk)
+                        .foregroundStyle(Palette.onBrand)
                         .symbolEffect(.bounce, options: .speed(1.1), value: celebration)
                         .transition(reduceMotion ? .opacity : .scale(scale: 0.3).combined(with: .opacity))
                 }
@@ -47,7 +47,7 @@ struct DownloadButton: View {
             .frame(width: 50, height: 50)
             .background {
                 Circle()
-                    .fill(Palette.ink)
+                    .fill(Palette.brand)
                     .opacity(phase == .downloaded ? 1 : 0)
                     .scaleEffect(phase == .downloaded || reduceMotion ? 1 : 0.3)
             }
@@ -91,11 +91,11 @@ struct ProgressRing: View {
                 .stroke(.quaternary, lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: max(0.02, fraction))
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(Palette.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.linear(duration: 0.25), value: fraction)
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(Palette.ink)
+                .fill(Palette.accent)
                 .frame(width: 9, height: 9)
         }
         .padding(11)
@@ -131,7 +131,7 @@ private struct Burst: View {
                 ForEach(0..<8, id: \.self) { index in
                     let angle = Double(index) / 8 * 2 * .pi
                     Circle()
-                        .fill(Palette.ink)
+                        .fill(Palette.brand)
                         .frame(width: 5, height: 5)
                         .scaleEffect(1 - t * 0.6)
                         .opacity(trigger == 0 ? 0 : max(0, 1 - t * 1.15))

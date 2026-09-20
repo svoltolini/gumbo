@@ -51,7 +51,7 @@ struct IndexingView: View {
                     ProgressView(value: indexer.enrichProgress)
                 }
             }
-            .tint(Palette.ink)
+            .tint(Palette.accent)
             .frame(width: 160 * Metrics.scale)
             .padding(.top, 28)
             .animation(.easeOut(duration: 0.25), value: indexer.enrichProgress)
@@ -62,12 +62,12 @@ struct IndexingView: View {
                 } label: {
                     Text("Try again")
                         .font(.headline)
-                        .foregroundStyle(Palette.onInk)
+                        .foregroundStyle(Palette.onBrand)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)
-                .tint(Palette.ink)
+                .tint(Palette.brand)
                 Button("Choose another folder") {
                     model.chooseAnotherFolder()
                 }
@@ -81,12 +81,12 @@ struct IndexingView: View {
                 } label: {
                     Text("Open library")
                         .font(.headline)
-                        .foregroundStyle(model.isIndexed ? Palette.onInk : .secondary)
+                        .foregroundStyle(model.isIndexed ? Palette.onBrand : .secondary)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.extraLarge)
-                .tint(model.isIndexed ? Palette.ink : Color.secondary.opacity(0.25))
+                .tint(model.isIndexed ? Palette.brand : Color.secondary.opacity(0.25))
                 .disabled(!model.isIndexed)
                 .animation(.easeInOut(duration: 0.4), value: model.isIndexed)
             }
