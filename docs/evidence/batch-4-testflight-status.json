@@ -1,38 +1,8 @@
 {
-  "checkedAt": "2026-09-14T21:17:29.340402+00:00",
-  "builds": [
-    {
-      "id": "ac236a12-c2e9-4b46-961b-84480686a0e5",
-      "platform": "IOS",
-      "version": "1.0",
-      "build": "202609142150",
-      "processingState": "VALID",
-      "internalBuildState": "IN_BETA_TESTING",
-      "externalBuildState": "READY_FOR_BETA_SUBMISSION",
-      "inInternalTestersGroup": true,
-      "testingNotesVerified": true
-    },
-    {
-      "id": "b664224f-0899-4f01-858e-0e22dfa6b8ea",
-      "platform": "TV_OS",
-      "version": "1.0",
-      "build": "202609142150",
-      "processingState": "VALID",
-      "internalBuildState": "IN_BETA_TESTING",
-      "externalBuildState": "READY_FOR_BETA_SUBMISSION",
-      "inInternalTestersGroup": true,
-      "testingNotesVerified": true
-    },
-    {
-      "id": "02764b35-932c-4c4c-9677-9be4e77e605c",
-      "platform": "MAC_OS",
-      "version": "1.0",
-      "build": "202609142150",
-      "processingState": "VALID",
-      "internalBuildState": "IN_BETA_TESTING",
-      "externalBuildState": "READY_FOR_BETA_SUBMISSION",
-      "inInternalTestersGroup": true,
-      "testingNotesVerified": true
-    }
-  ]
+  "schemaVersion": 1,
+  "kind": "historical-evidence-reference",
+  "sourceRevision": "503696ddce36c40932867e561fd6e772dcda3f61",
+  "sourceURL": "https://github.com/svoltolini/gumbo/blob/503696ddce36c40932867e561fd6e772dcda3f61/docs/evidence/batch-4-testflight-status.json",
+  "sourceSHA256": "af6ff718c2bfb8690bef2038fc7a60836cd30424caf555d9576bd9087ce6d820",
+  "notice": "Original evidence for the previous app identity. This is not validation of the new Gumbo identifiers or distribution."
 }

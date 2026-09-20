@@ -1,5 +1,7 @@
 # Search and open-detail refresh — issue 25
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Search already recomputes from coalesced library revisions. Runtime checks now confirm that added, removed and retagged matches update in the actual Mac and iPhone search views while the query remains active. A synthetic incoming catalogue changes the library without editing search text, focus or navigation.
 
 Those checks exposed a remaining detail problem: removing a pushed album left its old header and controls visible. Mac showed indefinite Loading Songs. On iPhone, the stale song button could still choose the removed song in PlayerModel. The fixture supplies no media URL, so this did not request NAS audio.

@@ -11,14 +11,14 @@ App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b914
 | Feature | Data and destination | Source evidence |
 | --- | --- | --- |
 | NAS sign-in and playback | Credentials, folder/media requests to the configured NAS; catalogue/downloads stored on device | `Networking/SynologyClient.swift`, `State/AppModel.swift`, `State/LibraryStore.swift`, `State/DownloadManager.swift` |
-| Album artwork | NAS-folder images and embedded music pictures only; no external artwork search or image requests | `Indexing/CoverStore.swift`, source reads in `LibraryIndexer.swift` and `LibraryStore.swift`, `SkyrShared/ArtworkPolicy.swift` |
+| Album artwork | NAS-folder images and embedded music pictures only; no external artwork search or image requests | `Indexing/CoverStore.swift`, source reads in `LibraryIndexer.swift` and `LibraryStore.swift`, `GumboShared/ArtworkPolicy.swift` |
 | Profile sync | Name, chosen photo, role, dates, Apple user-record association, PIN verification values; favourites, playlists, searches, recent plays and settings in private/family-shared CloudKit zone | `CloudSync.record(for:)`, `Models/Profile.swift`, `ProfileStateMerge.swift` |
 | Family connection | NAS address, names, account and music folder in family CloudKit record; selected Family Access password in `record.encryptedValues`; anyone with the share link can join | `CloudSync.record(for: FamilyInfo)` |
-| Watch and widgets | Watch playlist metadata, mosaic colour pairs, and the connection information needed for NAS downloads; no transferred cover image files. Widgets receive cover copies and metadata in an app-group snapshot. | `SkyrWatch/WatchStore.swift`, `WatchDownloads.swift`, `Models/WatchCatalogue.swift`, `WidgetFeed.swift`, `SkyrShared/WidgetSnapshot.swift` |
+| Watch and widgets | Watch playlist metadata, mosaic colour pairs, and the connection information needed for NAS downloads; no transferred cover image files. Widgets receive cover copies and metadata in an app-group snapshot. | `GumboWatch/WatchStore.swift`, `WatchDownloads.swift`, `Models/WatchCatalogue.swift`, `WidgetFeed.swift`, `GumboShared/WidgetSnapshot.swift` |
 | Diagnostics | Local diagnostic file, potentially included in device backups, copied on user action; Apple separately provides TestFlight feedback/crash reports according to Apple settings | `DiagnosticsLog.swift`, `DiagnosticsView.swift` |
 | Biometrics | Operating-system authentication result; no biometric template exposed to Gumbo | `ProfileStore.swift` |
 
-The package manifests include SkyrCore and SkyrShared, with no third-party SDK dependency. The project targets include privacy manifests declaring required UserDefaults/file-timestamp reasons, no tracking, and no developer-collected data types. These manifests are not substitutes for the app-level App Store answers.
+The package manifests include GumboCore and GumboShared, with no third-party SDK dependency. The project targets include privacy manifests declaring required UserDefaults/file-timestamp reasons, no tracking, and no developer-collected data types. These manifests are not substitutes for the app-level App Store answers.
 
 ## Proposed App Store answer rationale to confirm before publication
 

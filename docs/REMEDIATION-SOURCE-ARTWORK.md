@@ -1,5 +1,7 @@
 # Source-only album artwork — issue 34
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 The release no longer looks up covers through Apple's Search service. The request implementation and earlier opt-in consumer are removed, including automatic scan and manual-refresh fallbacks. NAS-folder covers and embedded pictures remain supported. Matching pictures on multiple albums are kept as source artwork.
 
 ## Existing installations

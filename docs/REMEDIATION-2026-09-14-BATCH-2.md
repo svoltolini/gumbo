@@ -1,5 +1,7 @@
 # Gumbo 1.0 — second remediation batch
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 Date: 14 September 2026
 
 Base: `e7510e9519761ef4f7cc282c141592a6a5d6b6af`
@@ -49,7 +51,7 @@ Concrete applications are native slider semantics, a stable layout that adapts t
 | Independent reviews | Findings corrected | Separate source reviews of media, download, and Cloud changes. Cloud follow-up confirmed the scoped review corrections; runtime provider acceptance remains pending. |
 | Diff whitespace | Passed | No whitespace errors. |
 
-Local run evidence is under `/tmp/skyr-remediation-2/`: `package-final.log`, `ios-final-check.log`, `macos-final-check.log`, `tvos-final-check.log`, and simulator screenshots. Temporary simulators contained only synthetic/sample data. The package test run covers the final core changes; the subsequent profile-button accessibility trait was verified by platform builds and simulator accessibility inspection.
+Local run evidence is under `/tmp/gumbo-remediation-2/`: `package-final.log`, `ios-final-check.log`, `macos-final-check.log`, `tvos-final-check.log`, and simulator screenshots. Temporary simulators contained only synthetic/sample data. The package test run covers the final core changes; the subsequent profile-button accessibility trait was verified by platform builds and simulator accessibility inspection.
 
 The final builds still report the existing captured-model warning in `LibraryView.swift` and the PhotosPicker actor-isolation warning in `ProfileEditorSheet.swift`; tvOS also reports skipped App Intents metadata extraction. No new compiler errors remain. Physical VoiceOver speech, iPad multitasking/Mac window resizing, touch scrolling at accessibility sizes, frame-time profiling, paired Watch, biometric hardware, live NAS/2FA, CloudKit convergence, and Live Activity/background-process acceptance are outstanding.
 

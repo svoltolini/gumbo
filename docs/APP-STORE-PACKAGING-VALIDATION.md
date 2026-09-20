@@ -8,11 +8,11 @@ This checklist provides concrete validation steps for every App Store submission
 
 | Platform | Bundle ID | Build |
 | --- | --- | --- |
-| iOS (iPhone/iPad) | `com.samuelvoltolini.skyr` | 1.0 (202609142150) |
-| iOS Widgets | `com.samuelvoltolini.skyr.widgets` | 1.0 (202609142150) |
-| watchOS | `com.samuelvoltolini.skyr.watchkitapp` | 1.0 (202609142150) |
-| macOS | `com.samuelvoltolini.skyr` | 1.0 (202609142150) |
-| tvOS | `com.samuelvoltolini.skyr` | 1.0 (202609142150) |
+| iOS (iPhone/iPad) | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
+| iOS Widgets | `com.samuelvoltolini.gumbo.widgets` | 1.0 (202609142150) |
+| watchOS | `com.samuelvoltolini.gumbo.watchkitapp` | 1.0 (202609142150) |
+| macOS | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
+| tvOS | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
 
 ---
 
@@ -24,26 +24,26 @@ Run for each target before every TestFlight upload.
 
 ```bash
 xcodebuild archive \
-  -project Skyr.xcodeproj \
-  -scheme Skyr \
+  -project Gumbo.xcodeproj \
+  -scheme Gumbo \
   -destination "generic/platform=iOS" \
-  -archivePath build/Skyr-iOS.xcarchive \
+  -archivePath build/Gumbo-iOS.xcarchive \
   -configuration Release
 ```
 
 - [ ] Archive completes without error
 - [ ] No unresolved asset catalog warnings
-- [ ] Watch app embedded at `Products/Applications/Skyr.app/Watch/Skyr.app`
-- [ ] Widgets extension embedded at `Products/Applications/Skyr.app/PlugIns/SkyrWidgets.appex`
+- [ ] Watch app embedded at `Products/Applications/Gumbo.app/Watch/Gumbo.app`
+- [ ] Widgets extension embedded at `Products/Applications/Gumbo.app/PlugIns/GumboWidgets.appex`
 
 ### 1.2 macOS Archive
 
 ```bash
 xcodebuild archive \
-  -project Skyr.xcodeproj \
-  -scheme SkyrMac \
+  -project Gumbo.xcodeproj \
+  -scheme GumboMac \
   -destination "generic/platform=macOS" \
-  -archivePath build/Skyr-macOS.xcarchive \
+  -archivePath build/Gumbo-macOS.xcarchive \
   -configuration Release
 ```
 
@@ -54,10 +54,10 @@ xcodebuild archive \
 
 ```bash
 xcodebuild archive \
-  -project Skyr.xcodeproj \
-  -scheme SkyrTV \
+  -project Gumbo.xcodeproj \
+  -scheme GumboTV \
   -destination "generic/platform=tvOS" \
-  -archivePath build/Skyr-tvOS.xcarchive \
+  -archivePath build/Gumbo-tvOS.xcarchive \
   -configuration Release
 ```
 
@@ -73,7 +73,7 @@ xcodebuild archive \
 
 ```bash
 xcodebuild -exportArchive \
-  -archivePath build/Skyr-iOS.xcarchive \
+  -archivePath build/Gumbo-iOS.xcarchive \
   -exportOptionsPlist ExportOptions-AppStore.plist \
   -exportPath build/export-ios
 ```
@@ -87,7 +87,7 @@ Repeat for macOS and tvOS archives.
 ### 2.2 Validate Exports
 
 ```bash
-xcrun altool --validate-app -f build/export-ios/Skyr.ipa \
+xcrun altool --validate-app -f build/export-ios/Gumbo.ipa \
   --type ios -u "$APPLE_ID" -p "$APP_SPECIFIC_PASSWORD"
 ```
 
@@ -104,7 +104,7 @@ xcrun altool --validate-app -f build/export-ios/Skyr.ipa \
 Extract and verify from the signed `.app`:
 
 ```bash
-codesign -d --entitlements - build/Skyr-iOS.xcarchive/Products/Applications/Skyr.app
+codesign -d --entitlements - build/Gumbo-iOS.xcarchive/Products/Applications/Gumbo.app
 ```
 
 **Required entitlements:**
@@ -112,8 +112,8 @@ codesign -d --entitlements - build/Skyr-iOS.xcarchive/Products/Applications/Skyr
 | Entitlement | Value | Status |
 | --- | --- | --- |
 | `com.apple.developer.carplay-audio` | `true` | ✅ Approved |
-| `com.apple.security.application-groups` | `group.com.samuelvoltolini.skyr` | Required |
-| `com.apple.developer.icloud-container-identifiers` | `iCloud.com.samuelvoltolini.skyr` | Required |
+| `com.apple.security.application-groups` | `group.com.samuelvoltolini.gumbo` | Required |
+| `com.apple.developer.icloud-container-identifiers` | `iCloud.com.samuelvoltolini.gumbo` | Required |
 | `com.apple.developer.icloud-services` | `CloudKit` | Required |
 | `aps-environment` | `production` (Release) | Required |
 
@@ -125,7 +125,7 @@ codesign -d --entitlements - build/Skyr-iOS.xcarchive/Products/Applications/Skyr
 ### 3.2 macOS Entitlements
 
 ```bash
-codesign -d --entitlements - build/Skyr-macOS.xcarchive/Products/Applications/Skyr.app
+codesign -d --entitlements - build/Gumbo-macOS.xcarchive/Products/Applications/Gumbo.app
 ```
 
 - [ ] `com.apple.security.app-sandbox` is `true`
@@ -135,7 +135,7 @@ codesign -d --entitlements - build/Skyr-macOS.xcarchive/Products/Applications/Sk
 ### 3.3 tvOS Entitlements
 
 ```bash
-codesign -d --entitlements - build/Skyr-tvOS.xcarchive/Products/Applications/Skyr.app
+codesign -d --entitlements - build/Gumbo-tvOS.xcarchive/Products/Applications/Gumbo.app
 ```
 
 - [ ] CloudKit entitlements present
@@ -151,11 +151,11 @@ Each app/extension must include a valid `PrivacyInfo.xcprivacy`.
 
 | Target | Path |
 | --- | --- |
-| iOS | `Skyr/PrivacyInfo.xcprivacy` |
-| Widgets | `SkyrWidgets/PrivacyInfo.xcprivacy` |
-| Watch | `SkyrWatch/PrivacyInfo.xcprivacy` |
-| Mac | `SkyrMac/PrivacyInfo.xcprivacy` |
-| TV | `SkyrTV/PrivacyInfo.xcprivacy` |
+| iOS | `Gumbo/PrivacyInfo.xcprivacy` |
+| Widgets | `GumboWidgets/PrivacyInfo.xcprivacy` |
+| Watch | `GumboWatch/PrivacyInfo.xcprivacy` |
+| Mac | `GumboMac/PrivacyInfo.xcprivacy` |
+| TV | `GumboTV/PrivacyInfo.xcprivacy` |
 
 ### 4.2 Required Declarations
 
@@ -180,12 +180,12 @@ All manifests must declare:
 ### 4.3 Verify in Archive
 
 ```bash
-unzip -l build/export-ios/Skyr.ipa | grep PrivacyInfo
+unzip -l build/export-ios/Gumbo.ipa | grep PrivacyInfo
 ```
 
-- [ ] `Payload/Skyr.app/PrivacyInfo.xcprivacy` present
-- [ ] `Payload/Skyr.app/Watch/Skyr.app/PrivacyInfo.xcprivacy` present
-- [ ] `Payload/Skyr.app/PlugIns/SkyrWidgets.appex/PrivacyInfo.xcprivacy` present
+- [ ] `Payload/Gumbo.app/PrivacyInfo.xcprivacy` present
+- [ ] `Payload/Gumbo.app/Watch/Gumbo.app/PrivacyInfo.xcprivacy` present
+- [ ] `Payload/Gumbo.app/PlugIns/GumboWidgets.appex/PrivacyInfo.xcprivacy` present
 
 ---
 
@@ -221,7 +221,7 @@ unzip -l build/export-ios/Skyr.ipa | grep PrivacyInfo
 ### 6.1 Upload Builds
 
 ```bash
-xcrun altool --upload-app -f build/export-ios/Skyr.ipa \
+xcrun altool --upload-app -f build/export-ios/Gumbo.ipa \
   --type ios -u "$APPLE_ID" -p "$APP_SPECIFIC_PASSWORD"
 ```
 
@@ -409,7 +409,7 @@ Evidence: [REMEDIATION-2026-09-14-BATCH-4.md](REMEDIATION-2026-09-14-BATCH-4.md)
 #!/bin/bash
 # Run before every TestFlight upload
 
-echo "=== Skyr Pre-Upload Validation ==="
+echo "=== Gumbo Pre-Upload Validation ==="
 
 # Check version consistency
 echo "Checking version numbers..."
@@ -417,11 +417,11 @@ grep -E "CURRENT_PROJECT_VERSION:" project.yml | head -5
 
 # Verify privacy manifests exist
 echo "Checking privacy manifests..."
-for manifest in Skyr/PrivacyInfo.xcprivacy \
-                SkyrWidgets/PrivacyInfo.xcprivacy \
-                SkyrWatch/PrivacyInfo.xcprivacy \
-                SkyrMac/PrivacyInfo.xcprivacy \
-                SkyrTV/PrivacyInfo.xcprivacy; do
+for manifest in Gumbo/PrivacyInfo.xcprivacy \
+                GumboWidgets/PrivacyInfo.xcprivacy \
+                GumboWatch/PrivacyInfo.xcprivacy \
+                GumboMac/PrivacyInfo.xcprivacy \
+                GumboTV/PrivacyInfo.xcprivacy; do
   if [ -f "$manifest" ]; then
     echo "✅ $manifest"
   else

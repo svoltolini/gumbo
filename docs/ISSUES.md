@@ -61,7 +61,7 @@ Build numbers are `CURRENT_PROJECT_VERSION` stamps (date and time of the build).
   nothing at all.
 - **Fix:** `parallelResults` (plain awaited tasks) and struct payloads everywhere; a scan that lists
   no folders now keeps the existing library instead of replacing it. Regression test in
-  `Packages/SkyrCore/Tests/SkyrCoreTests/ScanTests.swift`, run with `swift test -c release`.
+  `Packages/GumboCore/Tests/GumboCoreTests/ScanTests.swift`, run with `swift test -c release`.
 
 ### iCloud "Cannot create new type … in production schema"
 - **Seen:** every TestFlight build failed to sync the family and profile records.

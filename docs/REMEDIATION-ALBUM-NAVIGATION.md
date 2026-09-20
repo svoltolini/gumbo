@@ -1,5 +1,7 @@
 # Album navigation and cancellation
 
+> Historical record: names and source paths use current Gumbo spelling for navigation. Results predate the new app identity; see [identity and distribution](GUMBO-IDENTITY.md).
+
 An album request on iPhone and Apple TV waits briefly for the player sheet to dismiss. That pending push now belongs to the current navigation command, connection, NAS source and authenticated profile session. A newer request, leaving Library, signing out, changing source or locking/reopening the profile prevents the old request from opening a page. The final push resolves the current album by ID, so removed albums are rejected and refreshed titles are used. Mac keeps its immediate navigation behavior.
 
 Apple TV's independent tab owner cancels the same pending request when the listener selects another tab. The existing platform owners still switch to Library/Albums and use their own navigation stacks; no second Back mechanism was introduced.
