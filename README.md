@@ -30,6 +30,14 @@ xcodebuild -project Gumbo.xcodeproj -scheme GumboMac -configuration Release -des
 xcodebuild -project Gumbo.xcodeproj -scheme GumboTV -configuration Release -destination 'generic/platform=tvOS Simulator' build
 ```
 
+Run the `GumboUITests` scheme on an iPhone simulator for offline sample journeys: Settings navigation, search typing/scrolling, tab isolation and simulated transport controls. For example, replace `SIMULATOR_ID` with an available iPhone simulator identifier:
+
+```sh
+xcodebuild -project Gumbo.xcodeproj -scheme GumboUITests -destination 'platform=iOS Simulator,id=SIMULATOR_ID' test
+```
+
+These tests use a sample library and do not verify real NAS audio or downloads. See [the Settings and album-grouping validation](docs/SETTINGS-ALBUM-VALIDATION-2026-09-20.md) for current evidence and remaining release gates.
+
 Use XcodeGen after changing `project.yml`, and treat `project.yml` as the source of truth for generated project settings.
 
 ## Release version policy

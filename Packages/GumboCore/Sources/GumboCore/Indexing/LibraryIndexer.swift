@@ -371,7 +371,8 @@ public final class LibraryIndexer {
             noteEnrichProgress(enriched: enrichedSoFar)
             if Date.now.timeIntervalSince(lastPublish) > 6 {
                 // Show albums as their tags settle instead of the folder grouping until the very end.
-                working.regroupByTags()
+                working = await regroupInBackground(working, run: run)
+                try checkActive(run)
                 onCatalogue(working)
                 try checkActive(run)
                 lastPublish = .now
@@ -379,17 +380,7 @@ public final class LibraryIndexer {
         }
         noteEnrichProgress(enriched: enrichedSoFar, force: true)
         working.indexedAt = .now
-        let finished = working
-        let coverDirectory = CoverStore.directory
-        working = await Task.detached(priority: .userInitiated) {
-            CoverStore.$directoryOverride.withValue(coverDirectory) {
-                CoverStore.$indexingRun.withValue(run) {
-                    var regrouped = finished
-                    if run.isActive { regrouped.regroupByTags() }
-                    return regrouped
-                }
-            }
-        }.value
+        working = await regroupInBackground(working, run: run)
         try checkActive(run)
         let multiDisc = working.albums.filter(\.hasMultipleDiscs)
         recordDiagnostics("Regrouped by tags: \(working.albums.count) albums, \(multiDisc.count) with more than one disc" + (multiDisc.isEmpty ? "" : ": " + multiDisc.prefix(6).map { "“\($0.title)” (\($0.discs.count))" }.joined(separator: ", ")))
@@ -400,6 +391,21 @@ public final class LibraryIndexer {
         noteEnrichProgress(covers: coversTotal, force: true)
         CoverStore.clearTrackCovers()
         onCatalogue(working)
+    }
+
+    /// Partial updates need the same background work and cancellation boundary as the final result.
+    /// Grouping thousands of songs on the main actor interrupts scrolling and transport controls.
+    private func regroupInBackground(_ catalogue: Catalogue, run: IndexingRun) async -> Catalogue {
+        let coverDirectory = CoverStore.directory
+        return await Task.detached(priority: .userInitiated) {
+            CoverStore.$directoryOverride.withValue(coverDirectory) {
+                CoverStore.$indexingRun.withValue(run) {
+                    var regrouped = catalogue
+                    if run.isActive { regrouped.regroupByTags() }
+                    return regrouped
+                }
+            }
+        }.value
     }
 
     /// Fetches a cover for every album that still lacks one, from its folder image or its own tracks.

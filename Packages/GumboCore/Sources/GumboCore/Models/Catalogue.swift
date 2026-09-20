@@ -165,19 +165,22 @@ public nonisolated struct Catalogue: Codable, Sendable {
             var sources: Set<String> = []
         }
         let previous = Dictionary(albums.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let sourceByTrack = Dictionary(albums.flatMap { album in album.tracks.map { ($0.id, album.id) } },
+                                       uniquingKeysWith: { first, _ in first })
         var drafts: [String: Draft] = [:]
         var order: [String] = []
-        for album in albums {
+        // Start from physical album folders again, not the previous grouping. Enrichment can
+        // publish several times and an earlier partial result must not permanently split a release.
+        for album in Self.folderInputs(albums, rootPath: rootPath) {
             let folderArtist = album.folderArtist == "Unknown Artist" ? nil : album.folderArtist
-            // Tracks grouped by album title and, where the tag exists, album artist: two different
-            // artists' "Greatest Hits" in one folder stay two albums, while songs missing the tag join
-            // the tagged album their own credit points at. Each group then settles on one artist, so a
-            // guest on a few songs never splits an album.
+            // A folder named for this release is stronger evidence than per-song album-artist
+            // credits copied by some rippers. Mixed folders still respect distinct album artists.
+            let isAlbumFolder = Self.isAlbumFolder(album.folderPath, title: album.title)
             var groups: [String: [Track]] = [:]
             var groupOrder: [String] = []
             for track in album.tracks {
                 let title = (track.albumTitleTag.nonEmpty ?? album.folderTitle).lowercased()
-                let key = title + "\u{1F}" + (track.albumArtistTag.nonEmpty?.lowercased() ?? "")
+                let key = title + "\u{1F}" + (isAlbumFolder ? "" : (track.albumArtistTag.nonEmpty?.lowercased() ?? ""))
                 if groups[key] == nil { groupOrder.append(key) }
                 groups[key, default: []].append(track)
             }
@@ -211,7 +214,7 @@ public nonisolated struct Catalogue: Codable, Sendable {
                     var moved = track
                     moved.albumID = id
                     drafts[id]!.tracks.append(moved)
-                    drafts[id]!.sources.insert(album.id)
+                    drafts[id]!.sources.insert(sourceByTrack[track.id] ?? album.id)
                 }
             }
         }
@@ -247,6 +250,52 @@ public nonisolated struct Catalogue: Codable, Sendable {
             regrouped.append(album)
         }
         albums = Self.mergingSameTitles(regrouped).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private nonisolated static func isAlbumFolder(_ path: String?, title: String) -> Bool {
+        guard let name = path?.split(separator: "/").last.map(String.init) else { return false }
+        let clean = PathParser.splitDisc(PathParser.splitYear(PathParser.clean(name)).0).title
+        let guessed = PathParser.album(components: [name], rootName: name).title
+        let normalizedTitle = PathParser.clean(title)
+        return clean.caseInsensitiveCompare(normalizedTitle) == .orderedSame
+            || guessed.caseInsensitiveCompare(normalizedTitle) == .orderedSame
+    }
+
+    /// Coalesce tracks by physical folder and tagged title so cached splits can heal on a normal scan.
+    /// A CD/Disc subfolder belongs to its parent; sibling "Album (Disc N)" folders share a logical path.
+    private nonisolated static func folderInputs(_ albums: [Album], rootPath: String) -> [Album] {
+        var inputs: [String: Album] = [:]
+        var order: [String] = []
+        for album in albums {
+            for original in album.tracks {
+                var track = original
+                track.normalizeDiscFromAlbumTag()
+                let title = track.albumTitleTag.nonEmpty ?? album.folderTitle
+                var folder = track.path.map { ($0 as NSString).deletingLastPathComponent } ?? album.folderPath
+                if let current = folder {
+                    let name = (current as NSString).lastPathComponent
+                    if PathParser.discNumber(in: name) != nil, current != rootPath {
+                        folder = (current as NSString).deletingLastPathComponent
+                    } else {
+                        let split = PathParser.splitDisc(name)
+                        if split.disc != nil {
+                            folder = ((current as NSString).deletingLastPathComponent as NSString).appendingPathComponent(split.title)
+                        }
+                    }
+                }
+                let key = (folder ?? album.id) + "\u{1F}" + PathParser.clean(title).lowercased()
+                if inputs[key] == nil {
+                    var input = album
+                    input.title = title
+                    input.folderPath = folder
+                    input.tracks = []
+                    inputs[key] = input
+                    order.append(key)
+                }
+                inputs[key]!.tracks.append(track)
+            }
+        }
+        return order.compactMap { inputs[$0] }
     }
 
     /// Cross-folder grouping requires the same album artist identity. Shared title or guest

@@ -4,7 +4,7 @@
 **Build**: Record the exact new Gumbo build below.
 **Date**: _______________
 
-This is the manual testing checklist for TestFlight device acceptance. Complete this **after** running `scripts/preflight-validation.sh` which verifies all automated checks.
+This is the manual testing checklist for TestFlight device acceptance. Complete this **after** running `scripts/preflight-validation.sh` which checks release configuration and core tests. Run the GumboUITests scheme separately for simulator interaction tests.
 
 The previous app's build 202609142150 does not validate the new Gumbo identity. Record signed-device evidence in [#118](https://github.com/svoltolini/gumbo/issues/118) and [#119](https://github.com/svoltolini/gumbo/issues/119); leave unexecuted checks pending.
 
@@ -183,9 +183,9 @@ These are the critical path tests. Complete these first.
 
 | # | Test | Status | Notes |
 |---|------|--------|-------|
-| 13.1 | Live Activity appears during playback | | |
-| 13.2 | Live Activity updates on track change | | |
-| 13.3 | Live Activity controls work | | |
+| 13.1 | Live Activity appears during an album or playlist download | | |
+| 13.2 | Live Activity updates download progress and completion | | |
+| 13.3 | Live Activity tap opens the related player, album or playlist | | |
 
 ---
 
@@ -263,7 +263,7 @@ List issues to fix post-release or in next build:
 ## Diagnostics Attachment
 
 For any failed tests, attach:
-- Console logs (Settings → Privacy → Analytics → Gumbo)
+- Gumbo diagnostics (Settings → Advanced Settings → Diagnostics)
 - Screenshot of error state
 - Steps to reproduce
 - Device/OS/build details
