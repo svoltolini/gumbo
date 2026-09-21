@@ -886,25 +886,37 @@ public final class AppModel {
         library.tagServiceConfiguration = value
     }
 
-    public func configureTagService(address: String, token: String) async throws {
+    public func configureTagService(address: String, token: String, allowsReviewedDeletion: Bool = false) async throws {
         guard profiles?.canManageProfiles == true, let connection, let root = connection.musicPath, isConnected,
+              !library.metadataWriter.isWriting, !library.isDeletingFiles,
               library.catalogue.driveID == connection.sourceID, library.contentSourceID == connection.sourceID,
               library.catalogue.rootPath == root, library.contentRootPath == root,
               let endpoint = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw ProviderError.invalidConfiguration }
         let generation = connectionGeneration
         let profileSession = profiles?.sessionID
-        let value = TagServiceConfiguration(endpoint: endpoint, sourceID: connection.sourceID, libraryRoot: root)
+        let value = TagServiceConfiguration(endpoint: endpoint, sourceID: connection.sourceID, libraryRoot: root, allowsReviewedDeletion: allowsReviewedDeletion)
         let client = try RemoteTagService(endpoint: endpoint, token: token)
-        _ = try await client.capabilities()
+        let capabilities = try await client.capabilities()
+        guard !allowsReviewedDeletion || (capabilities.supportsReviewedDeletion == true && capabilities.supportsVerifiedInspection == true) else {
+            throw RemoteTagService.Error.service(code: "deletion_disabled", message: "Enable reviewed deletion in the helper's server settings before enabling it here.")
+        }
         // Catch a wrong mount before enabling writes. The user explicitly confirms the folder mapping.
         guard let sample = library.catalogue.albums.flatMap(\.tracks).first(where: { track in
             guard let path = track.path else { return false }
-            return ["mp3", "flac", "m4a"].contains((path as NSString).pathExtension.lowercased())
+            let extensionName = (path as NSString).pathExtension.lowercased()
+            return allowsReviewedDeletion ? RemoteDriveSupport.audioExtensions.contains(extensionName) : ["mp3", "flac", "m4a"].contains(extensionName)
         }), let path = sample.path else { throw MetadataWriteError.noFile }
-        let state = try await client.stat(path: value.relativePath(path))
-        guard sample.fileSize == nil || sample.fileSize == state.expected.size else { throw ProviderError.changed }
+        if allowsReviewedDeletion {
+            guard let base = library.drive as? any RemoteFileDrive else { throw ProviderError.invalidConfiguration }
+            let reviewed = try await HelperDeletionDrive(base: base, configuration: value, service: client).reviewDeletion(path)
+            guard sample.fileSize == nil || sample.fileSize == reviewed.size else { throw ProviderError.changed }
+        } else {
+            let state = try await client.stat(path: value.relativePath(path))
+            guard sample.fileSize == nil || sample.fileSize == state.expected.size else { throw ProviderError.changed }
+        }
         guard isCurrent(generation), profiles?.sessionID == profileSession, profiles?.canManageProfiles == true,
-              self.connection?.sourceID == connection.sourceID, self.connection?.musicPath == root else { throw CancellationError() }
+              self.connection?.sourceID == connection.sourceID, self.connection?.musicPath == root,
+              !library.metadataWriter.isWriting, !library.isDeletingFiles else { throw CancellationError() }
         KeychainStore.save(password: token, for: value.keychainAccount)
         guard KeychainStore.password(for: value.keychainAccount) == token else { throw RemoteTagService.Error.invalidToken }
         defaults.set(try JSONEncoder().encode(value), forKey: "tagHelper." + connection.sourceID)
@@ -912,7 +924,7 @@ public final class AppModel {
     }
 
     public func disableTagService() {
-        guard profiles?.canManageProfiles == true, let connection, !library.metadataWriter.isWriting else { return }
+        guard profiles?.canManageProfiles == true, let connection, !library.metadataWriter.isWriting, !library.isDeletingFiles else { return }
         if let value = library.tagServiceConfiguration { KeychainStore.delete(account: value.keychainAccount) }
         defaults.removeObject(forKey: "tagHelper." + connection.sourceID)
         library.tagServiceConfiguration = nil

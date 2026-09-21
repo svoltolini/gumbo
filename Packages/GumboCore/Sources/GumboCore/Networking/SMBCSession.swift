@@ -144,6 +144,58 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
         }
     }
 
+    func inspectionSnapshot(_ path: String) async throws -> any RemoteInspectionSnapshot {
+        let transaction = SMBCSession(settings: settings, password: password)
+        do {
+            let entry = try await transaction.openDeletion(path)
+            return SMBInspectionSnapshot(entry: entry, path: path, session: transaction)
+        } catch {
+            await transaction.disconnect()
+            throw error
+        }
+    }
+
+    private struct SMBInspectionSnapshot: RemoteInspectionSnapshot {
+        let entry: RemoteEntry
+        let path: String
+        let session: SMBCSession
+        let deadline = ContinuousClock.now + .seconds(120)
+        func read(_ range: Range<Int64>) async throws -> Data {
+            guard ContinuousClock.now < deadline else { throw SMBDriveError.timedOut }
+            return try await session.readInspection(range, size: entry.size ?? 0)
+        }
+        func validate() async throws {
+            guard ContinuousClock.now < deadline else { throw SMBDriveError.timedOut }
+            guard try await session.openDeletion(path, reusingHandle: true) == entry else { throw RemoteWriteError.changed }
+        }
+        func close() async { await session.disconnect() }
+    }
+
+    private func readInspection(_ range: Range<Int64>, size: Int64) async throws -> Data {
+        guard range.lowerBound >= 0, range.upperBound >= range.lowerBound,
+              range.upperBound - range.lowerBound <= SMBDrive.maximumReadBytes else { throw RemoteDriveError.tooLarge }
+        return try await perform { client, cancellation in
+            guard let context = client.context, let file = client.deletionHandle else { throw SMBDriveError.disconnected }
+            client.installCancellation(cancellation, on: context)
+            let end = min(size, range.upperBound)
+            var offset = range.lowerBound
+            var result = Data()
+            let maximum = min(smb2_get_max_read_size(context), 1024 * 1024)
+            guard maximum > 0 else { throw SMBDriveError.invalidResponse }
+            while offset < end {
+                try cancellation.check()
+                let count = UInt32(min(Int64(maximum), end - offset))
+                var bytes = [UInt8](repeating: 0, count: Int(count))
+                let read = smb2_pread(context, file, &bytes, count, UInt64(offset))
+                try client.check(read)
+                guard read > 0, read <= count else { throw SMBDriveError.invalidResponse }
+                result.append(contentsOf: bytes.prefix(Int(read)))
+                offset += Int64(read)
+            }
+            return result
+        }
+    }
+
     func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
         let transaction = SMBCSession(settings: settings, password: password)
         do {
@@ -162,12 +214,16 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
         }
     }
 
-    private func openDeletion(_ path: String) async throws -> RemoteEntry {
+    private func openDeletion(_ path: String, reusingHandle: Bool = false) async throws -> RemoteEntry {
         try await perform { client, cancellation in
+            if reusingHandle, client.deletionHandle == nil { throw SMBDriveError.disconnected }
             let context = try client.connected(cancellation)
-            guard client.deletionHandle == nil,
-                  let file = gumbo_smb2_open_delete_snapshot(context, path) else { throw client.failure() }
-            client.deletionHandle = file
+            if !reusingHandle {
+                guard client.deletionHandle == nil,
+                      let file = gumbo_smb2_open_delete_snapshot(context, path) else { throw client.failure() }
+                client.deletionHandle = file
+            }
+            guard let file = client.deletionHandle else { throw SMBDriveError.disconnected }
             var before = smb2_stat_64()
             try client.check(smb2_fstat(context, file, &before))
             guard before.smb2_type == SMB2_TYPE_FILE,

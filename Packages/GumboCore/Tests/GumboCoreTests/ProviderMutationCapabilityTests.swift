@@ -35,14 +35,14 @@ private actor CapabilityDrive: WritableRemoteDrive {
             try await drive.replaceFile(at: "/music/song.mp3", with: URL(fileURLWithPath: "/unused"), expectedSize: 0, modified: nil)
         }
         let finding = await MusicFileInspector.inspect(track, drive: drive)
-        #expect(finding.canDelete)
+        #expect(finding.condition == .damaged && !finding.canDelete)
         await #expect(throws: RemoteWriteError.unsupported) {
             try await MusicFileInspector.deleteReviewed(finding, drive: drive, authorized: { true })
         }
         #expect(await drive.mutations == 0)
     }
 
-    @Test func helperEnablesTagsOnlyAndCannotUnlockAlbumDeletion() async throws {
+    @Test func defaultHelperConfigurationEnablesTagsButNeverDeletion() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let suite = "ProviderCapabilityTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

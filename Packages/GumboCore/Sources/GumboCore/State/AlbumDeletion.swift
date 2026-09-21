@@ -13,6 +13,7 @@ public nonisolated struct AlbumDeletionRequest: Identifiable, Sendable {
     let connectionToken: UUID
     let catalogueRevision: Int
     let entries: [String: RemoteEntry]
+    var helper: TagServiceConfiguration? = nil
 }
 
 public nonisolated struct AlbumDeletionProgress: Sendable {

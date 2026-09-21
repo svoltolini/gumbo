@@ -111,6 +111,7 @@ nonisolated protocol SMBReadSession: Sendable {
     func disconnect() async
     var supportsReviewedDeletion: Bool { get }
     func reviewDeletion(_ path: String) async throws -> RemoteEntry
+    func inspectionSnapshot(_ path: String) async throws -> any RemoteInspectionSnapshot
     func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws
     func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
                       progress: @escaping @Sendable (Double) -> Void) async throws -> Int64
@@ -119,6 +120,7 @@ nonisolated protocol SMBReadSession: Sendable {
 nonisolated extension SMBReadSession {
     var supportsReviewedDeletion: Bool { false }
     func reviewDeletion(_ path: String) async throws -> RemoteEntry { throw RemoteWriteError.unsupported }
+    func inspectionSnapshot(_ path: String) async throws -> any RemoteInspectionSnapshot { throw RemoteWriteError.unsupported }
     func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
         throw RemoteWriteError.unsupported
     }
@@ -172,6 +174,12 @@ public actor SMBDrive: RemoteDeletionDrive, ResumableRemoteFileDrive {
         let relative = try SMBConnectionSettings.relativePath(path)
         guard !relative.isEmpty, path == "/" + relative else { throw SMBDriveError.invalidPath }
         return try await session.reviewDeletion(relative)
+    }
+
+    public func inspectionSnapshot(_ path: String) async throws -> any RemoteInspectionSnapshot {
+        let relative = try SMBConnectionSettings.relativePath(path)
+        guard !relative.isEmpty, path == "/" + relative else { throw SMBDriveError.invalidPath }
+        return try await session.inspectionSnapshot(relative)
     }
 
     public func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {

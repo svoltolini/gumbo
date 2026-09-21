@@ -6,10 +6,12 @@ private struct MaintenanceContext: Equatable {
     let source: String
     let root: String
     let session: UUID?
+    let helper: TagServiceConfiguration?
     init(_ library: LibraryStore, _ profiles: ProfileStore) {
         source = library.catalogue.driveID
         root = library.catalogue.rootPath
         session = profiles.sessionID
+        helper = library.activeTagService
     }
 }
 
@@ -306,7 +308,7 @@ struct ProblemFilesView: View {
     }
 
     private func inspectFiles() {
-        guard canStart, let drive = library.drive as? any RemoteFileDrive else { return }
+        guard canStart else { return }
         let candidates = library.tracks.filter(MusicFileInspector.needsInspection)
         let scope = context
         findings = []; selected = []; failures = []; summary = nil
@@ -321,14 +323,14 @@ struct ProblemFilesView: View {
             for (index, track) in candidates.enumerated() {
                 guard !Task.isCancelled, context == scope else { break }
                 currentFile = track.title
-                let finding = await MusicFileInspector.inspect(track, drive: drive)
+                let finding = await library.inspectFile(track)
                 guard !Task.isCancelled, context == scope else { break }
                 findings.append(finding)
                 progress = "\(index + 1) of \(candidates.count) files"
                 checkedProgress = Double(index + 1) / Double(candidates.count)
             }
             guard context == scope else { return }
-            let damaged = findings.filter(\.canDelete).count
+            let damaged = findings.filter { $0.condition == .damaged }.count
             summary = "Checked \(findings.count) of \(candidates.count) files. \(damaged) have confirmed structural damage or are empty."
                 + (Task.isCancelled ? " The check was stopped." : "")
                 + " Nothing has been deleted. This check does not decode every song in your library."
@@ -354,8 +356,9 @@ struct ProblemFilesView: View {
             selected.subtract(removed)
             failures = report.failures
             summary = "Deleted \(report.deleted.count) files from the NAS."
-                + (report.failures.isEmpty ? "" : " \(report.failures.count) files could not be deleted; see the details below.")
+                + (report.failures.isEmpty ? "" : " Deletion wasn’t confirmed for \(report.failures.count) files; see the details below.")
                 + (report.wasCancelled ? " Stopped before the remaining files were tried." : "")
+                + (report.persistenceError.map { " " + $0 } ?? "")
         }
     }
 }

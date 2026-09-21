@@ -5,6 +5,7 @@ import Foundation
 public nonisolated protocol RemoteDeletionDrive: RemoteFileDrive {
     /// Reads a deletion validator and checks this account's permissions without changing the file.
     func reviewDeletion(_ path: String) async throws -> RemoteEntry
+    func inspectionSnapshot(_ path: String) async throws -> any RemoteInspectionSnapshot
     /// Deletes only the reviewed representation, checking current authority after network preparation.
     func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws
 }

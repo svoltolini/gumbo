@@ -13,19 +13,22 @@ public nonisolated struct MusicFileInspection: Identifiable, Sendable {
     public let size: Int64?
     public let modified: Date?
     public let version: String?
+    /// Only an actual inspection may attach the provider's deletion witness.
+    var reviewedEntry: RemoteEntry?
     public init(track: Track, sourceID: String, condition: MusicFileCondition, explanation: String,
                 size: Int64?, modified: Date?, version: String? = nil) {
         self.track = track; self.sourceID = sourceID; self.condition = condition
         self.explanation = explanation; self.size = size; self.modified = modified; self.version = version
     }
     public var id: String { track.id }
-    public var canDelete: Bool { condition == .damaged && size != nil && modified != nil }
+    public var canDelete: Bool { condition == .damaged && size != nil && modified != nil && reviewedEntry != nil }
 }
 
 public nonisolated struct MusicFileDeletionReport: Sendable {
     public var deleted: [Track] = []
     public var failures: [MetadataWriteFailure] = []
     public var wasCancelled = false
+    public var persistenceError: String?
     public init() {}
 }
 
@@ -36,6 +39,26 @@ public nonisolated enum MusicFileInspector {
     }
 
     @concurrent public static func inspect(_ track: Track, drive: any RemoteFileDrive, now: Date = .now) async -> MusicFileInspection {
+        if let deletionDrive = drive as? any RemoteDeletionDrive,
+           drive.capabilities.contains(.delete), let path = track.path {
+            do {
+                let snapshot = try await deletionDrive.inspectionSnapshot(path)
+                let reader = InspectionSnapshotDrive(id: drive.id, displayName: drive.displayName, snapshot: snapshot)
+                var finding = await inspectContents(track, drive: reader, now: now)
+                await snapshot.close()
+                if finding.condition == .damaged { finding.reviewedEntry = snapshot.entry }
+                return finding
+            } catch is CancellationError {
+                return MusicFileInspection(track: track, sourceID: drive.id, condition: .unavailable,
+                    explanation: "The file check was stopped.", size: nil, modified: nil)
+            } catch {
+                // Read-only accounts can still inspect, but cannot obtain a deletion witness.
+            }
+        }
+        return await inspectContents(track, drive: drive, now: now)
+    }
+
+    @concurrent private static func inspectContents(_ track: Track, drive: any RemoteFileDrive, now: Date) async -> MusicFileInspection {
         var observed: RemoteEntry?
         func result(_ condition: MusicFileCondition, _ explanation: String) -> MusicFileInspection {
             MusicFileInspection(track: track, sourceID: drive.id, condition: condition,
@@ -66,6 +89,9 @@ public nonisolated enum MusicFileInspector {
             }
             return result(finding.0, finding.1)
         } catch {
+            if (error as? RemoteWriteError) == .changed || (error as? ProviderError) == .changed {
+                return result(.changing, "The file changed during the check. Let the download or conversion finish.")
+            }
             return result(.unavailable, "Could not finish checking this file. " + MetadataWriter.message(for: error))
         }
     }
@@ -119,19 +145,19 @@ public nonisolated enum MusicFileInspector {
         return (.unsupported, "This file has an unusually complex structure. Keep it for a separate check.")
     }
 
-    /// Rechecks the exact reviewed file immediately before deletion. File Station has no atomic
-    /// compare-and-delete API; this version check narrows, but cannot eliminate, a server-side race.
-    public static func deleteReviewed(_ finding: MusicFileInspection, drive: any WritableRemoteDrive,
+    /// Reclassifies the reviewed representation, then lets the provider enforce its deletion
+    /// condition. SMB keeps a protected handle; the legacy DSM adapter retains its documented limits.
+    public static func deleteReviewed(_ finding: MusicFileInspection, drive: any RemoteDeletionDrive,
                                       authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
         guard drive.capabilities.contains(.delete) else { throw RemoteWriteError.unsupported }
-        guard finding.canDelete, finding.sourceID == drive.id, let path = finding.track.path else {
+        guard finding.canDelete, finding.sourceID == drive.id, let reviewed = finding.reviewedEntry else {
             throw RemoteWriteError.changed
         }
         try Task.checkCancellation()
         guard await authorized() else { throw MetadataWriteError.notAuthorized }
         let current = await inspect(finding.track, drive: drive)
         guard current.canDelete, current.size == finding.size, current.modified == finding.modified,
-              current.version == finding.version else {
+              current.version == finding.version, current.reviewedEntry == reviewed else {
             throw RemoteWriteError.changed
         }
         try Task.checkCancellation()
@@ -142,7 +168,7 @@ public nonisolated enum MusicFileInspector {
         try await Task {
             guard await authorized() else { throw MetadataWriteError.notAuthorized }
             guard drive.capabilities.contains(.delete) else { throw RemoteWriteError.unsupported }
-            try await drive.delete(path)
+            try await drive.deleteReviewed(reviewed, authorized: authorized)
         }.value
     }
 }

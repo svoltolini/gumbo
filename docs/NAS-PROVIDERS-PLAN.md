@@ -97,6 +97,14 @@ The SMB work stays in scope even if a candidate fails. Select another acceptable
 
 Apple limits low-level networking on physical Watch and does not support BSD sockets there. A simulator success is not proof of independent Watch SMB access. Phone-to-Watch file transfer is asynchronous: show waiting-for-iPhone, transferring, available and failed states. Retain credential, catalogue and profile revisions; reject late transfers after logout, source changes or album deletion. An optional HTTPS endpoint requires explicit ownership/root mapping and must not silently alias unrelated libraries.
 
+### Current maintenance implementation decision
+
+Raw WebDAV mutations did not pass the disposable-server concurrency checks. Generic DAV headers or strong-looking ETags do not enable write capabilities. Embedded-tag edits instead use the optional, separately installed NAS helper, with its verified local staging/recovery contract. The same helper now offers explicit owner-reviewed album deletion, disabled by default on both ends. It validates expected content and uses durable jobs; the app cross-checks mapped file contents through both connections using full-file hashes. The owner must still explicitly map the correct folder. This provides a maintenance route without claiming universal WebDAV atomic replacement.
+
+SMB native deletion uses protected handles and full fingerprints. Damaged-file inspection now reads from that same protected handle, and only a verified inspection can authorize cleanup. Native SMB tag replacement is not enabled; the optional helper supplies that operation. Helper-backed damaged-file cleanup reads bounded ranges captured during the helper's full-file fingerprint pass, so it does not classify bytes from an unrelated provider read. Both cleanup and album deletion require explicit review and confirmation. Reading/listening and ordinary downloads require no helper.
+
+The helper and native provider capabilities are separate. File ownership, conflicts, partial outcomes, source/profile changes and lost acknowledgements still gate operations. Linux/Samba fixture results and real-NAS acceptance are recorded separately; no new vendor certification follows from these code paths alone.
+
 ### Setup, family access and maintenance
 
 Offer understandable choices such as Synology, QNAP and Other NAS. Brand selection suggests documented settings; the saved configuration is the actual protocol. Explain required NAS service setup before requesting credentials. Follow address → account → music folder → connection check → library scan, with cancellable work and a usable UI during scans. Keep protocol ports, certificate detail and diagnostics under relevant advanced help.

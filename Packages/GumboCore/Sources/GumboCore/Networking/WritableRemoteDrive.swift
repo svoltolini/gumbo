@@ -23,7 +23,15 @@ public nonisolated enum RemoteWriteError: LocalizedError, Sendable, Equatable {
     case incompleteTransfer
     case changed
     case deletionUnconfirmed
+    case helperDeletionUnconfirmed(UUID)
     case recoveryNeeded(String)
+
+    public var isDeletionUnconfirmed: Bool {
+        switch self {
+        case .deletionUnconfirmed, .helperDeletionUnconfirmed: true
+        default: false
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -31,6 +39,7 @@ public nonisolated enum RemoteWriteError: LocalizedError, Sendable, Equatable {
         case .readOnly: "This account can only read the music folder, so its files can't be changed."
         case .missing: "The file is no longer on the server."
         case .changed: "The file changed on the server. Update your library and try again."
+        case .helperDeletionUnconfirmed(let jobID): "The helper could not confirm deletion. Work has stopped. Check job \(jobID.uuidString.lowercased()) in the helper before deleting this file again."
         case .deletionUnconfirmed: "The server may have deleted this song, but its reply was lost. Deletion has stopped. Refresh your library before reviewing any more files."
         case .recoveryNeeded(let path): "The replacement could not be confirmed. Check the original file and its backup at \(path) in File Station before trying again."
         case .incompleteTransfer: "The file didn't transfer completely, so it was left unchanged."

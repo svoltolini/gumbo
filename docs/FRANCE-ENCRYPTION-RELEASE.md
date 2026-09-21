@@ -16,7 +16,7 @@ The correct form is [ANSSI Annex I for a cryptology product](https://cyber.gouv.
 
 The preparation pack provides French answers, an inventory of algorithms and key sizes, source/build provenance, a product description and connection guides. It is deliberately unsigned. Private owner details belong in the private filing packet, never in this repository or public issues.
 
-Before signing, the declarant needs to confirm individual versus company status, full legal identity, nationality, postal address, telephone, email, technical contact, requested supply/import operations, final app/build version and planned release date. Section A.2 is the individual route; company-only registration fields must not be fabricated. Ask ANSSI which supporting evidence it requires for a foreign individual. Section C's grand-public export classification is a distinct assertion and remains unselected until reviewed.
+The owner has confirmed personal filing and supplied identity/contact details; these are filled in the private preparation packet. Before signing, the declarant still needs to review the technical contact, requested supply/import operations, final app/build version and planned release date. Section A.2 is the individual route; company-only registration fields must not be fabricated. Ask ANSSI which supporting evidence it requires for a foreign individual. Section C's grand-public export classification is a distinct assertion and remains unselected until reviewed.
 
 ## Filing and review
 
