@@ -21,6 +21,8 @@ Gumbo now uses a separate app identity, with new bundle IDs, CloudKit container,
 
 The only supported server provider in the current implementation is Synology DSM/File Station. Bonjour discovers HTTP and SMB-advertising devices, but Gumbo is not an SMB client.
 
+Additional providers are planned in [#155](https://github.com/svoltolini/gumbo/issues/155): [the implementation plan](docs/NAS-PROVIDERS-PLAN.md) prioritizes QNAP over HTTPS WebDAV, then SMB2/3 and broader NAS validation. These are planned capabilities, not released compatibility claims.
+
 ## Local checks
 
 ```sh

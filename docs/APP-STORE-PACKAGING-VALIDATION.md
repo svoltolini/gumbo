@@ -6,15 +6,17 @@ This checklist provides concrete validation steps for every App Store submission
 
 ## Quick Reference
 
-These are the identifiers and version configured in the repository. They do not establish a signed archive or TestFlight upload for the new identity; fresh evidence is required in [#118](https://github.com/svoltolini/gumbo/issues/118).
+The separate Gumbo identity is distributed through App Store Connect app **6814252548**. Signed exports for main `c6313140709805ac4361ed410aac5c0441bef063` were verified, and at **11:33 UTC on 21 September 2026** all three platform builds were **VALID / IN_BETA_TESTING** internally and externally. See [current release evidence](https://github.com/svoltolini/gumbo/issues/123#issuecomment-5759326550) and the [external-beta status](EXTERNAL-BETA-2026-09-20.md).
 
 | Platform | Bundle ID | Build |
 | --- | --- | --- |
-| iOS (iPhone/iPad) | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
-| iOS Widgets | `com.samuelvoltolini.gumbo.widgets` | 1.0 (202609142150) |
-| watchOS | `com.samuelvoltolini.gumbo.watchkitapp` | 1.0 (202609142150) |
-| macOS | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
-| tvOS | `com.samuelvoltolini.gumbo` | 1.0 (202609142150) |
+| iOS (iPhone/iPad) | `com.samuelvoltolini.gumbo` | 1.0 (202609211143) |
+| iOS Widgets | `com.samuelvoltolini.gumbo.widgets` | 1.0 (202609211143) |
+| watchOS | `com.samuelvoltolini.gumbo.watchkitapp` | 1.0 (202609211143) |
+| macOS | `com.samuelvoltolini.gumbo` | 1.0 (202609211143) |
+| tvOS | `com.samuelvoltolini.gumbo` | 1.0 (202609211143) |
+
+The unchecked items in sections 1–7 are a **reusable checklist for each future candidate**, not an assertion that the current build was never archived or uploaded. Build-specific results are recorded under Validation Evidence. Physical/provider acceptance remains in [#123](https://github.com/svoltolini/gumbo/issues/123), and public-store metadata/privacy remains in [#119](https://github.com/svoltolini/gumbo/issues/119).
 
 ---
 
@@ -121,7 +123,9 @@ codesign -d --entitlements - build/Gumbo-iOS.xcarchive/Products/Applications/Gum
 
 - [ ] CarPlay audio entitlement present in binary
 - [ ] CarPlay audio entitlement present in provisioning profile
-- [ ] App Groups entitlement matches widgets and Watch
+- [ ] App Groups entitlement matches the widget extension
+- [ ] Watch has its explicit Gumbo bundle identifier and matching distribution profile
+- [ ] Personal Keychain access group matches between iOS and Mac
 - [ ] CloudKit entitlements present
 
 ### 3.2 macOS Entitlements
@@ -245,7 +249,7 @@ After upload, verify in App Store Connect:
 - [ ] Testing notes saved and visible
 - [ ] Build installs on test devices
 
-**Evidence from batch 4:** All three builds verified as `VALID / IN_BETA_TESTING` at 21:17 UTC on 14 September 2026.
+**Current evidence:** All three Gumbo platform builds `202609211143` were `VALID / IN_BETA_TESTING` internally and externally at 11:33 UTC on 21 September 2026. The 14 September batch-4 result below belongs to the previous app identity and remains historical.
 
 ---
 
@@ -285,7 +289,7 @@ These items require owner action in App Store Connect before public submission.
 
 | Field | Status | Notes |
 | --- | --- | --- |
-| App name | ⚠️ Required | "Gumbo Music" or "Gumbo" |
+| App name | ✅ Verified | "Gumbo Music", app `6814252548` |
 | Subtitle | ⚠️ Required | Short tagline |
 | Category | ⚠️ Required | Music |
 | Content rating | ⚠️ Required | Complete questionnaire |
@@ -294,9 +298,9 @@ These items require owner action in App Store Connect before public submission.
 
 | Platform | Status |
 | --- | --- |
-| iOS description | ⚠️ Required |
-| macOS description | ⚠️ Required |
-| tvOS description | ⚠️ Required |
+| iOS description | ⚠️ Empty at 21 September read-back |
+| macOS description | ⚠️ Empty at 21 September read-back |
+| tvOS description | ⚠️ Empty at 21 September read-back |
 
 ### 8.3 Screenshots
 
@@ -316,16 +320,21 @@ These items require owner action in App Store Connect before public submission.
 
 | URL | Status | Current |
 | --- | --- | --- |
-| Privacy Policy URL | ⚠️ Required | Not published |
-| Support URL | ⚠️ Required | Not published |
+| Public website | ✅ Live | `https://gumbo.one/` returned HTTP 200 and matched source |
+| Public privacy policy | ✅ Live | `https://gumbo.one/privacy/` returned HTTP 200 and matched source |
+| App Store privacy URL | ⚠️ Not configured | `privacyPolicyUrl` was null in the en-GB app-information localization |
+| App Store support URL | ⚠️ Not configured | `supportUrl` was null in all three platform localizations |
+| App Store marketing URL | Not configured | `marketingUrl` was null in all three platform localizations |
 
-**Note:** Owner confirmed no public website or support contact exists yet. These must be published before public submission. See [PRIVACY-POLICY.md](PRIVACY-POLICY.md) for draft policy.
+These observations were read back from the new app identity on 21 September 2026. The website policy is published; it has not yet been entered into App Store Connect. Beta support uses TestFlight's feedback/developer-contact route. Confirm the public support route and support-retention practice without publishing private review-contact details. See [PRIVACY-POLICY.md](PRIVACY-POLICY.md) and [#119](https://github.com/svoltolini/gumbo/issues/119).
 
 ---
 
 ## 9. App Store Privacy Answers (Owner Action Required)
 
 App Store Connect requires app-level privacy declarations separate from privacy manifests.
+
+The 21 September audit did not independently verify completed app-level answers. A privacy manifest, a live policy page and approved TestFlight builds do not establish that those answers are published.
 
 ### 9.1 Data Types Declaration
 
@@ -341,6 +350,8 @@ Based on source review, Gumbo:
 
 tvOS requires inline privacy policy text in App Store Connect. Copy the essential policy text for display.
 
+The new app's en-GB `privacyPolicyText` was null at the 21 September read-back.
+
 - [ ] Privacy policy text entered in App Store Connect
 - [ ] Text verified after save
 
@@ -350,8 +361,8 @@ tvOS requires inline privacy policy text in App Store Connect. Copy the essentia
 
 ### 10.1 Review Notes
 
-Prepare notes explaining:
-- How to access the sample library (if demo mode exists)
+The implemented review route is documented in [APP_REVIEW_NOTES.md](APP_REVIEW_NOTES.md). Keep store review notes consistent with:
+- How to open **Explore Sample Library** from Welcome or the Watch's phone-sync screen
 - NAS connection requirements
 - Any special test account credentials
 
@@ -359,9 +370,10 @@ Prepare notes explaining:
 
 | Option | Status |
 | --- | --- |
-| Demo mode with sample audio | Recommended |
-| Test NAS account credentials | Alternative |
-| Detailed review notes | Minimum |
+| Explore Sample Library | Implemented on iPhone/iPad, Mac, TV and Watch; no developer launch arguments required |
+| Sample playback | Simulated and silent on phone/Mac/TV; Watch sample supports browsing only |
+| Real-audio review access | Requires a reachable Synology NAS and authorized credentials; no demo credentials were invented or supplied |
+| Detailed review notes | Source updated; confirm public-review notes and any requested real-audio access before submission |
 
 ### 10.3 Contact Information
 
@@ -372,7 +384,24 @@ Prepare notes explaining:
 
 ## Validation Evidence
 
-### Completed Validations (Batch 4, 14 September 2026)
+### Separate Gumbo identity — 21 September 2026
+
+Build **1.0 (202609211143)**, main `c6313140709805ac4361ed410aac5c0441bef063`:
+
+- Signed iOS/Watch/widgets, universal Mac and TV archives and App Store exports passed.
+- All five exported bundles have matching versions, valid signatures and privacy manifests. Watch uses its explicit **Gumbo Watch App Store** profile.
+- Production CloudKit, the Mac sandbox and both Mac architectures, matching personal Keychain groups on iOS/Mac, and the iOS CarPlay entitlement/profile/scene were verified.
+- All **561 Release core tests across 36 suites** passed.
+- App Store Connect reported all platform builds **VALID / IN_BETA_TESTING** internally and externally at **11:33 UTC**. The earlier Mac external-review wait has completed.
+- Website and privacy-page HTTP 200 responses matched the merged source. Store privacy URL/TV text, support URLs and descriptions remained blank; app-level privacy answers were not independently verified.
+
+These are packaging, automation and provider-state results. Physical NAS, iCloud, Watch and CarPlay journeys remain unchecked in [#123](https://github.com/svoltolini/gumbo/issues/123). The public App Store records remain `PREPARE_FOR_SUBMISSION`; TestFlight approval is not public App Store approval.
+
+Evidence: [release record](https://github.com/svoltolini/gumbo/issues/123#issuecomment-5759326550), [identity record](GUMBO-IDENTITY.md), [external-beta status](EXTERNAL-BETA-2026-09-20.md).
+
+### Historical validations (previous identity, batch 4, 14 September 2026)
+
+The following results remain dated evidence for the previous app identity; they do not independently validate the new Gumbo identifiers.
 
 | Check | Result | Build |
 | --- | --- | --- |
@@ -394,12 +423,13 @@ Evidence: [REMEDIATION-2026-09-14-BATCH-4.md](REMEDIATION-2026-09-14-BATCH-4.md)
 
 | Item | Owner | Blocker |
 | --- | --- | --- |
-| Privacy policy URL | Owner | Yes |
+| App Store privacy URL and Apple TV policy text | Owner | Yes; website policy is already live |
 | Support URL | Owner | Yes |
 | App Store descriptions | Owner | Yes |
 | Screenshots (all platforms) | Owner | Yes |
 | App-level privacy answers | Owner | Yes |
-| App Review demo/credentials | Owner | Yes |
+| Public-review notes and any required real-audio access | Owner | Yes; visible sample UI is already implemented |
+| Physical/provider acceptance in #123 | Tester | Yes |
 
 ---
 
