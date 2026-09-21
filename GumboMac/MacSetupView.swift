@@ -201,9 +201,7 @@ private struct MacWelcomeStep: View {
                 welcomeRow("Listen your way", symbol: "headphones", detail: "Stream from your NAS or keep downloads on your devices for offline listening.")
                 welcomeRow("A personal library stays personal", symbol: "lock", detail: "No Gumbo account. Your NAS sign-in is saved in Keychain; profiles and playlists can sync through iCloud.")
                 PrivacyDetailsButton()
-                if let family = cloud.family, family.isReachable {
-                    familyNote(family)
-                }
+                MacCloudLibraryNotice()
                 Button("Explore Sample Library") {
                     model.useSampleLibrary()
                     model.openLibrary()
@@ -219,20 +217,9 @@ private struct MacWelcomeStep: View {
             Spacer()
             if let family = cloud.family, family.isReachable {
                 Button("Find Servers") { model.findServers() }
-                if family.familyAccount != nil {
-                    if model.signInError != nil, !model.isJoiningFamily {
-                        Button("Try Again") { Task { await model.connectWithFamilyAccess(family) } }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Palette.accent)
-                            .keyboardShortcut(.defaultAction)
-                    }
-                } else {
-                    Button("Join Family Library") { Task { await model.joinFamilyServer(family) } }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Palette.accent)
-                        .keyboardShortcut(.defaultAction)
-                        .help("Join \(family.serverName)")
-                }
+                    .disabled(model.isJoiningFamily)
+                MacCloudLibraryButton(family: family)
+                    .keyboardShortcut(.defaultAction)
             } else {
                 Button("Continue") { model.findServers() }
                     .buttonStyle(.borderedProminent)
@@ -262,26 +249,114 @@ private struct MacWelcomeStep: View {
         }
     }
 
-    /// A family invitation reached this Mac through iCloud.
-    private func familyNote(_ family: FamilyInfo) -> some View {
-        HStack(spacing: 10) {
-            if model.isJoiningFamily {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "person.2.fill").foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.isJoiningFamily ? "Joining \(family.serverName)…" : "Your family's server, \(family.serverName), is shared with you.")
-                    .font(.callout.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let error = model.signInError, !model.isJoiningFamily {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+}
+
+// MARK: - Library from iCloud
+
+/// Stays visible on Server too, so moving on before iCloud answers does not hide a saved library.
+private struct MacCloudLibraryNotice: View {
+    @Environment(AppModel.self) private var model
+    @Environment(CloudSync.self) private var cloud
+    var showsConnectButton = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "icloud")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                if let family = cloud.family, family.isReachable {
+                    Text(cloud.isOwner ? "Your saved library setup" : "Your family’s library setup")
+                        .font(.headline)
+                    Text(family.serverName).font(.callout.weight(.medium))
+                    Text(family.familyAccount != nil && family.familyPassword != nil
+                         ? "Gumbo can connect with your shared Family Access account and use the music folder already chosen."
+                         : "iCloud found your server and music folder. Sign in to your NAS once on this Mac to continue; its password stays in this Mac’s Keychain.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    if model.isJoiningFamily {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Connecting to your library…").font(.callout)
+                        }
+                    } else if let error = model.signInError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    if showsConnectButton {
+                        MacCloudLibraryButton(family: family)
+                    }
+                } else {
+                    unavailableLibrary
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(16)
+        .background(Palette.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder private var unavailableLibrary: some View {
+        switch cloud.status {
+        case .off, .syncing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Checking iCloud for your library…").font(.callout)
+            }
+            Text("Already use Gumbo on another device? Your saved library will appear here. You can also connect manually.")
+                .font(.callout).foregroundStyle(.secondary)
+        case .noAccount:
+            Text("Already set up on another device?").font(.headline)
+            Text("Sign in to the same Apple Account in System Settings to find your saved library, or connect manually.")
+                .font(.callout).foregroundStyle(.secondary)
+            retrySyncButton
+        case .failed:
+            Text("Couldn’t check iCloud").font(.headline)
+            Text("Try again to find the library from your other device, or connect manually.")
+                .font(.callout).foregroundStyle(.secondary)
+            retrySyncButton
+        case .synced:
+            Text("Already set up on another device?").font(.headline)
+            Text("No library setup was found in iCloud yet. Open Gumbo on your other device and let it sync, then check again here.")
+                .font(.callout).foregroundStyle(.secondary)
+            retrySyncButton
+        }
+    }
+
+    private var retrySyncButton: some View {
+        Button("Check iCloud Again") { Task { await cloud.refresh(reason: "Mac setup retry") } }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.primary)
+    }
+}
+
+private struct MacCloudLibraryButton: View {
+    @Environment(AppModel.self) private var model
+    let family: FamilyInfo
+    @State private var isStarting = false
+
+    var body: some View {
+        Button("Use This Library") {
+            guard !isStarting, !model.isJoiningFamily, !model.isSigningIn else { return }
+            isStarting = true
+            Task {
+                // Change the step in the same task that starts connecting. iOS presents a sheet;
+                // the Mac must leave Welcome before selecting the server for its Sign In step.
+                if model.stage == .welcome { model.stage = .discovering }
+                if family.familyAccount != nil, family.familyPassword != nil {
+                    await model.connectWithFamilyAccess(family)
+                } else {
+                    await model.joinFamilyServer(family)
+                }
+                isStarting = false
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Palette.accent)
+        .disabled(isStarting || model.isJoiningFamily || model.isSigningIn)
+        .accessibilityIdentifier("setup.useCloudLibrary")
+        .help("Connect to \(family.serverName) using its saved music folder")
     }
 }
 
@@ -300,6 +375,10 @@ private struct MacServerStep: View {
     var body: some View {
         StepPage(title: "Find your server", subtitle: "Synology servers on this network appear here. Away from home, enter the address you set up in DSM.") {
             VStack(alignment: .leading, spacing: 14) {
+                MacCloudLibraryNotice(showsConnectButton: true)
+                Text("Or connect to a server")
+                    .font(.headline)
+                    .padding(.top, 8)
                 List(servers, selection: $selection) { server in
                     HStack(spacing: 12) {
                         Image(systemName: "externaldrive.fill")
@@ -313,6 +392,7 @@ private struct MacServerStep: View {
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
                 .frame(height: 170)
+                .disabled(model.isJoiningFamily)
                 .overlay {
                     if servers.isEmpty {
                         HStack(spacing: 8) {
@@ -327,9 +407,9 @@ private struct MacServerStep: View {
                     TextField("Address, such as myds.synology.me or 192.168.1.40", text: $address)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(connect)
-                        .disabled(isResolving)
+                        .disabled(isResolving || model.isJoiningFamily)
                     Button("Connect", action: connect)
-                        .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isResolving)
+                        .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isResolving || model.isJoiningFamily)
                     if isResolving { ProgressView().controlSize(.small) }
                 }
                 Text("HTTPS is the default and needs a trusted certificate matching the address. Tailscale provides network access, but its IP or MagicDNS name may not match DSM's certificate. For an HTTP-only NAS on a trusted private connection, enter its full http:// address and port, then review the warning before signing in.")
@@ -350,6 +430,7 @@ private struct MacServerStep: View {
                 model.stage = .welcome
                 model.discovery.stop()
             }
+            .disabled(model.isJoiningFamily)
             Spacer()
             Button("Continue") {
                 if let server = servers.first(where: { $0.id == selection }) { model.select(server) }
@@ -357,7 +438,7 @@ private struct MacServerStep: View {
             .buttonStyle(.borderedProminent)
             .tint(Palette.accent)
             .keyboardShortcut(.defaultAction)
-            .disabled(selection == nil)
+            .disabled(selection == nil || model.isJoiningFamily)
         }
         .sheet(isPresented: $isReadingGuide) {
             RemoteAccessGuide()
@@ -366,7 +447,7 @@ private struct MacServerStep: View {
 
     private func connect() {
         let entry = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !entry.isEmpty, !isResolving else { return }
+        guard !entry.isEmpty, !isResolving, !model.isJoiningFamily else { return }
         isResolving = true
         error = nil
         Task {
@@ -384,6 +465,7 @@ private struct MacServerStep: View {
 
 private struct MacSignInStep: View {
     @Environment(AppModel.self) private var model
+    @Environment(CloudSync.self) private var cloud
     @State private var account = ""
     @State private var password = ""
     @State private var otpCode = ""
@@ -420,6 +502,8 @@ private struct MacSignInStep: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 280)
                         .focused($focus, equals: .account)
+                        .accessibilityLabel("NAS account")
+                        .accessibilityIdentifier("setup.nasAccount")
                         .onSubmit { focus = .password }
                 }
                 GridRow {
@@ -479,6 +563,8 @@ private struct MacSignInStep: View {
                 if let storedPassword = model.pendingReconnectPassword {
                     password = storedPassword
                 }
+            } else {
+                account = suggestedOwnerAccount(for: server) ?? ""
             }
             if model.needsOTP, !password.isEmpty {
                 focus = .otp
@@ -487,11 +573,20 @@ private struct MacSignInStep: View {
             }
         }
         .onChange(of: server?.id) {
-            account = model.pendingFamilyAccount ?? ""
+            account = model.pendingFamilyAccount ?? suggestedOwnerAccount(for: model.pendingServer) ?? ""
             password = model.pendingFamilyPassword ?? ""
             otpCode = ""
             httpAllowed = model.pendingServer.map { NASTransportSecurity.isAllowed($0.baseURL) } ?? false
         }
+    }
+
+    private func suggestedOwnerAccount(for server: DiscoveredServer?) -> String? {
+        guard let server, cloud.currentUserRecordName != nil, cloud.isOwner,
+              let family = cloud.family,
+              let savedOrigin = family.address.flatMap(URL.init(string:)).flatMap(NASOrigin.init(url:)),
+              let selectedOrigin = NASOrigin(url: server.baseURL), savedOrigin == selectedOrigin else { return nil }
+        // The owner's own account may be suggested; invited members never inherit it.
+        return family.serverAccount
     }
 
     private func label(_ text: String) -> some View {
