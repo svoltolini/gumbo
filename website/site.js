@@ -1,11 +1,14 @@
 /* Progressive enhancement only: the content and section links work without JavaScript. */
 (() => {
   "use strict";
-  const menu = document.querySelector(".mobile-menu");
-  if (menu) {
+  const menus = [...document.querySelectorAll(".product-menu, .mobile-menu")];
+  menus.forEach(menu => {
     const closeMenu = () => { menu.open = false; };
     menu.querySelectorAll("a").forEach(link => {
       link.addEventListener("click", closeMenu);
+    });
+    menu.addEventListener("toggle", () => {
+      if (menu.open) menus.filter(other => other !== menu).forEach(other => { other.open = false; });
     });
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && menu.open) {
@@ -20,7 +23,7 @@
       if (event.relatedTarget && !menu.contains(event.relatedTarget)) closeMenu();
     });
     window.matchMedia("(max-width: 760px)").addEventListener("change", closeMenu);
-  }
+  });
 
   const status = document.getElementById("beta-status");
   const links = document.querySelectorAll("[data-beta-link]");
