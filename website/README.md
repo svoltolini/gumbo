@@ -67,3 +67,7 @@ Import the app repository: **base `website`**, **publish `.`**, **no build comma
 Add `gumbo.one` as primary domain, configure DNS and verify HTTPS using [Netlify's domain guide](https://docs.netlify.com/manage/domains/configure-domains/bring-a-domain-to-netlify/).
 
 File delivery does **not** publish the site, configure DNS or enable public TestFlight access. After deployment, check mobile layout, keyboard navigation, beta buttons and the social image. For another domain, update `index.html` canonical/social URLs, `CNAME`, `robots.txt` and `sitemap.xml`.
+
+## Support
+
+`support/index.html` is the public support route at `https://gumbo.one/support/`. It uses the repository issue tracker for public reports and Apple TestFlight for private beta feedback. Never publish private review credentials or contact information here. Public issues remain with GitHub unless removed; do not promise an unimplemented automatic retention period.
