@@ -199,7 +199,7 @@ private struct MacWelcomeStep: View {
             VStack(alignment: .leading, spacing: 24) {
                 welcomeRow("Your collection, ready to play", symbol: "externaldrive", detail: "Choose your music folder. Gumbo reads your songs, tags and covers directly from your NAS.")
                 welcomeRow("Listen your way", symbol: "headphones", detail: "Stream from your NAS or keep downloads on your devices for offline listening.")
-                welcomeRow("A personal library stays personal", symbol: "lock", detail: "No Gumbo account. Your NAS sign-in is saved in Keychain; profiles and playlists can sync through iCloud.")
+                welcomeRow("A personal library stays personal", symbol: "lock", detail: "No Gumbo account. Your NAS sign-in stays in Keychain, with optional sync to your own devices. Profiles and playlists can sync through iCloud.")
                 PrivacyDetailsButton()
                 MacCloudLibraryNotice()
                 Button("Explore Sample Library") {
@@ -271,9 +271,11 @@ private struct MacCloudLibraryNotice: View {
                     Text(cloud.isOwner ? "Your saved library setup" : "Your family’s library setup")
                         .font(.headline)
                     Text(family.serverName).font(.callout.weight(.medium))
-                    Text(family.familyAccount != nil && family.familyPassword != nil
+                    Text(cloud.currentUserRecordName != nil && cloud.isOwner
+                         ? "Use the server and music folder saved in iCloud. If your sign-in has synced with iCloud Keychain, Gumbo can connect without asking again. Otherwise, you can sign in here."
+                         : family.familyAccount != nil && family.familyPassword != nil
                          ? "Gumbo can connect with your shared Family Access account and use the music folder already chosen."
-                         : "iCloud found your server and music folder. Sign in to your NAS once on this Mac to continue; its password stays in this Mac’s Keychain.")
+                         : "iCloud found your family’s server and music folder. Sign in with your NAS account to continue.")
                         .font(.callout).foregroundStyle(.secondary)
                     if model.isJoiningFamily {
                         HStack(spacing: 8) {
@@ -333,6 +335,7 @@ private struct MacCloudLibraryNotice: View {
 
 private struct MacCloudLibraryButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(CloudSync.self) private var cloud
     let family: FamilyInfo
     @State private var isStarting = false
 
@@ -344,11 +347,7 @@ private struct MacCloudLibraryButton: View {
                 // Change the step in the same task that starts connecting. iOS presents a sheet;
                 // the Mac must leave Welcome before selecting the server for its Sign In step.
                 if model.stage == .welcome { model.stage = .discovering }
-                if family.familyAccount != nil, family.familyPassword != nil {
-                    await model.connectWithFamilyAccess(family)
-                } else {
-                    await model.joinFamilyServer(family)
-                }
+                await model.useCloudLibrary(family, isOwner: cloud.currentUserRecordName != nil && cloud.isOwner)
                 isStarting = false
             }
         }
@@ -470,6 +469,7 @@ private struct MacSignInStep: View {
     @State private var password = ""
     @State private var otpCode = ""
     @State private var remember = true
+    @State private var syncCredentials = false
     @State private var httpAllowed = false
     @FocusState private var focus: Field?
 
@@ -477,7 +477,7 @@ private struct MacSignInStep: View {
 
     var body: some View {
         let server = model.pendingServer
-        StepPage(title: "Sign in to \(server?.name ?? "your NAS")", subtitle: "Your DSM account. It is kept in this Mac's Keychain and sent only to your server; your music is read through File Station, so nothing is installed on the NAS.") {
+        StepPage(title: "Sign in to \(server?.name ?? "your NAS")", subtitle: "Sign in with your DSM account. Gumbo reads your music through File Station, so nothing needs to be installed on the NAS.") {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 14) {
                 GridRow {
                     label("Server")
@@ -527,6 +527,22 @@ private struct MacSignInStep: View {
                 GridRow {
                     Text("")
                     Toggle("Remember me on this Mac", isOn: $remember)
+                        .disabled(model.isSigningIn)
+                }
+                if model.supportsCredentialSync {
+                    GridRow {
+                        Text("")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle("Sync sign-in with iCloud Keychain", isOn: $syncCredentials)
+                                .disabled(!remember || model.isSigningIn)
+                                .accessibilityIdentifier("signIn.syncCredentials")
+                            Text("Optional sync keeps your sign-in available on your iPhone, iPad and Mac with the same Apple Account. It does not share your password with your Gumbo family. Turn on Passwords & Keychain in iCloud settings on each device.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: 480, alignment: .leading)
+                        }
+                    }
                 }
                 if let error = model.signInError {
                     GridRow {
@@ -555,6 +571,7 @@ private struct MacSignInStep: View {
         .animation(.easeInOut(duration: 0.2), value: model.needsOTP)
         .onAppear {
             httpAllowed = server.map { NASTransportSecurity.isAllowed($0.baseURL) } ?? false
+            syncCredentials = model.syncCredentialsAcrossDevices
             if let familyAccount = model.pendingFamilyAccount {
                 account = familyAccount
                 password = model.pendingFamilyPassword ?? ""
@@ -572,7 +589,22 @@ private struct MacSignInStep: View {
                 focus = account.isEmpty ? .account : .password
             }
         }
+        .onChange(of: model.needsOTP) {
+            guard model.needsOTP else { return }
+            if let pendingPassword = model.pendingReconnectPassword {
+                password = pendingPassword
+            }
+            focus = .otp
+        }
+        .onChange(of: account) {
+            // A different NAS account needs its own explicit choice to sync its password.
+            if account != (model.pendingFamilyAccount ?? model.connection?.account) { syncCredentials = false }
+        }
+        .onChange(of: remember) {
+            if !remember { syncCredentials = false }
+        }
         .onChange(of: server?.id) {
+            syncCredentials = model.syncCredentialsAcrossDevices
             account = model.pendingFamilyAccount ?? suggestedOwnerAccount(for: model.pendingServer) ?? ""
             password = model.pendingFamilyPassword ?? ""
             otpCode = ""
@@ -597,7 +629,7 @@ private struct MacSignInStep: View {
 
     private func submit() {
         guard !account.isEmpty, !password.isEmpty, transportAllowed else { return }
-        Task { await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember) }
+        Task { await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember, syncCredentials: remember && syncCredentials) }
     }
 
     private var transportAllowed: Bool {

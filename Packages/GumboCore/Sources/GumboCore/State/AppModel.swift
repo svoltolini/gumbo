@@ -32,6 +32,49 @@ public final class AppModel {
     private var connectionGeneration = UUID()
     private let defaults: UserDefaults
     private let services: ConnectionServices
+    private var pendingCloudConnection: ServerConnection?
+    private var pendingCloudCredentialSync = false
+    private var credentialSyncRevision = 0
+    public private(set) var credentialSyncError: String?
+
+    public var supportsCredentialSync: Bool { services.supportsCredentialSync() }
+    public var syncCredentialsAcrossDevices: Bool {
+        _ = credentialSyncRevision
+        guard supportsCredentialSync else { return false }
+        if pendingCloudConnection != nil { return pendingCloudCredentialSync }
+        guard let connection else { return false }
+        if let pendingServer, NASOrigin(url: pendingServer.baseURL) != NASOrigin(url: connection.baseURL) { return false }
+        return credentialSyncEnabled(for: connection)
+    }
+
+    private func credentialSyncEnabled(for connection: ServerConnection) -> Bool {
+        defaults.bool(forKey: "credentialSync." + connection.sourceID)
+    }
+
+    private func recordCredentialSync(_ enabled: Bool, for connection: ServerConnection) {
+        defaults.set(enabled, forKey: "credentialSync." + connection.sourceID)
+        credentialSyncRevision += 1
+    }
+
+    /// An explicit choice: existing remembered passwords are never uploaded during migration.
+    public func setCredentialSyncEnabled(_ enabled: Bool) {
+        credentialSyncError = nil
+        guard supportsCredentialSync, let connection, !isDemo else { return }
+        if enabled {
+            guard isConnected, let password = services.password(connection.keychainAccount) ?? storedPassword(for: connection) else {
+                credentialSyncError = "Sign in with Remember me enabled before syncing your sign-in."
+                return
+            }
+            guard services.saveSyncedPassword(password, connection) else {
+                credentialSyncError = "Your sign-in is saved on this device, but couldn’t be saved to iCloud Keychain. Unlock your device and try again."
+                return
+            }
+        } else if !services.deleteSyncedPassword(connection) {
+            credentialSyncError = "The synced sign-in couldn’t be removed. Unlock your device and try again."
+            return
+        }
+        recordCredentialSync(enabled, for: connection)
+    }
 
     public var isDemo: Bool { library.isDemo }
     public var isConnected: Bool { session != nil }
@@ -79,6 +122,8 @@ public final class AppModel {
 
     public func findServers() {
         joiningFamily = nil
+        pendingCloudConnection = nil
+        pendingCloudCredentialSync = false
         beginConnectionChange()
         stage = .discovering
         discovery.start()
@@ -86,6 +131,8 @@ public final class AppModel {
 
     public func select(_ server: DiscoveredServer) {
         joiningFamily = nil
+        pendingCloudConnection = nil
+        pendingCloudCredentialSync = false
         beginConnectionChange()
         signInError = nil
         needsOTP = false
@@ -111,16 +158,21 @@ public final class AppModel {
 
     public func cancelSignIn() {
         beginConnectionChange()
+        pendingCloudConnection = nil
+        pendingCloudCredentialSync = false
         pendingServer = nil
         needsOTP = false
         pendingReconnectPassword = nil
     }
 
-    public func signIn(account: String, password: String, otpCode: String, remember: Bool) async {
+    public func signIn(account: String, password: String, otpCode: String, remember: Bool, syncCredentials: Bool = false) async {
         guard let server = pendingServer else { return }
+        let cloudConnection = pendingCloudConnection
+        let wasUsingSyncedCredentials = pendingCloudCredentialSync
         let generation = beginConnectionChange()
         isSigningIn = true
         signInError = nil
+        credentialSyncError = nil
         defer { if generation == connectionGeneration { isSigningIn = false } }
         do {
             let session = try await services.login(server.baseURL, account, password, otpCode.isEmpty ? nil : otpCode)
@@ -135,6 +187,9 @@ public final class AppModel {
             if let previous = self.connection, previous.sourceID == connection.sourceID {
                 connection.musicPath = previous.musicPath
             }
+            if connection.musicPath == nil, let cloudConnection, cloudConnection.sourceID == connection.sourceID {
+                connection.musicPath = cloudConnection.musicPath
+            }
             if connection.musicPath == nil, let family = joiningFamily, family.familyAccount == nil || family.familyAccount == account, family.address.flatMap(URL.init(string:)).flatMap(NASOrigin.init(url:)) == NASOrigin(url: server.baseURL) {
                 connection.musicPath = family.musicPath
             }
@@ -144,13 +199,36 @@ public final class AppModel {
                 services.savePassword(password, connection.keychainAccount)
             } else {
                 services.deletePassword(connection.keychainAccount)
+                services.deletePassword(connection.legacyKeychainAccount)
             }
+            if supportsCredentialSync {
+                if remember && syncCredentials {
+                    if services.saveSyncedPassword(password, connection) {
+                        recordCredentialSync(true, for: connection)
+                    } else {
+                        // Keep the newly verified local password usable if an older cloud copy
+                        // could not be replaced (for example while Keychain is locked).
+                        recordCredentialSync(false, for: connection)
+                        credentialSyncError = "Connected, but your sign-in couldn’t be saved to iCloud Keychain. Try again in Music Server settings."
+                    }
+                } else if credentialSyncEnabled(for: connection) || (wasUsingSyncedCredentials && cloudConnection?.sourceID == connection.sourceID) {
+                    // A new device may be completing an OTP challenge before it has saved a
+                    // local preference. Respect an explicit opt-out of that received secret too.
+                    recordCredentialSync(true, for: connection)
+                    setCredentialSyncEnabled(false)
+                }
+            }
+            // Even if removal from a locked Keychain failed, opting out of Remember me must
+            // not silently restore this device from the remaining synchronized copy.
+            if !remember { recordCredentialSync(false, for: connection) }
             self.session = session
             let drive = SynologyDrive(session: session, displayName: name)
             services.log("Signed in to \(name) at \(server.address)")
             pendingServer = nil
             needsOTP = false
             pendingReconnectPassword = nil
+            pendingCloudConnection = nil
+            pendingCloudCredentialSync = false
             discovery.stop()
             if library.catalogue.belongs(to: connection), !library.isEmpty {
                 library.drive = drive
@@ -164,6 +242,7 @@ public final class AppModel {
         } catch SynologyError.twoFactorRequired {
             guard isCurrent(generation) else { return }
             needsOTP = true
+            if cloudConnection != nil && syncCredentials { pendingReconnectPassword = password }
             signInError = "Enter the code from your authenticator app."
         } catch {
             guard isCurrent(generation) else { return }
@@ -194,6 +273,7 @@ public final class AppModel {
             guard isCurrent(generation) else { await services.logout(session); return }
             self.session = session
             self.connection = connection
+            if credentialSyncEnabled(for: connection) { services.savePassword(password, connection.keychainAccount) }
             saveConnection()
             library.drive = SynologyDrive(session: session, displayName: connection.name)
             signInError = nil
@@ -325,6 +405,9 @@ public final class AppModel {
 
     public func useSampleLibrary() {
         beginConnectionChange()
+        pendingCloudConnection = nil
+        pendingCloudCredentialSync = false
+        joiningFamily = nil
         pendingServer = nil
         connection = nil
         saveConnection()
@@ -410,6 +493,9 @@ public final class AppModel {
 
     public func signOut() async {
         beginConnectionChange()
+        pendingCloudConnection = nil
+        pendingCloudCredentialSync = false
+        credentialSyncError = nil
         pendingServer = nil
         joiningFamily = nil
         needsOTP = false
@@ -461,6 +547,8 @@ public final class AppModel {
 
     /// Only an exact-address legacy entry can migrate automatically; hostname-only entries require sign-in.
     private func storedPassword(for connection: ServerConnection) -> String? {
+        if supportsCredentialSync, credentialSyncEnabled(for: connection),
+           let password = services.syncedPassword(connection) { return password }
         if let password = services.password(connection.keychainAccount) { return password }
         guard let legacy = services.password(connection.legacyKeychainAccount) else { return nil }
         services.savePassword(legacy, connection.keychainAccount)
@@ -493,6 +581,7 @@ public final class AppModel {
                 let session = try await services.login(connection.baseURL, saved.account, password, nil)
                 guard isCurrent(generation) else { await services.logout(session); return }
                 self.session = session
+                if credentialSyncEnabled(for: connection) { services.savePassword(password, connection.keychainAccount) }
                 let drive = SynologyDrive(session: session, displayName: connection.name)
                 if library.isEmpty {
                     library.replace(with: .empty, drive: drive)
@@ -972,12 +1061,19 @@ public final class AppModel {
 
     /// The family record arrived: a member's device connects with the family account on its own,
     /// and picks up a rotated password.
-    public func familyArrived(_ info: FamilyInfo) {
+    public func familyArrived(_ info: FamilyInfo, isOwner: Bool = false) {
+        // An owner chooses their personal synced sign-in through Use This Library. Don't let
+        // arrival of the family's separate read-only credentials win that setup race.
+        if isOwner && connection == nil && supportsCredentialSync { return }
         guard let account = info.familyAccount, let password = info.familyPassword else { return }
         if let connection {
             if connection.account == account, info.address.flatMap(URL.init(string:)).flatMap(NASOrigin.init(url:)) == NASOrigin(url: connection.baseURL),
                storedPassword(for: connection) != password {
                 services.savePassword(password, connection.keychainAccount)
+                if supportsCredentialSync && credentialSyncEnabled(for: connection), !services.saveSyncedPassword(password, connection) {
+                    recordCredentialSync(false, for: connection)
+                    credentialSyncError = "Family Access has a new password. It is saved on this device, but couldn’t be updated in iCloud Keychain. Try again in Music Server settings."
+                }
                 Task { await reconnect() }
             }
             return
@@ -1049,8 +1145,37 @@ public final class AppModel {
 
     /// The family this device is joining; its music folder is used instead of asking.
     private var joiningFamily: FamilyInfo?
-    public var pendingFamilyAccount: String? { joiningFamily?.familyAccount }
-    public var pendingFamilyPassword: String? { joiningFamily?.familyPassword }
+    public var pendingFamilyAccount: String? { pendingCloudConnection?.account ?? joiningFamily?.familyAccount }
+    public var pendingFamilyPassword: String? {
+        if pendingCloudConnection != nil { return pendingReconnectPassword }
+        return joiningFamily?.familyPassword
+    }
+
+    /// Use a personal Keychain item only for a verified owner's exact saved server/account.
+    /// Members keep the separate Family Access route. No personal secret enters CloudKit.
+    public func useCloudLibrary(_ info: FamilyInfo, isOwner: Bool) async {
+        guard info.isReachable, !isSigningIn, !isJoiningFamily else { return }
+        if isOwner, let url = try? familyURL(info), NASOrigin(url: url) != nil,
+           !info.serverAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let saved = ServerConnection(name: info.serverName, baseURL: url, account: info.serverAccount, musicPath: info.musicPath)
+            let password = supportsCredentialSync ? services.syncedPassword(saved) : nil
+            if password != nil || info.familyAccount == nil || info.familyPassword == nil {
+                if stage == .welcome { stage = .discovering }
+                select(DiscoveredServer(name: saved.name, baseURL: saved.baseURL, model: nil))
+                joiningFamily = info
+                pendingCloudConnection = saved
+                pendingCloudCredentialSync = password != nil
+                guard let password else { return }
+                await signIn(account: saved.account, password: password, otpCode: "", remember: true, syncCredentials: true)
+                return
+            }
+        }
+        if info.familyAccount != nil && info.familyPassword != nil {
+            await connectWithFamilyAccess(info)
+        } else {
+            await joinFamilyServer(info)
+        }
+    }
 
     /// A member's device: reach the family's server and ask for the password.
     public func joinFamilyServer(_ info: FamilyInfo) async {

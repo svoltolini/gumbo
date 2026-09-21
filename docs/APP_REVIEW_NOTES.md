@@ -87,7 +87,7 @@ The owner can provide temporary demo NAS credentials upon request. Contact infor
 - No analytics SDK or advertising framework
 - No data sent to developer servers
 - CloudKit data stored in user's private iCloud container
-- NAS credentials stored in device Keychain
+- Remembered NAS credentials stored in Keychain; optional iCloud Keychain sync across the same Apple Account on iPhone, iPad and Mac, off by default and separate from Family Access
 - See in-app Privacy Details for full disclosure
 
 ## Export compliance

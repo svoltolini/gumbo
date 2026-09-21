@@ -108,57 +108,40 @@ private struct WelcomeContent: View {
     @ViewBuilder private var actions: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let family = cloud.family, family.isReachable {
-                if family.familyAccount != nil {
-                    // The family account signs this device in by itself.
+                Button {
+                    guard !model.isJoiningFamily, !model.isSigningIn else { return }
+                    Task {
+                        await model.useCloudLibrary(family, isOwner: cloud.currentUserRecordName != nil && cloud.isOwner)
+                    }
+                } label: {
                     HStack(spacing: 10) {
-                        if model.isJoiningFamily { ProgressView() }
-                        Text(model.isJoiningFamily ? "Joining \(family.serverName)…" : "Ready to join \(family.serverName)")
+                        if model.isJoiningFamily { ProgressView().tint(Palette.onAccent) }
+                        Text(model.isJoiningFamily ? "Connecting…" : "Use This Library")
                             .font(.headline)
                     }
+                    .foregroundStyle(Palette.onAccent)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    if let error = model.signInError, !model.isJoiningFamily {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .padding(.bottom, 8)
-                        Button {
-                            Task { await model.connectWithFamilyAccess(family) }
-                        } label: {
-                            Text("Try again")
-                                .font(.headline)
-                                .foregroundStyle(Palette.onAccent)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.extraLarge)
-                        .tint(Palette.accent)
-                        .padding(.bottom, 14)
-                    }
-                } else {
-                    Button {
-                        Task { await model.joinFamilyServer(family) }
-                    } label: {
-                        Text("Join \(family.serverName)")
-                            .font(.headline)
-                            .foregroundStyle(Palette.onAccent)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.extraLarge)
-                    .tint(Palette.accent)
-                    Text("Your family's server, shared with you through iCloud.")
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(Palette.accent)
+                .disabled(model.isJoiningFamily || model.isSigningIn)
+                .accessibilityIdentifier("setup.useCloudLibrary")
+                Text(cloud.currentUserRecordName != nil && cloud.isOwner
+                     ? model.supportsCredentialSync
+                        ? "\(family.serverName), saved in iCloud. Gumbo uses your synced sign-in when available."
+                        : "\(family.serverName), saved in iCloud. Use its saved server and music folder."
+                     : "Your family’s server, \(family.serverName), shared with you through iCloud.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
+                if let error = model.signInError, !model.isJoiningFamily {
+                    Text(error)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 8)
-                        .padding(.bottom, 14)
-                    if let error = model.signInError {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .padding(.bottom, 8)
-                    }
+                        .foregroundStyle(.red)
+                        .padding(.bottom, 8)
                 }
             }
             if cloud.family?.isReachable != true {
