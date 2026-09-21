@@ -5,6 +5,7 @@ import GumboShared
 import CloudKit
 import SwiftUI
 import UIKit
+import Intents
 
 /// Receives the wake-up for background downloads, silent pushes from iCloud, and hands scenes to
 /// `SceneDelegate` so family invitation links reach the app.
@@ -15,7 +16,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     static var library: LibraryStore?
     static var player: PlayerModel?
     static var profiles: ProfileStore?
+    private let siriMediaHandler = SiriMediaIntentHandler()
     static let indexTaskID = "com.samuelvoltolini.gumbo.index"
+
+    func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
+        intent is INPlayMediaIntent ? siriMediaHandler : nil
+    }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Silent pushes only; no permission prompt.
@@ -190,6 +196,7 @@ struct GumboApp: App {
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }
+        player.sourceIDProvider = { [library] in library.catalogue.driveID }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
@@ -241,6 +248,7 @@ struct GumboApp: App {
             }
         }
         profiles.openAutomaticallyIfPossible()
+        GumboVoiceRouter.install(model: model, library: library, profiles: profiles, player: player, downloads: downloads)
         widgetFeed.start(library: library, player: player, downloads: downloads, profiles: profiles)
         // Sample layout fixtures do not contact iCloud or change their profile as account checks finish.
         if !Self.isLayoutFixture { cloud.start() }

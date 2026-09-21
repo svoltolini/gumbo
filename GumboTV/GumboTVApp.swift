@@ -64,6 +64,7 @@ struct GumboTVApp: App {
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }
+        player.sourceIDProvider = { [library] in library.catalogue.driveID }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }

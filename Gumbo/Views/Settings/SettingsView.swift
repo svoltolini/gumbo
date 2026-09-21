@@ -16,6 +16,9 @@ struct SettingsTabView: View {
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "Appearance"
     case library = "Music Library"
+    #if !os(tvOS)
+    case siri = "Siri & Shortcuts"
+    #endif
     case server = "Music Server"
     case profiles = "Profiles & Family"
     case privacy = "Privacy"
@@ -27,6 +30,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: "circle.lefthalf.filled"
         case .library: "music.note.list"
+        #if !os(tvOS)
+        case .siri: "waveform"
+        #endif
         case .server: "externaldrive"
         case .profiles: "person.2"
         case .privacy: "hand.raised"
@@ -55,11 +61,26 @@ struct SettingsView: View {
     private var canScan: Bool { model.isConnected && !model.isScanning && !model.isDemo && !library.metadataWriter.isWriting && !library.isDeletingFiles }
 
     var body: some View {
+        #if !os(tvOS)
+        if category == .siri {
+            SiriSettingsView()
+        } else {
+            settingsForm
+        }
+        #else
+        settingsForm
+        #endif
+    }
+
+    private var settingsForm: some View {
         Form {
             switch category {
             case nil: overview
             case .general: appearanceSection
             case .library: librarySections
+            #if !os(tvOS)
+            case .siri: EmptyView()
+            #endif
             case .server:
                 serverSections
                 if permissions.canLeave { signOutSection }
@@ -110,6 +131,9 @@ struct SettingsView: View {
             Section {
                 categoryLink(.general)
                 categoryLink(.library)
+                #if !os(tvOS)
+                categoryLink(.siri)
+                #endif
                 #if !os(tvOS)
                 NavigationLink(value: LibraryRoute.downloads) {
                     LabeledContent {

@@ -34,7 +34,11 @@ struct OperationProgressView: View {
                 }
                 if let fractionCompleted {
                     ProgressView(value: min(1, max(0, fractionCompleted)))
+                        #if os(macOS)
+                        .progressViewStyle(OperationLinearProgressStyle())
+                        #else
                         .progressViewStyle(.linear)
+                        #endif
                         .tint(Palette.accent)
                         .accessibilityLabel(title)
                         .accessibilityValue(counter ?? "")
@@ -91,3 +95,23 @@ struct OperationProgressView: View {
             .accessibilityIdentifier("operation.stop")
     }
 }
+
+#if os(macOS)
+/// Native NSProgressIndicator posts accessibility notifications while SwiftUI updates a List
+/// row. That can re-enter the row's accessibility graph and stall the main thread. A SwiftUI
+/// track keeps the same progress semantics without crossing that AppKit update boundary.
+private struct OperationLinearProgressStyle: ProgressViewStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { geometry in
+            Capsule()
+                .fill(.quaternary)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(Palette.accent)
+                        .frame(width: geometry.size.width * min(1, max(0, configuration.fractionCompleted ?? 0)))
+                }
+        }
+        .frame(height: 4)
+    }
+}
+#endif

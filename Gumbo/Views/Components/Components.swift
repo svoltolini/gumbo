@@ -422,8 +422,43 @@ nonisolated struct CollectionDestination: Hashable {
     }
 }
 
+extension PlayerModel.CollectionPlaybackState {
+    var accessibilityDescription: String {
+        switch self {
+        case .inactive: ""
+        case .playing: "Playing"
+        case .paused: "Paused"
+        case .loading: "Loading"
+        case .failed: "Playback unavailable"
+        }
+    }
+}
+
+/// A quiet, observable marker that does not animate or reflow the song list.
+struct TrackPlaybackIndicator: View {
+    let state: PlayerModel.CollectionPlaybackState
+
+    private var symbol: String {
+        switch state {
+        case .inactive, .playing: "speaker.wave.2.fill"
+        case .paused: "pause.fill"
+        case .loading: "speaker.fill"
+        case .failed: "exclamationmark.triangle"
+        }
+    }
+
+    var body: some View {
+        if state != .inactive {
+            Image(systemName: symbol)
+                .foregroundStyle(.primary)
+                .accessibilityLabel(state.accessibilityDescription)
+        }
+    }
+}
+
 /// Primary and secondary pill actions used on album and artist pages.
 struct PlayActions: View {
+    var playbackState: PlayerModel.CollectionPlaybackState = .inactive
     let play: () -> Void
     let shuffle: () -> Void
 
@@ -435,7 +470,7 @@ struct PlayActions: View {
     var body: some View {
         HStack(spacing: 10) {
             Button(action: play) {
-                Label("Play", systemImage: "play.fill")
+                Label(playbackState.canPause ? "Pause" : "Play", systemImage: playbackState.canPause ? "pause.fill" : "play.fill")
                     .font(.headline)
                     .foregroundStyle(Palette.onAccent)
                     .frame(maxWidth: stretches ? .infinity : nil)

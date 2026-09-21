@@ -81,6 +81,8 @@ public final class AppModel {
 
     public var isDemo: Bool { library.isDemo }
     public var isConnected: Bool { session != nil }
+    /// Voice requests must not outlive a sign-out or another connection attempt.
+    public var playbackConnectionToken: UUID { connectionGeneration }
     public var serverTitle: String { connection?.name ?? library.catalogue.serverName }
 
     public convenience init(library: LibraryStore) {

@@ -99,6 +99,7 @@ struct GumboMacApp: App {
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }
+        player.sourceIDProvider = { [library] in library.catalogue.driveID }
         player.albumProvider = { [library] track in library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
@@ -143,6 +144,7 @@ struct GumboMacApp: App {
             }
         }
         profiles.openAutomaticallyIfPossible()
+        GumboVoiceRouter.install(model: model, library: library, profiles: profiles, player: player, downloads: downloads)
         cloud.start()
         // Development shortcut: `--sample-library` opens the built-in catalogue without a server.
         if ProcessInfo.processInfo.arguments.contains("--sample-library") {

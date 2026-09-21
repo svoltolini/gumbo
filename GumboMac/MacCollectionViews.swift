@@ -79,9 +79,10 @@ struct MacAlbumDetailView: View {
                     Text(album.metaLine).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                     Text(songSummary).font(.footnote).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        MacCollectionPlayButtons(isEmpty: album.tracks.isEmpty || !scope.isCurrent(library: library, profiles: profiles)) {
+                        MacCollectionPlayButtons(isEmpty: album.tracks.isEmpty || !scope.isCurrent(library: library, profiles: profiles),
+                                                 playbackState: player.playbackState(for: album.tracks, sourceID: library.catalogue.driveID)) {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                            player.play(album: album)
+                            player.togglePlayback(of: album.tracks, sourceID: library.catalogue.driveID)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
                             player.play(queue: album.tracks.shuffled(), title: album.title)
@@ -142,9 +143,10 @@ struct MacPlaylistDetailView: View {
                             Text(playlist.name).font(.title2.weight(.semibold)).lineLimit(2).textSelection(.enabled)
                             Text(playlist.summary).foregroundStyle(.secondary).lineLimit(2)
                             HStack(spacing: 8) {
-                                MacCollectionPlayButtons(isEmpty: playlist.tracks.isEmpty || !scope.isCurrent(library: library, profiles: profiles)) {
+                                MacCollectionPlayButtons(isEmpty: playlist.tracks.isEmpty || !scope.isCurrent(library: library, profiles: profiles),
+                                                         playbackState: player.playbackState(for: playlist.tracks, sourceID: library.catalogue.driveID)) {
                                     guard scope.isCurrent(library: library, profiles: profiles), library.playlist(id: playlist.id) == playlist else { return }
-                                    player.play(queue: playlist.tracks, title: playlist.name)
+                                    player.togglePlayback(of: playlist.tracks, sourceID: library.catalogue.driveID, title: playlist.name)
                                 } shuffle: {
                                     guard scope.isCurrent(library: library, profiles: profiles), library.playlist(id: playlist.id) == playlist else { return }
                                     player.play(queue: playlist.tracks.shuffled(), title: playlist.name)
@@ -415,12 +417,14 @@ private struct MacMissingSongsRow: View {
 
 private struct MacCollectionPlayButtons: View {
     let isEmpty: Bool
+    var playbackState: PlayerModel.CollectionPlaybackState = .inactive
     let play: () -> Void
     let shuffle: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Button("Play", systemImage: "play.fill", action: play)
+            Button(playbackState.canPause ? "Pause" : "Play",
+                   systemImage: playbackState.canPause ? "pause.fill" : "play.fill", action: play)
             Button("Shuffle", systemImage: "shuffle", action: shuffle)
         }
         .buttonStyle(.bordered)

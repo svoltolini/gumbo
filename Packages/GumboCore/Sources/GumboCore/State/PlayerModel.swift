@@ -14,6 +14,13 @@ public final class PlayerModel {
         case off, all, one
     }
 
+    public nonisolated enum CollectionPlaybackState: Equatable, Sendable {
+        case inactive, playing, paused, loading, failed
+
+        /// A preparing song can be paused too, preventing a late ready callback from starting it.
+        public var canPause: Bool { self == .playing || self == .loading }
+    }
+
     public private(set) var queue: [Track] = []
     /// The queue as it was handed over, for turning shuffle back off.
     private var orderedQueue: [Track] = []
@@ -45,6 +52,7 @@ public final class PlayerModel {
         index = 0
         album = nil
         queueTitle = nil
+        playbackSourceID = nil
         isPlaying = false
         position = 0
         lastError = nil
@@ -56,6 +64,8 @@ public final class PlayerModel {
     public private(set) var position: TimeInterval = 0
     public private(set) var album: Album?
     public private(set) var queueTitle: String?
+    /// File IDs are only unique inside a server/account, never across libraries.
+    public private(set) var playbackSourceID: String?
     public private(set) var lastError: String?
     /// Output level, 0 to 1. The phone leaves this at 1 and uses its own controls; the Mac has a slider.
     public var volume: Float = 1 {
@@ -64,6 +74,7 @@ public final class PlayerModel {
 
     /// Resolves a stream URL for a track; nil means the file is not reachable right now.
     public var streamURLProvider: ((Track) -> URL?)?
+    public var sourceIDProvider: (() -> String)?
     /// Whether a track without a URL may pretend to play (the sample library) instead of reporting an error.
     public var allowsSimulation: (() -> Bool)?
     public var artworkProvider: ((Album) -> (url: URL, version: Int)?)?
@@ -140,6 +151,7 @@ public final class PlayerModel {
     public func play(queue: [Track], startingAt index: Int = 0, title: String?) {
         recordPlaybackCommand()
         guard !queue.isEmpty else { return }
+        playbackSourceID = sourceIDProvider?()
         orderedQueue = queue
         queueTitle = title
         let start = min(max(0, index), queue.count - 1)
@@ -262,7 +274,36 @@ public final class PlayerModel {
     }
 
     public func isCurrent(track: Track) -> Bool {
-        self.track?.id == track.id && (isPlaying || position > 0)
+        self.track?.id == track.id && playbackSourceID == sourceIDProvider?()
+    }
+
+    /// Match file identity and source, including a paused song at the beginning of its queue.
+    public func playbackState(for track: Track, sourceID: String) -> CollectionPlaybackState {
+        guard playbackSourceID == sourceID, sourceIDProvider?() == sourceID,
+              self.track?.id == track.id else { return .inactive }
+        return currentPlaybackState
+    }
+
+    /// Album/playlist controls follow the current song, even when it started in another collection.
+    public func playbackState(for tracks: [Track], sourceID: String) -> CollectionPlaybackState {
+        guard let track, tracks.contains(where: { $0.id == track.id }) else { return .inactive }
+        return playbackState(for: track, sourceID: sourceID)
+    }
+
+    /// Preserve queue, shuffle, position and the selected occurrence when resuming this collection.
+    public func togglePlayback(of tracks: [Track], sourceID: String, title: String? = nil) {
+        guard sourceIDProvider?() == sourceID, !tracks.isEmpty else { return }
+        switch playbackState(for: tracks, sourceID: sourceID) {
+        case .playing, .loading: pause()
+        case .paused, .failed: resume()
+        case .inactive: play(queue: tracks, title: title)
+        }
+    }
+
+    private var currentPlaybackState: CollectionPlaybackState {
+        if lastError != nil { return .failed }
+        if isPlaying { return .playing }
+        return wantsToPlay ? .loading : .paused
     }
 
     // MARK: Loading

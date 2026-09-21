@@ -39,6 +39,14 @@
 	<true/>
 	<key>GumboKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.samuelvoltolini.gumbo</string>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>INPlayMediaIntent</string>
+	</array>
+	<key>INSupportedMediaCategories</key>
+	<array>
+		<string>INMediaCategoryMusic</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
@@ -55,6 +63,8 @@
 	<string>Face ID opens your profile without typing its PIN.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Gumbo looks for music servers on your local network.</string>
+	<key>NSSiriUsageDescription</key>
+	<string>Ask Siri to play songs, albums, artists and playlists from your Gumbo library. Requested music titles are shared with Siri to answer your request.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

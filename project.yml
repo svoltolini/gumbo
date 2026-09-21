@@ -60,6 +60,7 @@ targets:
         aps-environment: development
         # Requires Apple's approval for this new App ID and a matching signing profile.
         com.apple.developer.carplay-audio: true
+        com.apple.developer.siri: true
     info:
       path: Gumbo/Info.plist
       properties:
@@ -92,6 +93,11 @@ targets:
         CKSharingSupported: true
         NSLocalNetworkUsageDescription: Gumbo looks for music servers on your local network.
         NSFaceIDUsageDescription: Face ID opens your profile without typing its PIN.
+        NSSiriUsageDescription: Ask Siri to play songs, albums, artists and playlists from your Gumbo library. Requested music titles are shared with Siri to answer your request.
+        INIntentsSupported:
+          - INPlayMediaIntent
+        INSupportedMediaCategories:
+          - INMediaCategoryMusic
         NSBonjourServices:
           - _http._tcp
           - _smb._tcp
@@ -194,6 +200,7 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: GumboMac
+      - path: Gumbo/Siri
       - path: Gumbo/Views
         excludes:
           - "Main/**"
