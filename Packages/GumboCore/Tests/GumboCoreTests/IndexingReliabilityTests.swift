@@ -262,3 +262,40 @@ private nonisolated func scanEntry(_ path: String, directory: Bool = false) -> R
         }
     }
 }
+
+@Test @MainActor func verifiedListingDistinguishesEmptyLibraryFromMissingOrUnreadableFolders() async throws {
+    try await withArtworkDirectory {
+        let previous = Catalogue.build(folders: [ScannedFolder(path: "/music", audio: [scanEntry("/music/Old.flac")], cover: nil)], rootPath: "/music", serverName: "NAS", driveID: "indexing-test", existing: nil)
+        let cases: [(ReliabilityDrive, Bool)] = [
+            (ReliabilityDrive(tree: ["/music": []]), true),
+            (ReliabilityDrive(tree: [:], failingPath: "/music", failure: .fileDoesNotExist), false),
+            (ReliabilityDrive(tree: [:], failingPath: "/music", failure: .timedOut), false),
+            (ReliabilityDrive(tree: ["/music": [scanEntry("/music/Private", directory: true)]], failingPath: "/music/Private"), false),
+        ]
+        for (drive, shouldVerify) in cases {
+            let indexer = LibraryIndexer(recordDiagnostics: { _ in })
+            var verified: [Catalogue] = []
+            indexer.start(drive: drive, rootPath: "/music", serverName: "NAS", existing: previous,
+                          onVerifiedListing: { verified.append($0) }, onCatalogue: { _ in })
+            try await waitForIndexing { !indexer.isRunning }
+            #expect(verified.count == (shouldVerify ? 1 : 0))
+            if shouldVerify { #expect(verified.first?.trackCount == 0) }
+        }
+    }
+}
+
+@Test @MainActor func cancelledListingCannotAuthorizeDownloadRemoval() async throws {
+    try await withArtworkDirectory {
+        let gate = IndexingTestGate()
+        let drive = ReliabilityDrive(tree: ["/music": []], listingGate: gate)
+        let indexer = LibraryIndexer(recordDiagnostics: { _ in })
+        var verified = false
+        indexer.start(drive: drive, rootPath: "/music", serverName: "NAS", existing: .empty,
+                      onVerifiedListing: { _ in verified = true }, onCatalogue: { _ in })
+        try await waitForIndexing { await gate.entered }
+        indexer.cancel()
+        await gate.release()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(!verified)
+    }
+}

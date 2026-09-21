@@ -37,6 +37,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
         if UserDefaults.standard.string(forKey: Self.catalogueRevisionKey) == String(authorization.revision),
            let data = try? Data(contentsOf: Self.catalogueURL), let saved = try? JSONDecoder().decode(WatchCatalogue.self, from: data) {
             catalogue = saved
+            WatchPlayer.shared.setArtwork(saved.artwork)
             WatchDownloads.shared.reconcile(saved)
         }
         hasCredentials = credentials() != nil
@@ -64,6 +65,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
 
     private func clearAccess() {
         WatchPlayer.shared.stop()
+        WatchPlayer.shared.setArtwork([:])
         let defaults = UserDefaults.standard
         if let account = defaults.string(forKey: Self.accountKey) {
             KeychainStore.delete(account: "watch|\(account)")
@@ -140,7 +142,7 @@ final class WatchStore: NSObject, WCSessionDelegate {
                         id: track.id, title: track.title, artist: track.artist ?? album?.artist ?? "",
                         album: album?.title ?? "", duration: track.duration,
                         path: track.path ?? "/music/\(track.id).flac", fileSize: track.fileSize ?? 28_000_000,
-                        format: track.format, isLossless: track.isLossless
+                        format: track.format, isLossless: track.isLossless, albumID: track.albumID
                     )
                 },
                 totalSongs: playlist.tracks.count
@@ -148,16 +150,24 @@ final class WatchStore: NSObject, WCSessionDelegate {
         }
         catalogue = WatchCatalogue(serverName: SampleLibrary.serverName, profileName: "Me", playlists: playlists)
         isSample = true
+        WatchPlayer.shared.setArtwork([:])
         if let catalogue { WatchDownloads.shared.reconcile(catalogue) }
     }
 
     private func apply(catalogueData data: Data) {
-        guard let received = try? JSONDecoder().decode(WatchCatalogue.self, from: data) else {
+        guard var received = try? JSONDecoder().decode(WatchCatalogue.self, from: data) else {
             DiagnosticsLog.shared.record("Watch: catalogue could not be read (\(data.count) bytes)")
             return
         }
+        // WatchConnectivity can deliver files out of order within the same authorization.
+        // An older initial snapshot must not erase thumbnails delivered by the follow-up, or
+        // undo a deletion/re-import. accept() clears catalogue when authorization changes.
+        if let catalogue, !received.isAtLeastAsRecent(as: catalogue) { return }
+        received.applyServerDeletions(received.serverDeletedTrackIDs)
+        WatchPlayer.shared.stopIfServerFilesWereDeleted(received.deletedCacheKeys)
         DiagnosticsLog.shared.record("Watch: received \(received.playlists.count) playlists")
         catalogue = received
+        WatchPlayer.shared.setArtwork(received.artwork)
         isSample = false
         WatchDownloads.shared.reconcile(received)
         try? FileManager.default.createDirectory(at: Self.catalogueURL.deletingLastPathComponent(), withIntermediateDirectories: true)

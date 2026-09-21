@@ -3,6 +3,7 @@ import Foundation
 import MediaPlayer
 import Observation
 import GumboCore
+import UIKit
 
 /// Plays a downloaded playlist from the watch's own storage, through whatever headphones the
 /// system offers when the audio session comes up. The Now Playing screen and the crown are wired
@@ -14,6 +15,7 @@ final class WatchPlayer {
     private var authorization = WatchAuthorization(revision: 0, isGranted: false)
     private var intent = PlaybackIntentRevision()
     private var pendingActivation = false
+    private var pendingFileKeys: Set<String> = []
     private var itemPositions: [ObjectIdentifier: Int] = [:]
 
     private(set) var current: WatchTrack?
@@ -26,6 +28,10 @@ final class WatchPlayer {
     private var itemTracks: [ObjectIdentifier: WatchTrack] = [:]
     private var observers: [NSKeyValueObservation] = []
     private var commandsReady = false
+    private var artwork: [String: Data] = [:]
+    private var currentArtworkID: String?
+    private var currentArtworkData: Data?
+    private var currentArtwork: MPMediaItemArtwork?
 
     init() {
         // KVO arrives on whatever thread changed the player; hop to the main actor before touching state.
@@ -54,6 +60,7 @@ final class WatchPlayer {
         } else if index > 0, index < order.count {
             order = Array(order[index...]) + Array(order[..<index])
         }
+        pendingFileKeys = Set(order.map { $0.url.deletingPathExtension().lastPathComponent })
         setupRemoteCommands()
         do {
             let session = AVAudioSession.sharedInstance()
@@ -61,6 +68,7 @@ final class WatchPlayer {
             guard try await session.activate(options: []) else {
                 if intent.accepts(command) {
                     pendingActivation = false
+                    pendingFileKeys = []
                     if !Task.isCancelled { lastError = "Audio couldn't start. Connect your headphones and try again." }
                 }
                 return
@@ -68,12 +76,14 @@ final class WatchPlayer {
         } catch {
             if intent.accepts(command) {
                 pendingActivation = false
+                pendingFileKeys = []
                 if !Task.isCancelled { lastError = "Audio couldn't start. \(error.localizedDescription)" }
             }
             return
         }
         guard intent.accepts(command) else { return }
         pendingActivation = false
+        pendingFileKeys = []
         guard !Task.isCancelled, authorization.isGranted,
               WatchDownloads.shared.allowsPlayback(order) else { return }
         queue = order
@@ -91,13 +101,30 @@ final class WatchPlayer {
     }
 
     func setAuthorization(_ value: WatchAuthorization) {
-        if authorization != value { stop() }
+        if authorization != value {
+            artwork = [:]
+            stop()
+        }
         authorization = value
+    }
+
+    func setArtwork(_ images: [String: Data]) {
+        artwork = images
+        updateNowPlaying()
+    }
+
+    func stopIfServerFilesWereDeleted(_ keys: Set<String>) {
+        guard !keys.isEmpty else { return }
+        if (pendingActivation && !pendingFileKeys.isDisjoint(with: keys))
+            || queue.contains(where: { keys.contains($0.url.deletingPathExtension().lastPathComponent) }) {
+            stop()
+        }
     }
 
     func stop() {
         intent.advance()
         pendingActivation = false
+        pendingFileKeys = []
         player.pause()
         player.removeAllItems()
         queue = []
@@ -115,6 +142,7 @@ final class WatchPlayer {
     private func pause() {
         intent.advance()
         pendingActivation = false
+        pendingFileKeys = []
         player.pause()
     }
 
@@ -122,6 +150,7 @@ final class WatchPlayer {
         guard authorization.isGranted, player.currentItem != nil else { return }
         intent.advance()
         pendingActivation = false
+        pendingFileKeys = []
         player.play()
     }
 
@@ -132,6 +161,7 @@ final class WatchPlayer {
     func next() {
         intent.advance()
         pendingActivation = false
+        pendingFileKeys = []
         player.advanceToNextItem()
     }
 
@@ -139,6 +169,7 @@ final class WatchPlayer {
         guard authorization.isGranted, let item = player.currentItem, let index = itemPositions[ObjectIdentifier(item)] else { return }
         let command = intent.advance()
         pendingActivation = false
+        pendingFileKeys = []
         if player.currentTime().seconds > 3 || index == 0 {
             player.seek(to: .zero)
         } else {
@@ -180,10 +211,23 @@ final class WatchPlayer {
 
     private func updateNowPlaying() {
         guard let track = current else {
+            currentArtworkID = nil
+            currentArtworkData = nil
+            currentArtwork = nil
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+        let data = track.albumID.flatMap { artwork[$0] }
+        if track.albumID != currentArtworkID || data != currentArtworkData {
+            currentArtworkID = track.albumID
+            currentArtworkData = data
+            currentArtwork = nil
+            if let data, WatchArtwork.isThumbnail(data), let image = UIImage(data: data) {
+                // MediaPlayer requests artwork on its own queue; never inherit the main actor.
+                currentArtwork = MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in image }
+            }
+        }
+        var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist,
             MPMediaItemPropertyAlbumTitle: track.album,
@@ -191,5 +235,7 @@ final class WatchPlayer {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
         ]
+        if let currentArtwork { info[MPMediaItemPropertyArtwork] = currentArtwork }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 }

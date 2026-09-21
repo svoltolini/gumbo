@@ -201,6 +201,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     func reconcile(_ catalogue: WatchCatalogue) {
         let previous = currentCatalogue
         currentCatalogue = catalogue
+        removeConfirmedServerFiles(catalogue, previous: previous)
         for playlist in previous?.playlists ?? [] where catalogue.playlist(matching: playlist) == nil {
             cancel(playlist)
         }
@@ -234,6 +235,41 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         saveManifests()
     }
 
+    /// A missing playlist is not evidence of deleted audio. Only explicit source-scoped NAS
+    /// deletions remove saved files, including copies in an older playlist/profile manifest.
+    private func removeConfirmedServerFiles(_ catalogue: WatchCatalogue, previous: WatchCatalogue?) {
+        let deletedKeys = catalogue.deletedCacheKeys
+        guard !deletedKeys.isEmpty else { return }
+        let knownPlaylists = catalogue.playlists + (previous?.playlists ?? [])
+        for key in Array(manifests.keys) {
+            guard key.count == 64, key.allSatisfy(\.isHexDigit), var manifest = manifests[key] else { continue }
+            let source = knownPlaylists.first(where: { $0.cacheID == key })?.driveID
+            let removedIDs = Set(source.flatMap { catalogue.serverDeletedTrackIDs[$0] } ?? [])
+            let removal = manifest.removeServerFiles(deletedCacheKeys: deletedKeys, removedTrackIDs: removedIDs)
+            for path in removal.paths {
+                try? FileManager.default.removeItem(at: Self.root.appending(path: key).appending(path: path))
+            }
+            if removal.affected {
+                manifests[key] = manifest
+                expected[key] = nil
+                errors[key] = nil
+            }
+        }
+        saveManifests()
+        session.getAllTasks { @Sendable [weak self] tasks in
+            Task { @MainActor in
+                // A verified re-import may have arrived while URLSession enumerated tasks.
+                // Only the current deletion ledger can cancel a newly requested generation.
+                guard let activeKeys = self?.currentCatalogue?.deletedCacheKeys else { return }
+                for task in tasks {
+                    guard let job = WatchDownloadJob.decode(task.taskDescription),
+                          activeKeys.contains((job.fileName as NSString).deletingPathExtension) else { continue }
+                    task.cancel()
+                }
+            }
+        }
+    }
+
     private func restoreTasks() {
         session.getAllTasks { @Sendable tasks in
             let restored = tasks.compactMap { task in WatchDownloadJob.decode(task.taskDescription).map { ($0, task) } }
@@ -241,6 +277,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
             for task in tasks where WatchDownloadJob.decode(task.taskDescription) == nil { task.cancel() }
             Task { @MainActor in
                 for (job, task) in restored where self.manifests[job.playlistKey]?.generation == job.generation {
+                    if self.currentCatalogue?.deletedCacheKeys.contains((job.fileName as NSString).deletingPathExtension) == true {
+                        task.cancel()
+                        continue
+                    }
                     guard let original = task.originalRequest?.url, let current = task.currentRequest?.url,
                           NASTransportSecurity.permitsRedirect(from: original, to: current) else {
                         task.cancel()
@@ -257,7 +297,8 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     }
 
     private func record(job: WatchDownloadJob) {
-        guard manifests[job.playlistKey]?.generation == job.generation,
+        guard currentCatalogue?.deletedCacheKeys.contains((job.fileName as NSString).deletingPathExtension) != true,
+              manifests[job.playlistKey]?.generation == job.generation,
               manifests[job.playlistKey]?.desired.contains(job.trackID) == true else {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root))
             return

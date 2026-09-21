@@ -122,7 +122,11 @@ public final class LibraryStore {
     private var tracksByID: [String: Track] = [:]
     private var allTracks: [Track] = []
     public private(set) var searchIndex = LibrarySearchIndex()
-    private var coveredAlbumIDs: Set<String> = []
+    private var coveredAlbumIDs: Set<String> = [] {
+        didSet { if coveredAlbumIDs != oldValue { artworkRevision &+= 1 } }
+    }
+    /// Covers can change without changing playlist metadata or their extracted colours.
+    public private(set) var artworkRevision: UInt64 = 0
     /// Colours read from the covers on disk, by album id.
     private var palettes: [String: CoverPalette.Pair] = [:]
     /// Counts derivations started, so a slow one never overwrites a newer result.
@@ -147,6 +151,18 @@ public final class LibraryStore {
     /// Writes tag changes into the files on the server and reports progress to the screen that asked.
     public let metadataWriter = MetadataWriter()
     public private(set) var isDeletingFiles = false
+    /// The app returns its live connection generation only while it is connected and idle.
+    /// A missing provider never authorizes permanent album deletion.
+    public var fileDeletionConnectionTokenProvider: (() -> UUID?)?
+    public var onServerTracksDeleted: ((String, Set<String>) -> Void)?
+    public private(set) var albumDeletionProgress: AlbumDeletionProgress?
+    private var albumDeletionOperation: UUID?
+    private var cancelledAlbumDeletionOperation: UUID?
+    private var preparedAlbumDeletionIDs: Set<UUID> = []
+    /// Injectable durability boundary: isolated deletion tests never write the real catalogue cache.
+    var persistDeletedAlbumCatalogue: (Catalogue) async -> Bool = {
+        await CatalogueCache.shared.save($0).value == .saved
+    }
     public private(set) var metadataMutationRevision = 0
     private var catalogueRevision = 0
     public var onMetadataWriteWillBegin: (() -> Void)?
@@ -527,6 +543,204 @@ public final class LibraryStore {
     /// Shared-file maintenance belongs to the library owner; NAS permissions are still enforced by the server.
     public var canMaintainFiles: Bool { canWriteTags && (profiles?.canManageProfiles ?? true) }
 
+    /// Permanent shared-file deletion requires an open owner profile and a verified idle connection.
+    public var canDeleteAlbums: Bool {
+        profiles?.canManageProfiles == true && profiles?.sessionID != nil && canWriteTags
+            && !isDeletingFiles && !metadataWriter.isWriting && fileDeletionConnectionTokenProvider?() != nil
+    }
+
+    /// Reads the exact files for the confirmation sheet, without deleting or renaming anything.
+    public func prepareAlbumDeletion(_ album: Album) async throws -> AlbumDeletionRequest {
+        guard profiles?.canManageProfiles == true, let profileSession = profiles?.sessionID else {
+            throw AlbumDeletionError.notAuthorized
+        }
+        guard !isDeletingFiles, !metadataWriter.isWriting else { throw AlbumDeletionError.busy }
+        guard canDeleteAlbums, let token = fileDeletionConnectionTokenProvider?(),
+              let drive = drive as? any WritableRemoteDrive else { throw AlbumDeletionError.unavailable }
+        guard let current = catalogue.albums.first(where: { $0.id == album.id }),
+              !current.tracks.isEmpty,
+              Set(current.tracks.map(\.id)) == Set(album.tracks.map(\.id)),
+              current.tracks.allSatisfy({ track in album.tracks.contains { $0.id == track.id && $0.path == track.path } }) else {
+            throw AlbumDeletionError.changed
+        }
+        let sourceID = catalogue.driveID, root = catalogue.rootPath, revision = catalogueRevision
+        let otherTracks = catalogue.albums.filter { $0.id != current.id }.flatMap(\.tracks)
+        let otherPaths = Set(otherTracks.compactMap(\.path))
+        let otherIDs = Set(otherTracks.map(\.id))
+        var paths: Set<String> = []
+        var ids: Set<String> = []
+        var tracks: [Track] = []
+        for track in current.tracks {
+            guard let path = track.path, AlbumDeletionPaths.isSong(path, inside: root), !otherPaths.contains(path),
+                  !otherIDs.contains(track.id), paths.insert(path).inserted, ids.insert(track.id).inserted else {
+                throw AlbumDeletionError.unsafePath
+            }
+            tracks.append(track)
+        }
+        isDeletingFiles = true
+        defer { isDeletingFiles = false }
+        metadataMutationRevision += 1
+        onMetadataWriteWillBegin?()
+        var entries: [String: RemoteEntry] = [:]
+        for track in tracks {
+            try Task.checkCancellation()
+            guard deletionContextMatches(source: sourceID, root: root, profile: profileSession, connection: token),
+                  catalogueRevision == revision else { throw AlbumDeletionError.changed }
+            let path = track.path!
+            let entry = try await drive.info(path)
+            try Task.checkCancellation()
+            guard deletionContextMatches(source: sourceID, root: root, profile: profileSession, connection: token),
+                  catalogueRevision == revision else { throw AlbumDeletionError.changed }
+            guard entry.path == path, entry.name == (path as NSString).lastPathComponent,
+                  !entry.isDirectory, let size = entry.size, size >= 0, let modified = entry.modified else {
+                throw AlbumDeletionError.unverifiedFile
+            }
+            guard track.fileSize.map({ $0 == size }) ?? true,
+                  track.sourceModifiedAt.map({ $0 == modified.timeIntervalSince1970 }) ?? true else {
+                throw RemoteWriteError.changed
+            }
+            entries[path] = entry
+        }
+        let request = AlbumDeletionRequest(id: UUID(), albumTitle: current.title, tracks: tracks,
+                                           albumID: current.id, sourceID: sourceID, rootPath: root,
+                                           profileSession: profileSession, connectionToken: token,
+                                           catalogueRevision: revision, entries: entries)
+        // A new review supersedes an abandoned confirmation. A request can be consumed only once.
+        preparedAlbumDeletionIDs = [request.id]
+        return request
+    }
+
+    public func canDeleteAlbum(using request: AlbumDeletionRequest) -> Bool {
+        canDeleteAlbums && preparedAlbumDeletionIDs.contains(request.id)
+            && catalogueRevision == request.catalogueRevision
+            && deletionContextMatches(source: request.sourceID, root: request.rootPath,
+                                      profile: request.profileSession, connection: request.connectionToken)
+    }
+
+    /// Stops after the NAS finishes the current file, so an accepted deletion is still accounted for.
+    public func cancelAlbumDeletion() {
+        cancelledAlbumDeletionOperation = albumDeletionOperation
+    }
+
+    public func deleteAlbum(_ request: AlbumDeletionRequest) async -> AlbumDeletionReport {
+        var report = AlbumDeletionReport()
+        report.remainingCount = request.fileCount
+        guard canDeleteAlbum(using: request), let drive = drive as? any WritableRemoteDrive else {
+            report.failures = request.tracks.map {
+                MetadataWriteFailure(trackID: $0.id, title: $0.title, message: AlbumDeletionError.changed.localizedDescription)
+            }
+            return report
+        }
+        preparedAlbumDeletionIDs.remove(request.id)
+        let operation = UUID()
+        albumDeletionOperation = operation
+        cancelledAlbumDeletionOperation = nil
+        isDeletingFiles = true
+        metadataMutationRevision += 1
+        onMetadataWriteWillBegin?()
+        var expectedRevision = catalogueRevision
+        defer {
+            if albumDeletionOperation == operation {
+                albumDeletionOperation = nil
+                cancelledAlbumDeletionOperation = nil
+                albumDeletionProgress = nil
+                isDeletingFiles = false
+            }
+        }
+        for (index, track) in request.tracks.enumerated() {
+            if Task.isCancelled || cancelledAlbumDeletionOperation == operation {
+                report.wasCancelled = true
+                break
+            }
+            guard deletionContextMatches(source: request.sourceID, root: request.rootPath,
+                                         profile: request.profileSession, connection: request.connectionToken),
+                  catalogueRevision == expectedRevision else {
+                report.wasCancelled = true
+                report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title,
+                                                            message: AlbumDeletionError.changed.localizedDescription))
+                break
+            }
+            albumDeletionProgress = AlbumDeletionProgress(completed: index, total: request.fileCount, title: track.title)
+            do {
+                guard let path = track.path, let reviewed = request.entries[path],
+                      catalogue.albums.first(where: { $0.id == request.albumID })?.tracks.contains(where: { $0.id == track.id && $0.path == path }) == true else {
+                    throw AlbumDeletionError.changed
+                }
+                let current = try await drive.info(path)
+                try Task.checkCancellation()
+                guard cancelledAlbumDeletionOperation != operation,
+                      deletionContextMatches(source: request.sourceID, root: request.rootPath,
+                                             profile: request.profileSession, connection: request.connectionToken),
+                      catalogueRevision == expectedRevision else { throw CancellationError() }
+                guard current == reviewed, !current.isDirectory else { throw RemoteWriteError.changed }
+                // The server may already have accepted this request when Stop is pressed. Let
+                // this one finish; cancelling the caller must not discard its acknowledgement.
+                let authorizedRevision = expectedRevision
+                let deletion = Task {
+                    // The task may start after another main-actor action changed the profile
+                    // or connection. Recheck authority at the actual destructive call.
+                    guard albumDeletionOperation == operation, cancelledAlbumDeletionOperation != operation,
+                          deletionContextMatches(source: request.sourceID, root: request.rootPath,
+                                                 profile: request.profileSession, connection: request.connectionToken),
+                          catalogueRevision == authorizedRevision else { throw CancellationError() }
+                    try await drive.delete(path)
+                }
+                try await deletion.value
+                report.deleted.append(track)
+                report.remainingCount = request.fileCount - report.deleted.count
+                onServerTracksDeleted?(request.sourceID, [track.id])
+                // A completed delete is real even if a profile/connection changed while waiting.
+                // Never apply its cache/profile edits to a different source or folder.
+                if catalogue.driveID == request.sourceID && catalogue.rootPath == request.rootPath {
+                    let snapshot = removeConfirmedAlbumFiles([track.id], request: request)
+                    expectedRevision = catalogueRevision
+                    let saved = await persistDeletedAlbumCatalogue(snapshot)
+                    report.persistenceError = saved ? nil : "The files were deleted from the NAS, but the updated library could not be saved on this device. Refresh your library."
+                }
+            } catch {
+                if Task.isCancelled || error is CancellationError || cancelledAlbumDeletionOperation == operation {
+                    report.wasCancelled = true
+                    break
+                }
+                report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title,
+                                                            message: MetadataWriter.message(for: error)))
+            }
+            albumDeletionProgress = AlbumDeletionProgress(completed: index + 1, total: request.fileCount, title: track.title)
+        }
+        return report
+    }
+
+    private func deletionContextMatches(source: String, root: String, profile: UUID, connection: UUID) -> Bool {
+        profiles?.canManageProfiles == true && profiles?.sessionID == profile && canWriteTags
+            && catalogue.driveID == source && catalogue.rootPath == root && drive?.id == source
+            && !metadataWriter.isWriting && fileDeletionConnectionTokenProvider?() == connection
+    }
+
+    /// Only confirmed successes are removed; failed, changed and unattempted songs remain available.
+    private func removeConfirmedAlbumFiles(_ removed: Set<String>, request: AlbumDeletionRequest) -> Catalogue {
+        var patched = catalogue
+        for index in patched.albums.indices {
+            patched.albums[index].tracks.removeAll { removed.contains($0.id) }
+            for song in patched.albums[index].tracks.indices { patched.albums[index].tracks[song].index = song }
+        }
+        let removedAlbums = Set(patched.albums.filter { $0.tracks.isEmpty }.map(\.id))
+        patched.albums.removeAll { $0.tracks.isEmpty }
+        if profiles?.sessionID == request.profileSession, profiles?.canManageProfiles == true {
+            profiles?.updateLibrary(request.sourceID) { state in
+                state.favourites.removeAll { removed.contains($0) }
+                state.played.removeAll { removed.contains($0) }
+                state.recentAlbums.removeAll { removedAlbums.contains($0) }
+                state.downloadedAlbums.removeAll { removedAlbums.contains($0) }
+                for index in state.playlists.indices {
+                    state.playlists[index].trackIDs.removeAll { removed.contains($0) }
+                }
+            }
+        }
+        replace(with: patched, drive: drive)
+        loadProfileState()
+        return patched
+    }
+
     public func fillMissingGenre(_ genre: String, trackIDs: Set<String>) async -> MetadataWriteReport {
         let genre = genre.trimmingCharacters(in: .whitespacesAndNewlines)
         let selected = tracks.filter { trackIDs.contains($0.id) }
@@ -646,7 +860,9 @@ public final class LibraryStore {
         coveredAlbumIDs.contains(album.id) ? CoverStore.$directoryOverride.withValue(artworkDirectory) { CoverStore.fileURL(for: album.id) } : nil
     }
 
-    public private(set) var coverVersions: [String: Int] = [:]
+    public private(set) var coverVersions: [String: Int] = [:] {
+        didSet { if coverVersions != oldValue { artworkRevision &+= 1 } }
+    }
 
     /// A value that changes whenever the album's cover file is replaced, so views reload it.
     public func coverVersion(for album: Album) -> Int { coverVersions[album.id] ?? 0 }

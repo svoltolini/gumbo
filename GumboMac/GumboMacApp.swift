@@ -74,6 +74,13 @@ struct GumboMacApp: App {
         }
         // An album renamed in its files keeps its downloads under its new identity.
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        library.onServerTracksDeleted = { [library, downloads, player] sourceID, trackIDs in
+            downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
+            if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {
+                player.stop()
+            }
+        }
+
         // Membership restored from iCloud meets the files already in the downloads folder: songs still
         // here are reused rather than fetched again, and anything no download uses is surfaced. Runs
         // whenever either side changes: a profile opening, its document arriving, or the catalogue loading.

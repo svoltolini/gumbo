@@ -2,7 +2,7 @@
 
 Gumbo is a native Apple-platform music app for a personal Synology NAS library. It talks directly to DSM File Station, builds a local catalogue, streams or downloads audio, and synchronizes family profiles through CloudKit.
 
-The repository contains the iPhone/iPad app, native Mac app, Apple TV app, Apple Watch companion, widgets, Live Activities, CarPlay scene, and the shared Swift package.
+The repository contains the iPhone/iPad app, native Mac app, Apple TV app, Apple Watch app, widgets, Live Activities, CarPlay scene, and the shared Swift package.
 
 Gumbo now uses a separate app identity, with new bundle IDs, CloudKit container, app group, URL scheme and local storage. It does not update or migrate the previous TestFlight app. See [the identity and distribution checklist](docs/GUMBO-IDENTITY.md) before signing or uploading a build.
 
@@ -45,6 +45,8 @@ Use XcodeGen after changing `project.yml`, and treat `project.yml` as the source
 The first public version remains `1.0`. For TestFlight iterations, increment `CURRENT_PROJECT_VERSION` across every target and keep `MARKETING_VERSION` at `1.0`.
 
 Passing a build or local simulator check is not sufficient release evidence. Provider-backed flows must be tested with a signed build on the intended devices, including a controlled Synology account, CloudKit owner/member accounts, and offline/reconnect cases.
+
+Recent feature notes: [optional personal sign-in sync](docs/ICLOUD-KEYCHAIN-2026-09-21.md) and [owner-reviewed album deletion](docs/ALBUM-DELETION-2026-09-21.md).
 
 ## Current audit
 

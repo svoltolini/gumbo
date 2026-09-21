@@ -15,13 +15,17 @@ public nonisolated struct DownloadRecord: Codable, Hashable, Sendable {
     public let bytes: Int64
     /// The albums and playlists this song was downloaded for, as `DownloadOwner` ids.
     public var owners: Set<String>
+    /// A fresh download after a NAS deletion belongs to that deletion epoch. Older manifest
+    /// records cannot become playable again if the process stopped before their files were removed.
+    public var serverDeletionEpoch: String?
 
-    public init(trackID: String, driveID: String, fileName: String, bytes: Int64, owners: Set<String>) {
+    public init(trackID: String, driveID: String, fileName: String, bytes: Int64, owners: Set<String>, serverDeletionEpoch: String? = nil) {
         self.trackID = trackID
         self.driveID = driveID
         self.fileName = fileName
         self.bytes = bytes
         self.owners = owners
+        self.serverDeletionEpoch = serverDeletionEpoch
     }
 
     private enum LegacyKeys: String, CodingKey { case albumID }
@@ -32,6 +36,7 @@ public nonisolated struct DownloadRecord: Codable, Hashable, Sendable {
         driveID = try container.decode(String.self, forKey: .driveID)
         fileName = try container.decode(String.self, forKey: .fileName)
         bytes = try container.decode(Int64.self, forKey: .bytes)
+        serverDeletionEpoch = try container.decodeIfPresent(String.self, forKey: .serverDeletionEpoch)
         if let owners = try container.decodeIfPresent(Set<String>.self, forKey: .owners) {
             self.owners = owners
         } else if let albumID = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(String.self, forKey: .albumID) {
@@ -258,6 +263,10 @@ public final class DownloadManager {
     private var isStartingTask = false
     private var expectedAttempts: [String: String] = [:]
     private var retiredAttempts: Set<String> = []
+    /// Confirmed NAS deletions reject unknown background completions even after relaunch. An
+    /// explicit future request can still create a new accepted attempt if the file is restored.
+    private var serverDeletedKeys: Set<String> = []
+    private var serverDeletionEpochs: [String: String] = [:]
     private var requests: [String: OwnerRequest] = [:] { didSet { stateRevision &+= 1 } }
     private var hasVersionedIntent = false
     private var initialJobs: [String: DownloadJob] = [:]
@@ -290,6 +299,8 @@ public final class DownloadManager {
         var jobs: [String: DownloadJob]
         var requests: [String: OwnerRequest]
         var allowsLegacyRestoration: Bool
+        var serverDeletedKeys: Set<String>?
+        var serverDeletionEpochs: [String: String]?
     }
 
     private enum SessionEvent {
@@ -361,6 +372,8 @@ public final class DownloadManager {
             initialJobs = saved.jobs
             expectedAttempts = saved.jobs.mapValues(\.attemptID)
             requests = saved.requests
+            serverDeletedKeys = saved.serverDeletedKeys ?? []
+            serverDeletionEpochs = saved.serverDeletionEpochs ?? [:]
             hasSavedPendingOwners = true
             hasVersionedIntent = !saved.allowsLegacyRestoration
         } else if FileManager.default.fileExists(atPath: intentURL.path) {
@@ -375,6 +388,15 @@ public final class DownloadManager {
         }
         initialPendingOwners = pendingByOwner
         migratesLegacySessionOwners = !hasSavedPendingOwners
+        // Intent is saved before physical removal. Recover that crash window before exposing
+        // records or accepting any restored transfer, while preserving later explicit downloads.
+        var migratedDeletionEpochs = false
+        for key in serverDeletedKeys where serverDeletionEpochs[key] == nil {
+            serverDeletionEpochs[key] = UUID().uuidString
+            migratedDeletionEpochs = true
+        }
+        discardDeletedManifestRecords()
+        if migratedDeletionEpochs { savePendingOwners() }
         // Songs still queued from an earlier launch keep going; pick their bookkeeping back up.
         // Answered on the session's own queue, so the closure stays off the main actor and hands
         // the tasks across explicitly.
@@ -561,7 +583,8 @@ public final class DownloadManager {
     /// The file in the folder that holds this song, when one does and it is worth keeping: complete
     /// according to the catalogue, and audio rather than a server's error page.
     private func validFile(for track: Track, key: String, in inventory: DownloadCacheInventory) -> DownloadCacheInventory.File? {
-        guard let candidates = inventory.filesByKey[key] else { return nil }
+        // A leftover copy from a failed filesystem removal must never be silently adopted again.
+        guard !serverDeletedKeys.contains(key), let candidates = inventory.filesByKey[key] else { return nil }
         let expected = track.fileSize ?? 0
         let valid = candidates.filter { file in
             guard !file.isIncoming, file.bytes > 0 else { return false }
@@ -1036,6 +1059,120 @@ public final class DownloadManager {
         notifyMembershipChange(driveID: driveIDProvider())
     }
 
+    /// Removes local copies of files whose deletion was confirmed by the NAS. The physical file
+    /// belongs to its exact source and track, so all profile/playlist owners lose that copy; files
+    /// from a different NAS are unaffected even when their paths and album identities match.
+    public func removeServerTracks(sourceID: String, trackIDs: Set<String>) {
+        guard !sourceID.isEmpty, !trackIDs.isEmpty else { return }
+        let keys = Set(trackIDs.map { Self.cacheKey(trackID: $0, driveID: sourceID) })
+        serverDeletedKeys.formUnion(keys)
+        for key in keys { serverDeletionEpochs[key] = UUID().uuidString }
+        var affectedOwners: Set<String> = []
+        var fileNames: Set<String> = []
+        for (key, record) in records where keys.contains(key) && record.driveID == sourceID {
+            affectedOwners.formUnion(record.owners)
+            if !record.fileName.isEmpty { fileNames.insert(record.fileName) }
+            records[key] = nil
+        }
+        for owner in Array(pendingByOwner.keys) {
+            guard !(pendingByOwner[owner] ?? []).isDisjoint(with: keys) else { continue }
+            affectedOwners.insert(owner)
+            pendingByOwner[owner]?.subtract(keys)
+            if pendingByOwner[owner]?.isEmpty == true { pendingByOwner[owner] = nil }
+        }
+        for owner in Array(initialPendingOwners.keys) {
+            guard !(initialPendingOwners[owner] ?? []).isDisjoint(with: keys) else { continue }
+            affectedOwners.insert(owner)
+            initialPendingOwners[owner]?.subtract(keys)
+            if initialPendingOwners[owner]?.isEmpty == true { initialPendingOwners[owner] = nil }
+        }
+        for key in keys {
+            let task = tasks[key]
+            let simulation = simulations[key]
+            if let job = jobs[key] ?? initialJobs[key] {
+                fileNames.insert(job.incomingFileName)
+                fileNames.insert(job.fileName)
+                retire(job)
+            }
+            expectedAttempts[key] = nil
+            simulatedKeys.remove(key)
+            task?.cancel()
+            simulation?.cancel()
+        }
+        for id in Array(requests.keys) {
+            guard var request = requests[id], request.driveID == sourceID else { continue }
+            let removed = request.keys.intersection(keys)
+            guard !removed.isEmpty else { continue }
+            affectedOwners.insert(request.ownerID)
+            request.keys.subtract(removed)
+            request.total = max(0, request.total - removed.count)
+            for key in removed { request.errors[key] = nil }
+            requests[id] = request.keys.isEmpty ? nil : request
+        }
+        // Only retire membership that actually depended on these tracks and has no remaining
+        // saved or requested song. Other owners, profiles and libraries keep their intent.
+        for owner in affectedOwners {
+            let stillSaved = records.values.contains { $0.driveID == sourceID && $0.owners.contains(owner) }
+            let stillRequested = requests.values.contains { $0.driveID == sourceID && $0.ownerID == owner && !$0.keys.isEmpty }
+            let stillPending = ((pendingByOwner[owner] ?? []).union(initialPendingOwners[owner] ?? [])).contains { key in
+                (jobs[key] ?? initialJobs[key])?.driveID == sourceID
+            }
+            if !stillSaved && !stillRequested && !stillPending { restoredOwners[sourceID]?.remove(owner) }
+        }
+        if restoredOwners[sourceID]?.isEmpty == true { restoredOwners[sourceID] = nil }
+        // Includes abandoned retries named for the exact source/track, never a broad folder sweep.
+        let inventory = DownloadCacheInventory.read(directory: cacheDirectory)
+        for key in keys { fileNames.formUnion((inventory.filesByKey[key] ?? []).map(\.fileName)) }
+        let protectedFiles = Set(records.values.map(\.fileName))
+            .union(jobs.values.map(\.fileName)).union(initialJobs.values.map(\.fileName))
+        savePendingOwners()
+        let failures = removeDeletedCacheFiles(fileNames, protecting: protectedFiles)
+        saveManifest()
+        if failures > 0 {
+            lastError = "Some local downloads couldn’t be removed. Open Downloads to review and remove the remaining unused files."
+        }
+        // Invalidate the previous storage summary; a UI refresh can recalculate it. Do not use
+        // the general sweep here: this action may remove only the specifically deleted tracks.
+        unusedStorage = UnusedDownloadStorage()
+        startNextIfIdle()
+        refreshActivity(force: true)
+        if affectedOwners.contains(where: { $0.hasPrefix(DownloadOwner.scope(activeProfileID)) }) {
+            notifyMembershipChange(driveID: sourceID)
+        }
+        log("Removed local download access for \(trackIDs.count) confirmed deleted NAS songs")
+    }
+
+    private func discardDeletedManifestRecords() {
+        let stale = records.filter { key, record in
+            serverDeletedKeys.contains(key) && record.serverDeletionEpoch != serverDeletionEpochs[key]
+        }
+        guard !stale.isEmpty else { return }
+        for key in stale.keys { records[key] = nil }
+        let protectedFiles = Set(records.values.map(\.fileName))
+            .union(initialJobs.values.map(\.fileName))
+        let failures = removeDeletedCacheFiles(Set(stale.values.map(\.fileName)), protecting: protectedFiles)
+        saveManifest()
+        if failures > 0 {
+            lastError = "Some local downloads couldn’t be removed. Open Downloads to review and remove the remaining unused files."
+        }
+    }
+
+    private func removeDeletedCacheFiles(_ fileNames: Set<String>, protecting protectedFiles: Set<String>) -> Int {
+        var failures = 0
+        for name in fileNames where !name.isEmpty && !protectedFiles.contains(name) {
+            // A decoded legacy record must never turn cleanup into an arbitrary path deletion.
+            guard name != ".", name != "..", (name as NSString).lastPathComponent == name,
+                  !DownloadCacheInventory.bookkeepingFiles.contains(name) else { continue }
+            let file = cacheDirectory.appending(path: name)
+            guard FileManager.default.fileExists(atPath: file.path) else { continue }
+            let kind = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.type] as? FileAttributeType
+            guard kind == .typeRegular || kind == .typeSymbolicLink else { continue }
+            do { try FileManager.default.removeItem(at: file) }
+            catch { failures += 1 }
+        }
+        return failures
+    }
+
     private func simulate(_ track: Track, job: DownloadJob) {
         let key = job.cacheKey
         simulations[key] = Task { [weak self] in
@@ -1120,6 +1257,7 @@ public final class DownloadManager {
     /// Only a saved pre-migration intent may introduce a legacy transfer not already registered.
     private func accept(_ job: DownloadJob) -> Bool {
         guard !retiredAttempts.contains(job.attemptID) else { return false }
+        if serverDeletedKeys.contains(job.cacheKey), expectedAttempts[job.cacheKey] != job.attemptID { return false }
         if let current = jobs[job.cacheKey] { return current.attemptID == job.attemptID }
         guard records[job.cacheKey] == nil else { return false }
         if let expected = expectedAttempts[job.cacheKey] {
@@ -1222,7 +1360,8 @@ public final class DownloadManager {
                     return
                 }
             }
-            records[job.cacheKey] = DownloadRecord(trackID: job.trackID, driveID: job.driveID, fileName: simulated ? "" : job.fileName, bytes: bytes, owners: owners)
+            records[job.cacheKey] = DownloadRecord(trackID: job.trackID, driveID: job.driveID, fileName: simulated ? "" : job.fileName,
+                                                  bytes: bytes, owners: owners, serverDeletionEpoch: serverDeletionEpochs[job.cacheKey])
         }
         saveManifest()
         settle(job)
@@ -1388,7 +1527,8 @@ public final class DownloadManager {
         for (key, job) in jobs { savedJobs[key] = job }
         savedJobs = savedJobs.filter { expectedAttempts[$0.key] == $0.value.attemptID }
         let saved = SavedIntent(pending: pending, jobs: savedJobs, requests: requests,
-                                allowsLegacyRestoration: !hasVersionedIntent && (migratesLegacySessionOwners || !initialPendingOwners.isEmpty))
+                                allowsLegacyRestoration: !hasVersionedIntent && (migratesLegacySessionOwners || !initialPendingOwners.isEmpty),
+                                serverDeletedKeys: serverDeletedKeys, serverDeletionEpochs: serverDeletionEpochs)
         if let data = try? JSONEncoder().encode(saved) {
             do {
                 try data.write(to: intentURL, options: .atomic)

@@ -32,6 +32,9 @@ public final class AppModel {
     private var connectionGeneration = UUID()
     private let defaults: UserDefaults
     private let services: ConnectionServices
+    /// Complete NAS listings can reconcile explicit deletions on companion devices. Partial
+    /// scans and missing-root errors never invoke this callback.
+    public var onVerifiedServerListing: ((String, Set<String>) -> Void)?
     private var pendingCloudConnection: ServerConnection?
     private var pendingCloudCredentialSync = false
     private var credentialSyncRevision = 0
@@ -90,6 +93,12 @@ public final class AppModel {
         self.defaults = defaults
         self.services = services
         library.onMetadataWriteWillBegin = { [weak self] in self?.indexer.cancel() }
+        library.fileDeletionConnectionTokenProvider = { [weak self] in
+            guard let self, self.isConnected, self.pendingServer == nil,
+                  !self.isScanning, !self.isRestoring, !self.isReconnecting,
+                  !self.isSigningIn, !self.isJoiningFamily else { return nil }
+            return self.connectionGeneration
+        }
         loadSettings()
         if let data = defaults.data(forKey: "family.access.v2"),
            let records = try? JSONDecoder().decode([String: FamilyAccessRecord].self, from: data) {
@@ -394,7 +403,17 @@ public final class AppModel {
         let existing = library.catalogue.isEmpty ? nil : library.catalogue
         let generation = connectionGeneration
         let metadataRevision = library.metadataMutationRevision
-        indexer.start(drive: drive, rootPath: path, serverName: connection.name, existing: existing, forceMetadataReread: forceMetadataReread) { [weak self] catalogue in
+        indexer.start(drive: drive, rootPath: path, serverName: connection.name, existing: existing, forceMetadataReread: forceMetadataReread, onVerifiedListing: { [weak self] catalogue in
+            guard let self, generation == self.connectionGeneration,
+                  metadataRevision == self.library.metadataMutationRevision,
+                  self.connection == connection, self.library.drive?.id == drive.id else { return }
+            let presentIDs = Set(catalogue.albums.flatMap(\.tracks).map(\.id))
+            self.onVerifiedServerListing?(catalogue.driveID, presentIDs)
+            guard let existing, existing.driveID == catalogue.driveID, existing.rootPath == catalogue.rootPath else { return }
+            let previousIDs = Set(existing.albums.flatMap(\.tracks).map(\.id))
+            let removed = previousIDs.subtracting(presentIDs)
+            if !removed.isEmpty { self.library.onServerTracksDeleted?(catalogue.driveID, removed) }
+        }) { [weak self] catalogue in
             guard let self, generation == connectionGeneration,
                   metadataRevision == library.metadataMutationRevision,
                   self.connection == connection, library.drive?.id == drive.id else { return }
