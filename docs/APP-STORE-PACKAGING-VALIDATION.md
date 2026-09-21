@@ -240,7 +240,7 @@ xcrun altool --upload-app -f build/export-ios/Gumbo.ipa \
 After upload, verify in App Store Connect:
 
 - [ ] Build status: "Processing" → "Ready to Submit" (allow 15-60 minutes)
-- [ ] No "Missing Compliance" warning (ITSAppUsesNonExemptEncryption is false)
+- [ ] Encryption questionnaire/documentation completed for the actual binary; no unresolved Missing Compliance status
 - [ ] No "Invalid Binary" rejection email
 
 ### 6.3 TestFlight Internal Testing
@@ -281,60 +281,19 @@ grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION" project.yml
 
 ---
 
-## 8. App Store Metadata (Owner Action Required)
+## 8. App Store metadata
 
-These items require owner action in App Store Connect before public submission.
+The current account read-back is maintained in [APP_STORE_CHECKLIST.md](APP_STORE_CHECKLIST.md). On 21 September the Gumbo name, subtitle, Music category, three platform descriptions/keywords, privacy URL/TV policy text and support/marketing URLs were saved and verified. Five native iPhone, iPad, Mac and TV screenshots processed successfully with dimensions/checksums verified, and the 4+ age rating was saved and read back. All public storefronts remain **Prepare for Submission**.
 
-### 8.1 App Information
-
-| Field | Status | Notes |
-| --- | --- | --- |
-| App name | ✅ Verified | "Gumbo Music", app `6814252548` |
-| Subtitle | ⚠️ Required | Short tagline |
-| Category | ⚠️ Required | Music |
-| Content rating | ⚠️ Required | Complete questionnaire |
-
-### 8.2 Platform Descriptions
-
-| Platform | Status |
-| --- | --- |
-| iOS description | ⚠️ Empty at 21 September read-back |
-| macOS description | ⚠️ Empty at 21 September read-back |
-| tvOS description | ⚠️ Empty at 21 September read-back |
-
-### 8.3 Screenshots
-
-| Platform | Required Sizes |
-| --- | --- |
-| iPhone 6.9" | 1320 × 2868 or 1290 × 2796 |
-| iPhone 6.5" | 1284 × 2778 or 1242 × 2688 |
-| iPad 13" | 2064 × 2752 |
-| Mac | 1280 × 800 minimum |
-| Apple TV | 1920 × 1080 or 3840 × 2160 |
-
-- [ ] At least 1 screenshot per platform
-- [ ] Up to 10 screenshots per platform
-- [ ] No placeholder or development screenshots
-
-### 8.4 URLs (Owner Action Required)
-
-| URL | Status | Current |
-| --- | --- | --- |
-| Public website | ✅ Live | `https://gumbo.one/` returned HTTP 200 and matched source |
-| Public privacy policy | ✅ Live | `https://gumbo.one/privacy/` returned HTTP 200 and matched source |
-| App Store privacy URL | ⚠️ Not configured | `privacyPolicyUrl` was null in the en-GB app-information localization |
-| App Store support URL | ⚠️ Not configured | `supportUrl` was null in all three platform localizations |
-| App Store marketing URL | Not configured | `marketingUrl` was null in all three platform localizations |
-
-These observations were read back from the new app identity on 21 September 2026. The website policy is published; it has not yet been entered into App Store Connect. Beta support uses TestFlight's feedback/developer-contact route. Confirm the public support route and support-retention practice without publishing private review-contact details. See [PRIVACY-POLICY.md](PRIVACY-POLICY.md) and [#119](https://github.com/svoltolini/gumbo/issues/119).
+Use Apple's [current screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/). The 6.9-inch iPhone and 13-inch iPad sets can supply scaled screenshots for smaller supported displays; do not require every old device size when Apple accepts scaling. Screenshots must be JPEG/PNG without transparency and reflect the submitted UI.
 
 ---
 
-## 9. App Store Privacy Answers (Owner Action Required)
+## 9. App Store Privacy Answers
 
 App Store Connect requires app-level privacy declarations separate from privacy manifests.
 
-The 21 September audit did not independently verify completed app-level answers. A privacy manifest, a live policy page and approved TestFlight builds do not establish that those answers are published.
+The App Privacy declaration was published with explicit owner confirmation on 21 September. Reloading App Store Connect showed the published attribution and all eight categories. See `PRIVACY-RELEASE-CHECK.md` for the owner-confirmed diagnostics/feedback rationale. This is separate from app-version approval.
 
 ### 9.1 Data Types Declaration
 
@@ -344,7 +303,7 @@ Based on source review, Gumbo:
 - Stores profile data in user's private CloudKit zone
 - Does not transmit library data to developer servers
 
-**Owner must confirm** any developer access outside the reviewed code (App Store analytics, TestFlight reports, support submissions) before publishing answers.
+The owner confirmed use of Apple usage/crash reports to fix bugs and TestFlight-only feedback handling, then explicitly approved publication. Changes to those practices require an updated declaration.
 
 ### 9.2 Apple TV Privacy Text
 
