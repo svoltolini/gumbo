@@ -386,7 +386,26 @@ public final class LibraryStore {
     // MARK: Writing tags
 
     /// Whether edits can reach the files themselves: a signed-in server that accepts uploads.
-    public var canWriteTags: Bool { profiles?.isLocked != true && !isDemo && drive?.id == catalogue.driveID && (drive as? any WritableRemoteDrive) != nil }
+    public var tagServiceConfiguration: TagServiceConfiguration?
+    public var activeTagService: TagServiceConfiguration? {
+        guard profiles?.canManageProfiles == true, profiles?.sessionID != nil,
+              let configuration = tagServiceConfiguration, configuration.sourceID == catalogue.driveID,
+              configuration.libraryRoot == catalogue.rootPath else { return nil }
+        return configuration
+    }
+    public var canWriteTags: Bool {
+        guard profiles?.isLocked != true, !isDemo, let drive, drive.id == catalogue.driveID else { return false }
+        return (drive is any WritableRemoteDrive && drive.capabilities.supportsTagReplacement) || activeTagService != nil
+    }
+    public var canInspectFiles: Bool {
+        profiles?.isLocked != true && !isDemo && drive?.id == catalogue.driveID
+            && drive is any RemoteFileDrive && drive?.capabilities.contains(.read) == true
+    }
+    public var canDeleteFiles: Bool {
+        profiles?.canManageProfiles == true && profiles?.sessionID != nil && canInspectFiles
+            && drive is any WritableRemoteDrive && drive?.capabilities.contains(.delete) == true
+            && fileDeletionConnectionTokenProvider?() != nil
+    }
 
     /// Every song shown under the genre `name`: those whose own tag reads it, plus tagless songs of
     /// albums filed there. Songs not yet read are left alone, since their real tag is unknown.
@@ -497,7 +516,7 @@ public final class LibraryStore {
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notAuthorized.localizedDescription) }
             return report
         }
-        guard let drive = drive as? any WritableRemoteDrive, drive.id == catalogue.driveID, !isDemo else {
+        guard canWriteTags, let drive else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.notConnected.localizedDescription) }
             return report
@@ -505,11 +524,20 @@ public final class LibraryStore {
         let sourceID = catalogue.driveID
         let rootPath = catalogue.rootPath
         let session = profiles?.sessionID
+        let helper = activeTagService
+        guard tracks.allSatisfy({ candidate in
+            guard let path = candidate.path, AlbumDeletionPaths.isSong(path, inside: rootPath) else { return false }
+            return track(id: candidate.id)?.path == path
+        }) else {
+            var report = MetadataWriteReport()
+            report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: RemoteWriteError.changed.localizedDescription) }
+            return report
+        }
         metadataMutationRevision += 1
         onMetadataWriteWillBegin?()
-        let report = await metadataWriter.write(edits, to: tracks, drive: drive, onlyIfGenreMissing: onlyIfGenreMissing) { [weak self] in
+        let report = await metadataWriter.write(edits, to: tracks, drive: drive, onlyIfGenreMissing: onlyIfGenreMissing, helper: helper) { [weak self] in
             guard let self else { return false }
-            return self.profiles?.isLocked != true && self.profiles?.sessionID == session
+            return self.canWriteTags && self.profiles?.sessionID == session && self.activeTagService == helper
                 && (!onlyIfGenreMissing || self.canMaintainFiles)
                 && self.catalogue.driveID == sourceID && self.catalogue.rootPath == rootPath && self.drive?.id == sourceID
         }
@@ -545,8 +573,7 @@ public final class LibraryStore {
 
     /// Permanent shared-file deletion requires an open owner profile and a verified idle connection.
     public var canDeleteAlbums: Bool {
-        profiles?.canManageProfiles == true && profiles?.sessionID != nil && canWriteTags
-            && !isDeletingFiles && !metadataWriter.isWriting && fileDeletionConnectionTokenProvider?() != nil
+        canDeleteFiles && !isDeletingFiles && !metadataWriter.isWriting && fileDeletionConnectionTokenProvider?() != nil
     }
 
     /// Reads the exact files for the confirmation sheet, without deleting or renaming anything.
@@ -711,13 +738,17 @@ public final class LibraryStore {
     }
 
     private func deletionContextMatches(source: String, root: String, profile: UUID, connection: UUID) -> Bool {
-        profiles?.canManageProfiles == true && profiles?.sessionID == profile && canWriteTags
+        canDeleteFiles && profiles?.sessionID == profile
             && catalogue.driveID == source && catalogue.rootPath == root && drive?.id == source
             && !metadataWriter.isWriting && fileDeletionConnectionTokenProvider?() == connection
     }
 
     /// Only confirmed successes are removed; failed, changed and unattempted songs remain available.
     private func removeConfirmedAlbumFiles(_ removed: Set<String>, request: AlbumDeletionRequest) -> Catalogue {
+        removeConfirmedFiles(removed, sourceID: request.sourceID, profileSession: request.profileSession)
+    }
+
+    private func removeConfirmedFiles(_ removed: Set<String>, sourceID: String, profileSession: UUID?) -> Catalogue {
         var patched = catalogue
         for index in patched.albums.indices {
             patched.albums[index].tracks.removeAll { removed.contains($0.id) }
@@ -725,8 +756,8 @@ public final class LibraryStore {
         }
         let removedAlbums = Set(patched.albums.filter { $0.tracks.isEmpty }.map(\.id))
         patched.albums.removeAll { $0.tracks.isEmpty }
-        if profiles?.sessionID == request.profileSession, profiles?.canManageProfiles == true {
-            profiles?.updateLibrary(request.sourceID) { state in
+        if profiles?.sessionID == profileSession, profiles?.canManageProfiles == true {
+            profiles?.updateLibrary(sourceID) { state in
                 state.favourites.removeAll { removed.contains($0) }
                 state.played.removeAll { removed.contains($0) }
                 state.recentAlbums.removeAll { removedAlbums.contains($0) }
@@ -754,7 +785,8 @@ public final class LibraryStore {
 
     public func deleteReviewedFiles(_ findings: [MusicFileInspection]) async -> MusicFileDeletionReport {
         var report = MusicFileDeletionReport()
-        guard canMaintainFiles, !isDeletingFiles, !metadataWriter.isWriting,
+        guard canDeleteFiles, !isDeletingFiles, !metadataWriter.isWriting,
+              let connectionToken = fileDeletionConnectionTokenProvider?(),
               let drive = drive as? any WritableRemoteDrive else {
             report.failures = findings.map { MetadataWriteFailure(trackID: $0.id, title: $0.track.title,
                 message: "Connect as the library owner and wait for other file changes to finish.") }
@@ -771,16 +803,18 @@ public final class LibraryStore {
             do {
                 try Task.checkCancellation()
                 guard let current = track(id: finding.id), current.path == finding.track.path,
-                      let path = current.path, path.hasPrefix(root.hasSuffix("/") ? root : root + "/") else {
+                      let path = current.path, AlbumDeletionPaths.isSong(path, inside: root) else {
                     throw RemoteWriteError.changed
                 }
                 try await MusicFileInspector.deleteReviewed(finding, drive: drive) { [weak self] in
                     guard let self else { return false }
-                    return self.canMaintainFiles && self.profiles?.sessionID == session
+                    return self.canDeleteFiles && self.profiles?.sessionID == session
+                        && self.fileDeletionConnectionTokenProvider?() == connectionToken
                         && self.catalogue.driveID == sourceID && self.catalogue.rootPath == root
                         && self.drive?.id == sourceID
                 }
                 report.deleted.append(current)
+                onServerTracksDeleted?(sourceID, [current.id])
             } catch {
                 if Task.isCancelled || error is CancellationError { report.wasCancelled = true; break }
                 report.failures.append(MetadataWriteFailure(trackID: finding.id, title: finding.track.title,
@@ -789,13 +823,7 @@ public final class LibraryStore {
         }
         guard catalogue.driveID == sourceID, catalogue.rootPath == root, !report.deleted.isEmpty else { return report }
         let removed = Set(report.deleted.map(\.id))
-        var patched = catalogue
-        for index in patched.albums.indices {
-            patched.albums[index].tracks.removeAll { removed.contains($0.id) }
-            for song in patched.albums[index].tracks.indices { patched.albums[index].tracks[song].index = song }
-        }
-        patched.albums.removeAll { $0.tracks.isEmpty }
-        replace(with: patched, drive: self.drive)
+        _ = removeConfirmedFiles(removed, sourceID: sourceID, profileSession: session)
         saveCatalogue()
         return report
     }
@@ -894,8 +922,17 @@ public final class LibraryStore {
         return "No folder image or embedded art was found for this album."
     }
 
+    public func mediaSource(for track: Track) -> RemoteMediaSource? {
+        guard let drive, let path = track.path, profiles?.isLocked != true,
+              catalogue.driveID == drive.id, contentSourceID == drive.id,
+              tracksByID[track.id]?.path == path else { return nil }
+        return RemoteMediaSource.resolve(drive: drive, path: path)
+    }
+
     public func streamURL(for track: Track, quality: StreamQuality) -> URL? {
-        guard let drive, let path = track.path else { return nil }
+        guard let drive, let path = track.path, profiles?.isLocked != true,
+              catalogue.driveID == drive.id, contentSourceID == drive.id,
+              tracksByID[track.id]?.path == path else { return nil }
         return drive.streamURL(for: path)
     }
 

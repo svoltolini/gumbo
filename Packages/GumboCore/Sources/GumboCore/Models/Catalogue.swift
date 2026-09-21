@@ -102,16 +102,19 @@ public nonisolated struct Catalogue: Codable, Sendable {
                     isEnriched: false
                 )
                 track.sourceModifiedAt = file.modified?.timeIntervalSince1970
+                track.sourceVersion = file.version
                 // A changed, newly available or missing timestamp schedules a reread. Keep the
                 // last good tags until that read succeeds, including during an explicit reread.
                 // Providers without timestamps use the size/path cache until the user rereads.
                 if let known = previous[file.path] {
                     let needsReread = forceMetadataReread || known.fileSize != file.size
                         || known.sourceModifiedAt != track.sourceModifiedAt
+                        || known.sourceVersion != track.sourceVersion
                     if known.isEnriched {
                         track = known
                         track.fileSize = file.size
                         track.sourceModifiedAt = file.modified?.timeIntervalSince1970
+                        track.sourceVersion = file.version
                         track.normalizeDiscFromAlbumTag()
                     }
                     if needsReread {

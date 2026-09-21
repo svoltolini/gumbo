@@ -108,8 +108,14 @@ struct PlaylistDetailView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else if let credentials = store.credentials(), credentials.matches(playlist) {
+                if credentials.providerKind == .smb {
+                    Text("Keep Gumbo open on your iPhone while songs are prepared. They transfer to your Watch for offline listening.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 Button {
-                    if NASOrigin(url: credentials.baseURL)?.isHTTPS == false, !NASTransportSecurity.isAllowed(credentials.baseURL) {
+                    if credentials.providerKind == .synology, NASOrigin(url: credentials.baseURL)?.isHTTPS == false, !NASTransportSecurity.isAllowed(credentials.baseURL) {
                         pendingHTTPCredentials = credentials
                     } else {
                         Task { await downloads.download(playlist, credentials: credentials) }

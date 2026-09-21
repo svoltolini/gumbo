@@ -156,6 +156,10 @@ struct AlbumView: View {
                     }
                 }
 
+                #if !os(tvOS)
+                ProviderDownloadNotice(topSpacing: 12)
+                #endif
+
                 if album.hasMultipleDiscs {
                     ForEach(album.discs) { disc in
                         discHeader(disc)

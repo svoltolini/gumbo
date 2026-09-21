@@ -2,6 +2,9 @@ import Foundation
 
 /// File Station on a DiskStation, reached through a signed-in DSM session.
 public nonisolated final class SynologyDrive: RemoteDrive {
+    // Protocol support is separate from NAS ACLs: File Station enforces the signed-in account's
+    // rights for each operation. It offers no atomic conditional replacement primitive.
+    public var capabilities: RemoteCapabilities { [.read, .ranges, .backgroundDownload, .upload, .rename, .delete, .replace, .manageAccounts] }
     public let session: DSMSession
     public let displayName: String
     private let urlSession: URLSession

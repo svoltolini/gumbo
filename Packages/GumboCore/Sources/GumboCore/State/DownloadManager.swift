@@ -155,6 +155,8 @@ public nonisolated struct DownloadJob: Codable, Sendable {
     public let ownerTrackCount: Int
     /// A retry is a different transfer, even when it asks for the same NAS file.
     public let attemptID: String
+    public var authentication: DownloadAuthentication?
+    public var requiresForeground = false
 
     public var incomingFileName: String { Self.incomingFileName(cacheKey: cacheKey, attemptID: attemptID) }
 
@@ -181,6 +183,8 @@ public nonisolated struct DownloadJob: Codable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        authentication = try container.decodeIfPresent(DownloadAuthentication.self, forKey: .authentication)
+        requiresForeground = try container.decodeIfPresent(Bool.self, forKey: .requiresForeground) ?? false
         trackID = try container.decode(String.self, forKey: .trackID)
         driveID = try container.decode(String.self, forKey: .driveID)
         fileName = try container.decode(String.self, forKey: .fileName)
@@ -226,6 +230,54 @@ public final class DownloadManager {
     public private(set) var stateRevision: UInt64 = 0
     /// Read from the current catalogue, including when its server is offline.
     public var driveIDProvider: () -> String = { "" }
+    public var remoteSourceProvider: ((Track) -> RemoteDownloadSource?)?
+    public var requiresOpenAppForDownloads = false
+    private var foregroundSources: [String: (drive: any RemoteFileDrive, path: String)] = [:]
+    private var foregroundTask: Task<Void, Never>?
+    private var foregroundAttempt: String?
+    private var foregroundTaskID: UUID?
+    private var foregroundPauseID: UUID?
+    private var foregroundPaused = false
+
+    public func setForegroundDownloadsActive(_ active: Bool) {
+        foregroundPaused = !active
+        if !active {
+            // Keep the reason until this exact task unwinds, even if foregrounding happens first.
+            foregroundPauseID = foregroundTaskID
+            foregroundTask?.cancel()
+        } else { startNextIfIdle() }
+    }
+
+    /// A foreground provider retains its authenticated connection in memory. Revoke that work
+    /// before changing servers or leaving a profile; completed files and retry intent stay local.
+    /// HTTP background tasks have their own persisted authentication and are not changed here.
+    public func revokeForegroundDownloads() {
+        let revoked = jobs.values.filter { $0.requiresForeground }
+        guard !revoked.isEmpty else { return }
+        // Remove every queued source first: settling one job can otherwise start the next song
+        // with credentials whose access is being revoked. The current read is cancelled below.
+        foregroundSources.removeAll()
+        foregroundTask?.cancel()
+        let keys = Set(revoked.map(\.cacheKey))
+        for job in revoked {
+            for (owner, pending) in pendingByOwner where pending.contains(job.cacheKey) {
+                requests[requestKey(ownerID: owner, driveID: job.driveID)]?.cancelled = true
+            }
+            retire(job)
+        }
+        for owner in Array(pendingByOwner.keys) {
+            pendingByOwner[owner]?.subtract(keys)
+            if pendingByOwner[owner]?.isEmpty == true { pendingByOwner[owner] = nil }
+        }
+        for owner in Array(initialPendingOwners.keys) {
+            initialPendingOwners[owner]?.subtract(keys)
+            if initialPendingOwners[owner]?.isEmpty == true { initialPendingOwners[owner] = nil }
+        }
+        // Persist once for the whole queue; one write per song can stall sign-out on large lists.
+        savePendingOwners()
+        startNextIfIdle()
+        refreshActivity(force: true)
+    }
     /// The profile whose downloads the screens show and new downloads belong to.
     public var activeProfileID = "default"
     /// The profiles on this device. Songs owned only by profiles not in this set are surfaced as
@@ -888,7 +940,7 @@ public final class DownloadManager {
             }
             let existing = jobs[key] ?? initialJobs[key]
             let hasLiveTask = tasks[key].map { $0.state == .running || $0.state == .suspended } == true
-            if let existing, (isRestoringTasks || hasLiveTask || simulations[key] != nil), accept(existing) {
+            if let existing, (isRestoringTasks || hasLiveTask || simulations[key] != nil || foregroundSources[key] != nil), accept(existing) {
                 pending.insert(key)
                 continue
             }
@@ -903,9 +955,11 @@ public final class DownloadManager {
                     continue
                 }
             }
+            var remoteSource = remoteSourceProvider?(track)
+            if case .file(let drive, _) = remoteSource, drive.id != driveID { remoteSource = nil }
             let offeredSource = url(track)
             let source = offeredSource.flatMap { isTransportAllowed($0) ? $0 : nil }
-            guard source != nil || (isSample && driveID.isEmpty) else {
+            guard source != nil || remoteSource != nil || (isSample && driveID.isEmpty) else {
                 lastError = offeredSource == nil
                     ? "Connect to your NAS, then try downloading “\(owner.title)” again. Your existing downloads are still available."
                     : "Review the server address in Sign in before downloading. HTTPS is recommended; HTTP requires permission on this device. Your existing downloads are still available."
@@ -922,11 +976,13 @@ public final class DownloadManager {
             if let existing { retire(existing) }
             let attemptID = UUID().uuidString
             let name = Self.fileName(for: track, driveID: driveID)
-            let job = DownloadJob(
+            var job = DownloadJob(
                 ownerID: owner.id, trackID: track.id, driveID: driveID, fileName: attemptID + "-" + name,
                 expectedBytes: track.fileSize, ownerTitle: owner.title, ownerSubtitle: owner.subtitle,
                 trackTitle: track.title, ownerTrackCount: owner.tracks.count, attemptID: attemptID
             )
+            if case .http(_, let authentication) = remoteSource { job.authentication = authentication }
+            if case .file = remoteSource { job.requiresForeground = true }
             jobs[key] = job
             expectedAttempts[key] = job.attemptID
             initialJobs[key] = nil
@@ -937,7 +993,13 @@ public final class DownloadManager {
             pending.insert(key)
             order.append(key)
             queued += 1
-            if let source {
+            if case .http(let request, _) = remoteSource {
+                let task = session.downloadTask(with: request)
+                task.taskDescription = job.encoded
+                tasks[key] = task
+            } else if case .file(let drive, let path) = remoteSource {
+                foregroundSources[key] = (drive, path)
+            } else if let source {
                 let task = session.downloadTask(with: source)
                 task.taskDescription = job.encoded
                 tasks[key] = task
@@ -958,10 +1020,15 @@ public final class DownloadManager {
 
     /// Starts the first waiting task when nothing is running, so files come down one after another.
     private func startNextIfIdle() {
-        guard !isStartingTask, !tasks.values.contains(where: { $0.state == .running }) else { return }
+        guard !isStartingTask, foregroundAttempt == nil, !tasks.values.contains(where: { $0.state == .running }) else { return }
         isStartingTask = true
         defer { isStartingTask = false }
         for trackID in order {
+            if let source = foregroundSources[trackID], let job = jobs[trackID] {
+                guard !foregroundPaused else { continue }
+                startForeground(source, job: job)
+                return
+            }
             guard let task = tasks[trackID], task.state == .suspended else { continue }
             // A task can wait behind many songs after its URL was created. A local permission
             // change must take effect before the next task sends its session credentials.
@@ -979,6 +1046,47 @@ public final class DownloadManager {
             resumeTask(task)
             return
         }
+    }
+
+    private func startForeground(_ source: (drive: any RemoteFileDrive, path: String), job: DownloadJob) {
+        let taskID = UUID()
+        foregroundAttempt = job.attemptID
+        foregroundTaskID = taskID
+        foregroundPauseID = nil
+        progressByKey[job.cacheKey] = 0
+        refreshActivity(force: true)
+        let incoming = cacheDirectory.appending(path: job.incomingFileName)
+        foregroundTask = Task { [weak self] in
+            do {
+                let bytes = try await ForegroundFileTransfer.copy(drive: source.drive, path: source.path, destination: incoming, expectedBytes: job.expectedBytes) { [weak self] fraction in
+                    await self?.update(job: job, fraction: fraction)
+                }
+                guard let self else { try? FileManager.default.removeItem(at: incoming); return }
+                guard clearForeground(taskID: taskID) else { try? FileManager.default.removeItem(at: incoming); return }
+                guard jobs[job.cacheKey]?.attemptID == job.attemptID else { try? FileManager.default.removeItem(at: incoming); startNextIfIdle(); return }
+                finish(job: job, bytes: bytes, status: 200, failure: nil)
+            } catch {
+                guard let self else { return }
+                let pausedForBackground = foregroundPauseID == taskID
+                let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+                guard clearForeground(taskID: taskID) else { return }
+                if cancelled, pausedForBackground, jobs[job.cacheKey]?.attemptID == job.attemptID {
+                    progressByKey[job.cacheKey] = nil
+                    refreshActivity(force: true)
+                } else { fail(job: job, message: cancelled ? nil : error.localizedDescription) }
+                startNextIfIdle()
+            }
+        }
+    }
+
+    /// A delayed callback must not clear the state of a newer foreground transfer.
+    private func clearForeground(taskID: UUID) -> Bool {
+        guard foregroundTaskID == taskID else { return false }
+        foregroundAttempt = nil
+        foregroundTaskID = nil
+        foregroundPauseID = nil
+        foregroundTask = nil
+        return true
     }
 
     private func allowsTransport(for task: URLSessionTask) -> Bool {
@@ -1209,7 +1317,23 @@ public final class DownloadManager {
             guard let job = event.job, jobs[job.cacheKey]?.attemptID == job.attemptID else { return nil }
             return job.cacheKey
         })
-        let activeKeys = Set(tasks.keys).union(simulations.keys).union(completingKeys)
+        let activeKeys = Set(tasks.keys).union(simulations.keys).union(foregroundSources.keys).union(completingKeys)
+        // Foreground transports cannot survive process exit. Keep the requested collection listed
+        // with a retry, instead of silently discarding its unfinished intent during OS enumeration.
+        let interrupted = initialJobs.values.filter { $0.requiresForeground && !activeKeys.contains($0.cacheKey) }
+        for job in interrupted {
+            for id in Array(requests.keys) {
+                guard let request = requests[id], request.driveID == job.driveID, request.keys.contains(job.cacheKey),
+                      records[job.cacheKey]?.owners.contains(request.ownerID) != true else { continue }
+                requests[id]?.errors[job.cacheKey] = "This download was interrupted. Keep Gumbo open and retry to save the missing songs."
+            }
+            for owner in Array(initialPendingOwners.keys) {
+                initialPendingOwners[owner]?.remove(job.cacheKey)
+                if initialPendingOwners[owner]?.isEmpty == true { initialPendingOwners[owner] = nil }
+            }
+            try? FileManager.default.removeItem(at: cacheDirectory.appending(path: job.incomingFileName))
+            retire(job)
+        }
         // A retry requested during enumeration may have temporarily adopted a saved job. Without
         // its OS task it is still only saved intent, not an active download.
         for key in Array(jobs.keys) where !activeKeys.contains(key) {
@@ -1400,6 +1524,8 @@ public final class DownloadManager {
     }
 
     private func retire(_ job: DownloadJob) {
+        if foregroundAttempt == job.attemptID { foregroundTask?.cancel() }
+        foregroundSources[job.cacheKey] = nil
         retiredAttempts.insert(job.attemptID)
         expectedAttempts[job.cacheKey] = nil
         initialJobs[job.cacheKey] = nil
@@ -1562,6 +1688,19 @@ public nonisolated final class DownloadDelegate: NSObject, URLSessionDownloadDel
     private let lock = NSLock()
     private var lastReport: [Int: (fraction: Double, at: Date)] = [:]
 
+    public func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                           completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod != NSURLAuthenticationMethodServerTrust else {
+            completionHandler(.performDefaultHandling, nil); return
+        }
+        guard let authentication = DownloadJob.decode(task.taskDescription)?.authentication,
+              authentication.permits(challenge.protectionSpace, original: task.originalRequest?.url, current: task.currentRequest?.url, failures: challenge.previousFailureCount),
+              let password = KeychainStore.password(for: authentication.keychainAccount) else {
+            completionHandler(.cancelAuthenticationChallenge, nil); return
+        }
+        completionHandler(.useCredential, URLCredential(user: authentication.account, password: password, persistence: .none))
+    }
+
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         guard let job = DownloadJob.decode(downloadTask.taskDescription) else { return }
         let expected = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (job.expectedBytes ?? 0)
@@ -1584,7 +1723,18 @@ public nonisolated final class DownloadDelegate: NSObject, URLSessionDownloadDel
             onError?(job, "This download needs to be requested again.")
             return
         }
+        if let authentication = job.authentication,
+           downloadTask.response?.url.flatMap(NASOrigin.init(url:)) != authentication.origin
+            || downloadTask.response?.url != downloadTask.originalRequest?.url {
+            onError?(job, "The download was redirected. Enter the server's final address, then try again.")
+            return
+        }
         let destination = directory.appending(path: job.incomingFileName)
+        if let version = downloadTask.originalRequest?.value(forHTTPHeaderField: "If-Match"),
+           (downloadTask.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag") != version {
+            onError?(job, "This song changed on the server. Refresh your library, then download it again.")
+            return
+        }
         let bytes = (try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int64) ?? 0
         var failure: String?
         do {

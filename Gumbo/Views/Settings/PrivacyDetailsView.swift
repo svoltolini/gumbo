@@ -14,7 +14,12 @@ struct PrivacyDetailsView: View {
         ]),
         ("Optional genre lookup and file maintenance", [
             "When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for genres. It does not send audio, file paths or NAS sign-in details. You can enter genres yourself without using online lookup.",
-            "Saving reviewed genres writes tags into the original NAS music files. The library owner can permanently delete an album or selected, rechecked damaged files after reviewing and confirming the original files. These changes affect everyone using that NAS; they are different from removing a download from your device."
+            "Saving album, album artist or genre changes edits the original NAS music files. With Synology's built-in editing path, Gumbo downloads each selected file to your device and uploads the rewritten file to your NAS. WebDAV and SMB connections are read-only unless you enable the separate helper for supported tag edits.",
+            "On supported connections, the library owner can permanently delete an album or selected, rechecked damaged files after reviewing and confirming the original files. Tag edits and original-file deletion affect everyone using that NAS; they are different from removing a download from your device."
+        ]),
+        ("Optional metadata helper", [
+            "The library owner can enable a separate helper installed by you or your NAS administrator. Gumbo sends relative file paths, requested album, album artist or genre changes, file fingerprints and job identifiers to the HTTPS address you choose. It does not upload audio or send your NAS password to that address. The helper reads and edits the music files through its own mounted folder.",
+            "The helper's operator controls its access to those files, job records and logs. Its separate access token is saved in this device's Keychain; it is not included in personal sign-in sync or family CloudKit records. The helper is not run by Gumbo, is not needed for listening, and does not enable file deletion."
         ]),
         ("Your sign-in across devices", [
             "On iPhone, iPad and Mac, Sync sign-in with iCloud Keychain is optional and off by default. When enabled, your saved NAS address, account and password sync through Apple’s iCloud Keychain to Gumbo on devices using the same Apple Account with Passwords & Keychain enabled. It does not share your password with your Gumbo family or save it in family CloudKit records.",
@@ -27,8 +32,13 @@ struct PrivacyDetailsView: View {
         ]),
         ("Your devices", [
             "Gumbo stores its catalogue, preferences, covers and downloads on your devices. Downloads are copies: removing them in Gumbo does not delete the original music on your NAS. Apple TV may clear cached data to recover space.",
-            "The paired Watch can receive playlist metadata, small cover thumbnails from your library, colours for playlist mosaics, and your current NAS address, account and password from your iPhone, then download music from the NAS. The password is saved in the Watch Keychain. Cover thumbnails stay on your devices and are used by the Watch player; they are not uploaded to a Gumbo service. Widgets, Now Playing, AirPlay and CarPlay use the information needed to show and control playback.",
+            "Widgets, Now Playing, AirPlay and CarPlay use the information needed to show and control playback.",
             "Face ID and Touch ID are handled by the operating system. Gumbo receives an authentication result, not your biometric data."
+        ]),
+        ("Apple Watch", [
+            "Your paired Watch can receive playlist metadata, small cover thumbnails and colours for playlist mosaics from your iPhone. For Synology and HTTPS WebDAV connections, it can also receive the server address, account and password to download music directly. The password is saved in the Watch Keychain.",
+            "For SMB shared folders, Gumbo prepares songs on a reachable iPhone with the app open, then sends the audio files to your Watch through Apple's WatchConnectivity for local playback. The Watch does not connect directly to SMB or receive the SMB account or password. Transfer timing is controlled by the operating system.",
+            "These transfers are between your devices; audio and cover thumbnails are not uploaded to a Gumbo service. A disconnected Watch may keep existing downloads until it reconnects and receives library or access changes."
         ]),
         ("Diagnostics and choices", [
             "Gumbo includes no advertising or third-party analytics SDK. Gumbo does not automatically send its diagnostic log to the developer. It may be included in device backups or shared if you copy it. The log can contain profile names, server details and error information. You can clear it from Diagnostics.",

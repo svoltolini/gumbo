@@ -44,6 +44,8 @@ struct GumboTVApp: App {
         // Nothing is kept on a television; the manager only exists so the shared screens have one.
         let downloads = DownloadManager()
         downloads.driveIDProvider = { [library] in library.catalogue.driveID }
+        downloads.remoteSourceProvider = { [model] in model.downloadSource(for: $0) }
+        model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
         downloads.activeProfileID = profiles.lastActiveID ?? profiles.owner?.id ?? "default"
         // Persist download membership changes to iCloud via the profile state (TV doesn't keep files, but membership syncs).
         downloads.onMembershipChanged = { [profiles] driveID, albumIDs, playlistIDs in
@@ -60,7 +62,7 @@ struct GumboTVApp: App {
             }
         }
 
-        player.streamURLProvider = { [library, model] track in library.streamURL(for: track, quality: model.quality) }
+        player.mediaSourceProvider = { [library, downloads] track in downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track) }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }
@@ -83,6 +85,7 @@ struct GumboTVApp: App {
             player.applySettings(repeatMode: PlayerModel.RepeatMode(rawValue: settings.repeatMode) ?? .off, shuffle: settings.shuffle)
         }
         profiles.onDeactivate = { [player, library, downloads] in
+            downloads.revokeForegroundDownloads()
             player.stop()
             library.metadataWriter.cancel()
             downloads.activeProfileID = "locked"
@@ -131,6 +134,7 @@ struct GumboTVApp: App {
                 .preferredColorScheme(model.appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
                     model.scenePhaseChanged(phase)
+                    downloads.setForegroundDownloadsActive(phase != .background)
                     if phase == .active { Task { await cloud.refresh(reason: "foreground") } }
                     if phase == .background { profiles.flushSave() }
                 }

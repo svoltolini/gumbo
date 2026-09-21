@@ -68,9 +68,8 @@ nonisolated struct SyncedServerCredentialKeychain: Sendable {
     private func query(for connection: ServerConnection) -> [String: Any]? {
         guard isSupported,
               let accessGroup, !accessGroup.isEmpty, !accessGroup.contains("$("),
-              let origin = NASOrigin(url: connection.baseURL),
               !connection.account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let key = try? JSONEncoder().encode([origin.identifier, connection.account]) else { return nil }
+              let key = credentialKey(for: connection) else { return nil }
         // A structured encoding avoids delimiter collisions and keeps the account's case intact.
         // URL paths, display names and music folders are not authentication boundaries.
         return [
@@ -81,6 +80,16 @@ nonisolated struct SyncedServerCredentialKeychain: Sendable {
             kSecAttrSynchronizable as String: true,
             kSecUseDataProtectionKeychain as String: true,
         ]
+    }
+
+    private func credentialKey(for connection: ServerConnection) -> Data? {
+        if connection.providerKind == .synology {
+            guard let origin = NASOrigin(url: connection.baseURL) else { return nil }
+            // Preserve the exact existing iCloud Keychain account for DSM users.
+            return try? JSONEncoder().encode([origin.identifier, connection.account])
+        }
+        guard connection.provider != nil else { return nil }
+        return try? JSONEncoder().encode(["provider-v1", connection.sourceID, connection.account])
     }
 
     func save(password: String, for connection: ServerConnection) -> Bool {

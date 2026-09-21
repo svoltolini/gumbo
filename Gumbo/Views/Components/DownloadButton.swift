@@ -144,3 +144,20 @@ private struct Burst: View {
         .allowsHitTesting(false)
     }
 }
+
+/// Explain the foreground-only transport before someone starts a large SMB download.
+struct ProviderDownloadNotice: View {
+    var topSpacing: CGFloat = 0
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if model.downloadsRequireOpenApp {
+            Label("Keep Gumbo open while downloading from this connection. Finished songs work offline.", systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, topSpacing)
+        }
+    }
+}

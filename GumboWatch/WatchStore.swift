@@ -24,9 +24,13 @@ final class WatchStore: NSObject, WCSessionDelegate {
     private static let accountKey = "watch.account"
     private static let baseURLKey = "watch.baseURL"
     private static let driveIDKey = "watch.driveID"
+    private static let providerDescriptorKey = "watch.providerConnection.v2"
 
     override init() {
         super.init()
+        WatchDownloads.shared.credentialsProvider = { [weak self] in self?.credentials() }
+        WatchDownloads.shared.relayRequest = { [weak self] request in self?.requestAudio(request) }
+        WatchDownloads.shared.relayCancellation = { [weak self] request in self?.cancelAudio(request) }
         authorization = WatchAuthorization.decode(UserDefaults.standard.data(forKey: Self.authorizationKey)) ?? authorization
         WatchPlayer.shared.setAuthorization(authorization)
         guard authorization.isGranted else {
@@ -70,9 +74,11 @@ final class WatchStore: NSObject, WCSessionDelegate {
         if let account = defaults.string(forKey: Self.accountKey) {
             KeychainStore.delete(account: "watch|\(account)")
         }
+        if let driveID = defaults.string(forKey: Self.driveIDKey) { KeychainStore.delete(account: "watch.v2|\(driveID)") }
         defaults.removeObject(forKey: Self.accountKey)
         defaults.removeObject(forKey: Self.baseURLKey)
         defaults.removeObject(forKey: Self.driveIDKey)
+        defaults.removeObject(forKey: Self.providerDescriptorKey)
         defaults.removeObject(forKey: Self.credentialsRevisionKey)
         defaults.removeObject(forKey: Self.catalogueRevisionKey)
         hasCredentials = false
@@ -94,7 +100,17 @@ final class WatchStore: NSObject, WCSessionDelegate {
     func credentials() -> WatchCredentials? {
         let defaults = UserDefaults.standard
         guard authorization.isGranted,
-              defaults.string(forKey: Self.credentialsRevisionKey) == String(authorization.revision),
+              defaults.string(forKey: Self.credentialsRevisionKey) == String(authorization.revision) else { return nil }
+        if let data = defaults.data(forKey: Self.providerDescriptorKey) {
+            guard var credentials = try? JSONDecoder().decode(WatchCredentials.self, from: data),
+                  let driveID = credentials.driveID else { return nil }
+            if credentials.providerKind != .smb {
+                guard let password = KeychainStore.password(for: "watch.v2|\(driveID)") else { return nil }
+                credentials.password = password
+            }
+            return credentials.isUsable ? credentials : nil
+        }
+        guard
               let account = defaults.string(forKey: Self.accountKey),
               let base = defaults.string(forKey: Self.baseURLKey), let url = URL(string: base),
               let password = KeychainStore.password(for: "watch|\(account)") else { return nil }
@@ -114,13 +130,16 @@ final class WatchStore: NSObject, WCSessionDelegate {
             let account = reply["account"] as? String
             let password = reply["password"] as? String
             let driveID = reply["driveID"] as? String
+            let providerData = reply["providerConnectionV2"] as? Data
             Task { @MainActor in
                 guard self.accept(authorizationData) else { return }
                 DiagnosticsLog.shared.record("Watch: sync answered, status \(status), \(packed?.count ?? 0) bytes")
                 if let packed, let data = try? (packed as NSData).decompressed(using: .lzfse) as Data {
                     self.apply(catalogueData: data)
                 }
-                if let base, let url = URL(string: base), let account, let password {
+                if let providerData {
+                    if let credentials = try? JSONDecoder().decode(WatchCredentials.self, from: providerData) { self.apply(credentials: credentials) }
+                } else if let base, let url = URL(string: base), let account, let password {
                     self.apply(credentials: WatchCredentials(baseURL: url, account: account, password: password, driveID: driveID))
                 }
             }
@@ -180,14 +199,29 @@ final class WatchStore: NSObject, WCSessionDelegate {
     }
 
     private func apply(credentials: WatchCredentials) {
+        guard credentials.isUsable else { return }
         let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: Self.credentialsRevisionKey)
+        hasCredentials = false
         if let previous = defaults.string(forKey: Self.accountKey), previous != credentials.account {
             KeychainStore.delete(account: "watch|\(previous)")
         }
         defaults.set(credentials.account, forKey: Self.accountKey)
         defaults.set(credentials.baseURL.absoluteString, forKey: Self.baseURLKey)
         defaults.set(credentials.driveID, forKey: Self.driveIDKey)
-        KeychainStore.save(password: credentials.password, for: "watch|\(credentials.account)")
+        if credentials.provider != nil, let driveID = credentials.driveID {
+            if credentials.providerKind != .smb {
+                KeychainStore.save(password: credentials.password, for: "watch.v2|\(driveID)")
+                guard KeychainStore.password(for: "watch.v2|\(driveID)") == credentials.password else { return }
+            }
+            var descriptor = credentials
+            descriptor.password = ""
+            defaults.set(try? JSONEncoder().encode(descriptor), forKey: Self.providerDescriptorKey)
+        } else {
+            defaults.removeObject(forKey: Self.providerDescriptorKey)
+            KeychainStore.save(password: credentials.password, for: "watch|\(credentials.account)")
+            guard KeychainStore.password(for: "watch|\(credentials.account)") == credentials.password else { return }
+        }
         defaults.set(String(authorization.revision), forKey: Self.credentialsRevisionKey)
         hasCredentials = true
     }
@@ -202,6 +236,18 @@ final class WatchStore: NSObject, WCSessionDelegate {
         // The file lives only for the length of this call: read it here, decode on the main actor.
         let authorizationData = file.metadata?["authorization"] as? Data
         let kind = file.metadata?["kind"] as? String ?? "?"
+        if kind == "audioV2", let request = WatchAudioRelayRequest.decode(file.metadata?["request"] as? Data) {
+            // WCSession's incoming URL expires after this delegate returns. Move only to a fresh
+            // staging path here; authorization and ownership are checked before accepting it.
+            let staged = FileManager.default.temporaryDirectory.appending(path: "watch-audio-\(UUID().uuidString)")
+            guard (try? FileManager.default.copyItem(at: file.fileURL, to: staged)) != nil else { return }
+            Task { @MainActor in
+                defer { try? FileManager.default.removeItem(at: staged) }
+                guard WatchAuthorization.decode(authorizationData) == self.authorization, self.authorization.isGranted else { return }
+                WatchDownloads.shared.receiveRelay(request, file: staged)
+            }
+            return
+        }
         let data = try? Data(contentsOf: file.fileURL)
         Task { @MainActor in
             DiagnosticsLog.shared.record("Watch: file arrived, kind \(kind), \(data?.count ?? -1) bytes")
@@ -224,6 +270,21 @@ final class WatchStore: NSObject, WCSessionDelegate {
             Task { @MainActor in _ = self.accept(authorizationData) }
             return
         }
+        if kind == "audioFailureV2", let request = WatchAudioRelayRequest.decode(userInfo["request"] as? Data) {
+            Task { @MainActor in
+                guard WatchAuthorization.decode(authorizationData) == self.authorization, self.authorization.isGranted else { return }
+                WatchDownloads.shared.failRelay(request)
+            }
+            return
+        }
+        if kind == "providerConnectionV2", let data = userInfo["providerConnectionV2"] as? Data,
+           let credentials = try? JSONDecoder().decode(WatchCredentials.self, from: data) {
+            Task { @MainActor in
+                guard self.accept(authorizationData) else { return }
+                self.apply(credentials: credentials)
+            }
+            return
+        }
         guard kind == "credentials",
               let base = userInfo["baseURL"] as? String, let url = URL(string: base),
               let account = userInfo["account"] as? String, let password = userInfo["password"] as? String else { return }
@@ -232,5 +293,31 @@ final class WatchStore: NSObject, WCSessionDelegate {
             guard self.accept(authorizationData) else { return }
             self.apply(credentials: credentials)
         }
+    }
+
+    private func requestAudio(_ request: WatchAudioRelayRequest) {
+        guard authorization.isGranted, WCSession.default.activationState == .activated else {
+            WatchDownloads.shared.failRelay(request); return
+        }
+        let grant = authorization
+        let payload: [String: Any] = ["kind": "requestAudioV2", "request": request.encoded!, "authorization": grant.encoded!]
+        guard WCSession.default.isReachable else { WatchDownloads.shared.failRelay(request); return }
+        WCSession.default.sendMessage(payload, replyHandler: { @Sendable response in
+            let accepted = response["accepted"] as? Bool == true
+            Task { @MainActor in
+                guard grant == self.authorization else { return }
+                if !accepted { WatchDownloads.shared.failRelay(request) }
+            }
+        }, errorHandler: { @Sendable _ in
+            Task { @MainActor in if grant == self.authorization { WatchDownloads.shared.failRelay(request) } }
+        })
+    }
+
+    private func cancelAudio(_ request: WatchAudioRelayRequest) {
+        guard authorization.isGranted, WCSession.default.activationState == .activated else { return }
+        let payload: [String: Any] = ["kind": "cancelAudioV2", "request": request.encoded!, "authorization": authorization.encoded!]
+        // Queued cancellation remains effective even if the devices lose reachability.
+        _ = WCSession.default.transferUserInfo(payload)
+        if WCSession.default.isReachable { WCSession.default.sendMessage(payload, replyHandler: nil, errorHandler: nil) }
     }
 }

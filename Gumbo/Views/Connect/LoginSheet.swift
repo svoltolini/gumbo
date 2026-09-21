@@ -1,7 +1,7 @@
 import GumboCore
 import SwiftUI
 
-/// DSM account sign-in for a chosen server.
+/// Account sign-in for the selected NAS service.
 struct LoginSheet: View {
     let server: DiscoveredServer
     @Environment(AppModel.self) private var model
@@ -21,7 +21,7 @@ struct LoginSheet: View {
                 Section {
                     LabeledContent("Server", value: server.name)
                     LabeledContent("Address", value: server.address)
-                    NASTransportChoice(url: server.baseURL, httpAllowed: $httpAllowed) {
+                    NASTransportChoice(server: server, httpAllowed: $httpAllowed) {
                         guard let url = NASTransportSecurity.httpsAlternative(for: server.baseURL) else { return }
                         model.select(DiscoveredServer(name: server.name, baseURL: url, model: server.model))
                     }
@@ -54,10 +54,10 @@ struct LoginSheet: View {
                             .accessibilityIdentifier("signIn.syncCredentials")
                     }
                 } header: {
-                    Text("DSM account")
+                    Text(server.providerKind == .synology ? "DSM account" : "NAS account")
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Signs in with your DiskStation account. Nothing needs to be installed on the NAS.")
+                        Text(server.signInExplanation)
                         if model.supportsCredentialSync {
                             Text("Optional sign-in sync uses iCloud Keychain on your iPhone, iPad and Mac with the same Apple Account. It does not share your password with your Gumbo family. Turn on Passwords & Keychain in iCloud settings on each device.")
                         }
@@ -96,7 +96,7 @@ struct LoginSheet: View {
                 if let familyAccount = model.pendingFamilyAccount {
                     account = familyAccount
                     password = model.pendingFamilyPassword ?? ""
-                } else if let connection = model.connection, NASOrigin(url: connection.baseURL) == NASOrigin(url: server.baseURL) {
+                } else if let connection = model.connection, server.matches(connection: connection) {
                     account = connection.account
                     if let storedPassword = model.pendingReconnectPassword {
                         password = storedPassword
@@ -141,18 +141,30 @@ struct LoginSheet: View {
     }
 
     private var transportAllowed: Bool {
-        NASOrigin(url: server.baseURL)?.isHTTPS == true || httpAllowed
+        server.allowsSignIn(httpAllowed: httpAllowed)
     }
 }
 
 /// A local choice made before credentials are sent. Merely displaying an HTTP address grants nothing.
 struct NASTransportChoice: View {
-    let url: URL
+    let server: DiscoveredServer
+    private var url: URL { server.baseURL }
     @Binding var httpAllowed: Bool
     let useHTTPS: () -> Void
 
     var body: some View {
-        if NASOrigin(url: url)?.isHTTPS == false {
+        if server.providerKind == .smb {
+            VStack(alignment: .leading, spacing: 5) {
+                Label(server.provider?.requiresEncryption != false ? "Encrypted SMB required" : "Signed SMB required",
+                      systemImage: server.provider?.requiresEncryption != false ? "lock.fill" : "checkmark.shield")
+                    .font(.footnote)
+                if server.provider?.requiresEncryption == false {
+                    Text("Signing protects against changes in transit; it does not encrypt your music. Use a trusted private connection.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } else if server.providerKind == .synology, NASOrigin(url: url)?.isHTTPS == false {
             VStack(alignment: .leading, spacing: 8) {
                 Label("HTTP sends credentials in cleartext", systemImage: "exclamationmark.lock.open")
                     .foregroundStyle(.red)
@@ -176,10 +188,36 @@ struct NASTransportChoice: View {
                 ))
                 .font(.footnote)
             }
-        } else {
+        } else if NASOrigin(url: url)?.isHTTPS == true {
             Label("Encrypted connection (HTTPS)", systemImage: "lock.fill")
                 .foregroundStyle(.green)
                 .font(.footnote)
+        }
+    }
+}
+
+// Shared with the native Mac setup. A nil HTTP origin must never match two SMB connections.
+extension DiscoveredServer {
+    func matches(connection: ServerConnection) -> Bool {
+        guard providerKind == connection.providerKind else { return false }
+        if let provider { return provider.sourceID(account: connection.account) == connection.sourceID }
+        guard providerKind == .synology, let origin = NASOrigin(url: baseURL) else { return false }
+        return origin == NASOrigin(url: connection.baseURL)
+    }
+
+    func allowsSignIn(httpAllowed: Bool) -> Bool {
+        switch providerKind {
+        case .smb: return provider?.kind == .smb
+        case .webDAV: return provider?.kind == .webDAV && baseURL.scheme?.lowercased() == "https"
+        case .synology: return NASOrigin(url: baseURL)?.isHTTPS == true || httpAllowed
+        }
+    }
+
+    var signInExplanation: String {
+        switch providerKind {
+        case .synology: "Sign in with your DSM account. Gumbo reads your music through File Station."
+        case .webDAV: "Use a NAS account with permission to read this WebDAV folder. WebDAV must already be enabled on your server."
+        case .smb: "Use a NAS account with permission to read this shared folder. SMB 2 or 3 must already be enabled on your server."
         }
     }
 }

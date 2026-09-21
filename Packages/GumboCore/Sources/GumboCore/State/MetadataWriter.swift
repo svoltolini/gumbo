@@ -67,8 +67,14 @@ public final class MetadataWriter {
     public private(set) var total = 0
     public private(set) var currentTitle: String?
     private var job: Task<MetadataWriteReport, Never>?
+    private let helperClientFactory: (TagServiceConfiguration) throws -> RemoteTagService
 
-    public init() {}
+    public init() { helperClientFactory = { try $0.client() } }
+
+    /// Network fixtures avoid reading real helper tokens from the Keychain.
+    init(helperClientFactory: @escaping (TagServiceConfiguration) throws -> RemoteTagService) {
+        self.helperClientFactory = helperClientFactory
+    }
 
     public var progress: Double { total > 0 ? Double(completed) / Double(total) : 0 }
 
@@ -77,7 +83,7 @@ public final class MetadataWriter {
         job?.cancel()
     }
 
-    public func write(_ edits: TagEdits, to tracks: [Track], drive: any WritableRemoteDrive, onlyIfGenreMissing: Bool = false, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async -> MetadataWriteReport {
+    public func write(_ edits: TagEdits, to tracks: [Track], drive: any RemoteDrive, onlyIfGenreMissing: Bool = false, helper: TagServiceConfiguration? = nil, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async -> MetadataWriteReport {
         guard !isWriting else {
             var report = MetadataWriteReport()
             report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: MetadataWriteError.busy.localizedDescription) }
@@ -91,11 +97,150 @@ public final class MetadataWriter {
             isWriting = false
             currentTitle = nil
         }
-        let job = Task { await run(edits, tracks: tracks, drive: drive, onlyIfGenreMissing: onlyIfGenreMissing, authorized: authorized) }
+        let job = Task {
+            if let helper {
+                return await runRemote(edits, tracks: tracks, drive: drive, configuration: helper, onlyIfGenreMissing: onlyIfGenreMissing, authorized: authorized)
+            }
+            guard let writable = drive as? any WritableRemoteDrive, drive.capabilities.supportsTagReplacement else {
+                var report = MetadataWriteReport()
+                report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: RemoteWriteError.unsupported.localizedDescription) }
+                return report
+            }
+            return await run(edits, tracks: tracks, drive: writable, onlyIfGenreMissing: onlyIfGenreMissing, authorized: authorized)
+        }
         self.job = job
         let report = await job.value
         if self.job == job { self.job = nil }
         return report
+    }
+
+    private func runRemote(_ edits: TagEdits, tracks: [Track], drive: any RemoteDrive, configuration: TagServiceConfiguration,
+                           onlyIfGenreMissing: Bool, authorized: @escaping @MainActor @Sendable () -> Bool) async -> MetadataWriteReport {
+        var report = MetadataWriteReport()
+        guard !edits.isEmpty else { return report }
+        do {
+            guard configuration.sourceID == drive.id else { throw MetadataWriteError.notAuthorized }
+            let client = try helperClientFactory(configuration)
+            _ = try await client.capabilities()
+            for track in tracks {
+                if Task.isCancelled { report.wasCancelled = true; break }
+                currentTitle = track.title
+                do {
+                    guard authorized(), let path = track.path else { throw MetadataWriteError.notAuthorized }
+                    let relative = try configuration.relativePath(path)
+                    let before = try await client.stat(path: relative)
+                    guard track.fileSize == nil || track.fileSize == before.expected.size else { throw RemoteWriteError.changed }
+                    if let modified = track.sourceModifiedAt, modified.isFinite, modified >= 0 {
+                        guard floor(modified) == floor(Double(before.expected.mtimeNs) / 1_000_000_000) else { throw RemoteWriteError.changed }
+                    }
+                    try Task.checkCancellation()
+                    guard authorized() else { throw MetadataWriteError.notAuthorized }
+                    let edit = RemoteTagService.Edit(path: relative, expected: before.expected,
+                        changes: .init(album: edits.albumValue(replacing: before.fields.album), albumArtist: edits.albumArtist, genre: edits.genre), onlyIfGenreMissing: onlyIfGenreMissing)
+                    let outcome = try await Self.remoteEdit(client, edit: edit, authorized: authorized)
+                    switch outcome.status {
+                    case .succeeded, .unchanged:
+                        guard let after = outcome.after else { throw RemoteTagService.Error.invalidResponse }
+                        var updated = track
+                        updated.albumTitleTag = after.fields.album
+                        updated.albumArtistTag = after.fields.albumArtist
+                        updated.genreTag = after.fields.genre
+                        updated.fileSize = after.size
+                        updated.sourceModifiedAt = Double(after.mtimeNs) / 1_000_000_000
+                        updated.sourceVersion = nil
+                        updated.normalizeDiscFromAlbumTag()
+                        if outcome.status == .succeeded { report.written.append(updated) }
+                        else { report.unchanged.append(updated) }
+                    case .cancelled: report.wasCancelled = true
+                    default:
+                        throw RemoteTagService.Error.service(code: outcome.error?.code ?? "unconfirmed",
+                            message: outcome.error?.message ?? "The helper couldn't confirm this edit. Refresh song information before trying again.")
+                    }
+                } catch {
+                    if Task.isCancelled || error is CancellationError { report.wasCancelled = true }
+                    // A failed helper is never followed by a whole-file upload: its earlier request may have committed.
+                    report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title, message: error.localizedDescription))
+                    if Task.isCancelled { break }
+                    if case RemoteTagService.Error.service(let code, _) = error,
+                       ["unconfirmed", "recovery_required", "recovery_needed"].contains(code) { break }
+                }
+                completed += 1
+            }
+        } catch {
+            report.failures = tracks.map { MetadataWriteFailure(trackID: $0.id, title: $0.title, message: error.localizedDescription) }
+        }
+        return report
+    }
+
+    private static func remoteEdit(_ client: RemoteTagService, edit: RemoteTagService.Edit,
+                                   authorized: @escaping @MainActor @Sendable () -> Bool) async throws -> RemoteTagService.FileOutcome {
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            var job: RemoteTagService.Job
+            do { job = try await client.submit(jobID: id, files: [edit]) }
+            catch {
+                // Only transport/invalid-response failures may hide a committed submission.
+                // Preserve deterministic request/auth failures instead of masking them with a status lookup.
+                guard error is CancellationError || (error as? RemoteTagService.Error) == .unavailable
+                    || (error as? RemoteTagService.Error) == .invalidResponse else { throw error }
+                do { job = try await Task.detached { try await client.status(jobID: id) }.value }
+                catch {
+                    job = try await terminalAfterCancellation(client, jobID: id,
+                        message: "The helper couldn't confirm whether this edit started. Refresh song information before retrying.")
+                }
+            }
+            let deadline = ContinuousClock.now + .seconds(120)
+            var cancellationSent = false
+            while !job.status.isTerminal {
+                if Task.isCancelled || !authorized() {
+                    if !cancellationSent {
+                        do { job = try await Task.detached { try await client.cancel(jobID: id) }.value }
+                        catch {
+                            throw RemoteTagService.Error.service(code: "unconfirmed", message: "The helper couldn't confirm that this edit stopped. Further edits have stopped. Refresh song information before trying again.")
+                        }
+                        cancellationSent = true
+                    }
+                }
+                if job.status.isTerminal { break }
+                guard ContinuousClock.now < deadline else {
+                    job = try await terminalAfterCancellation(client, jobID: id,
+                        message: "The helper is still working or its response was lost. Refresh song information before retrying this edit.")
+                    break
+                }
+                do {
+                    job = try await Task.detached {
+                        try await Task.sleep(for: .milliseconds(250))
+                        return try await client.status(jobID: id)
+                    }.value
+                } catch {
+                    job = try await terminalAfterCancellation(client, jobID: id,
+                        message: "Contact with the helper was lost during this edit. Further edits have stopped. Refresh song information before trying again.")
+                }
+            }
+            guard !job.dryRun, job.files.count == 1, let outcome = job.files.first, outcome.path == edit.path else {
+                throw RemoteTagService.Error.service(code: "unconfirmed", message: "The helper returned an unexpected result. Refresh song information before trying again.")
+            }
+            if outcome.status == .succeeded {
+                guard let fields = outcome.after?.fields,
+                      edit.changes.album.map({ $0 == fields.album }) ?? true,
+                      edit.changes.albumArtist.map({ $0 == fields.albumArtist }) ?? true,
+                      edit.changes.genre.map({ $0 == fields.genre }) ?? true else {
+                    throw RemoteTagService.Error.service(code: "unconfirmed", message: "The helper couldn't verify the requested tags. Refresh song information before trying again.")
+                }
+            }
+            return outcome
+        } onCancel: {
+            Task.detached { _ = try? await client.cancel(jobID: id) }
+        }
+    }
+
+    /// Cancellation is also a final status query: a committed file must still be accounted for.
+    /// A running/unknown response is not proof that the NAS file was left untouched.
+    private static func terminalAfterCancellation(_ client: RemoteTagService, jobID: UUID,
+                                                  message: String) async throws -> RemoteTagService.Job {
+        if let job = try? await Task.detached(operation: { try await client.cancel(jobID: jobID) }).value,
+           job.status.isTerminal { return job }
+        throw RemoteTagService.Error.service(code: "unconfirmed", message: message)
     }
 
     private func run(_ edits: TagEdits, tracks: [Track], drive: any WritableRemoteDrive, onlyIfGenreMissing: Bool = false, authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async -> MetadataWriteReport {
@@ -158,12 +303,14 @@ public final class MetadataWriter {
     @concurrent nonisolated static func rewrite(track: Track, edits: TagEdits, drive: any WritableRemoteDrive, scratch: URL,
                                                onlyIfGenreMissing: Bool = false,
                                                authorized: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> RewriteResult {
+        guard drive.capabilities.supportsTagReplacement else { throw RemoteWriteError.unsupported }
         guard let path = track.path else { throw MetadataWriteError.noFile }
         let name = (path as NSString).lastPathComponent
         let ext = (name as NSString).pathExtension.lowercased()
         guard TagWriter.supports(fileName: name) else { throw TagWriteError.unsupportedFormat(ext) }
         let remote = try await drive.info(path)
         guard !remote.isDirectory, let size = remote.size, size > 0, remote.modified != nil else { throw RemoteWriteError.incompleteTransfer }
+        if let version = track.sourceVersion, version != remote.version { throw RemoteWriteError.changed }
         if onlyIfGenreMissing {
             // The suggestion belonged to the reviewed album. A different file may now occupy
             // that path; require a library refresh instead of classifying its replacement.
@@ -189,6 +336,7 @@ public final class MetadataWriter {
             current.genreTag = before.genre
             current.fileSize = remote.size
             current.sourceModifiedAt = remote.modified?.timeIntervalSince1970
+            current.sourceVersion = remote.version
             return RewriteResult(track: current, changed: false)
         }
         guard try TagWriter.rewrite(edits: edits, fileName: name, source: original, destination: patched) else {
@@ -199,6 +347,7 @@ public final class MetadataWriter {
             current.normalizeDiscFromAlbumTag()
             current.fileSize = remote.size
             current.sourceModifiedAt = remote.modified?.timeIntervalSince1970
+            current.sourceVersion = remote.version
             return RewriteResult(track: current, changed: false)
         }
         let newSize = try localSize(patched)
@@ -223,6 +372,7 @@ public final class MetadataWriter {
         }
         updated.fileSize = newSize
         updated.sourceModifiedAt = modified.timeIntervalSince1970
+        updated.sourceVersion = nil
         return RewriteResult(track: updated, changed: true)
     }
 

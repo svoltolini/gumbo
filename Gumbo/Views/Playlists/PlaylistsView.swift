@@ -154,6 +154,21 @@ struct PlaylistCard: View {
     }
 }
 
+/// A menu or confirmation can remain open while the library or profile changes.
+private struct PlaylistDownloadRequest {
+    let playlist: Playlist
+    let owner: DownloadOwner
+    let sourceID: String
+    let profileID: String?
+    let sessionID: UUID?
+
+    func isCurrent(library: LibraryStore, profiles: ProfileStore, downloads: DownloadManager) -> Bool {
+        sessionID != nil && profiles.sessionID == sessionID && profiles.activeID == profileID
+            && library.catalogue.driveID == sourceID && library.contentSourceID == sourceID
+            && library.playlist(id: playlist.id) == playlist && downloads.owner(for: playlist) == owner
+    }
+}
+
 /// Songs of one playlist with play and shuffle. Your own playlists can be renamed or deleted here.
 struct PlaylistDetailView: View {
     let playlist: Playlist
@@ -166,6 +181,7 @@ struct PlaylistDetailView: View {
     @State private var renameText = ""
     @State private var isConfirmingDelete = false
     @State private var isConfirmingRemoval = false
+    @State private var removalRequest: PlaylistDownloadRequest?
     @Environment(\.dismiss) private var dismiss
 
     /// The playlist as it is right now, since favourites and contents change while the page is open.
@@ -217,6 +233,12 @@ struct PlaylistDetailView: View {
                     }
                     .disabled(playlist.tracks.isEmpty)
                 }
+
+                #if !os(tvOS)
+                if canDownload {
+                    ProviderDownloadNotice(topSpacing: 12)
+                }
+                #endif
 
                 if playlist.tracks.isEmpty {
                     EmptyStateView(title: emptyTitle, systemImage: emptySymbol, message: emptyDescription, centered: false)
@@ -284,18 +306,22 @@ extension PlaylistDetailView {
     /// Same control as on an album: songs already downloaded for an album are shared, not fetched again.
     private func downloadButton(for playlist: Playlist) -> some View {
         let owner = downloads.owner(for: playlist)
+        let request = PlaylistDownloadRequest(playlist: playlist, owner: owner, sourceID: library.catalogue.driveID,
+                                              profileID: profiles.activeID, sessionID: profiles.sessionID)
         return DownloadStateReader(owner: owner) { state in
             if let state {
                 DownloadButton(state: state) {
+                    guard request.isCurrent(library: library, profiles: profiles, downloads: downloads) else { return }
                     switch state {
                     case .none, .failed, .partial, .cancelled:
-                        downloads.download(owner, driveID: library.catalogue.driveID, isSample: library.isDemo) {
+                        downloads.download(owner, driveID: request.sourceID, isSample: library.isDemo) {
                             track in
                             library.streamURL(for: track, quality: .original)
                         }
                     case .downloading:
                         downloads.cancel(owner)
                     case .downloaded:
+                        removalRequest = request
                         isConfirmingRemoval = true
                     }
                 }
@@ -307,7 +333,12 @@ extension PlaylistDetailView {
             "Remove this playlist from your \(Device.noun)?", isPresented: $isConfirmingRemoval,
             titleVisibility: .visible
         ) {
-            Button("Remove Download", role: .destructive) { downloads.remove(owner) }
+            Button("Remove Download", role: .destructive) {
+                guard let request = removalRequest else { return }
+                removalRequest = nil
+                guard request.isCurrent(library: library, profiles: profiles, downloads: downloads) else { return }
+                downloads.remove(request.owner)
+            }
         } message: {
             Text("The playlist stays; songs a downloaded album still needs are kept.")
         }

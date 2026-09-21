@@ -144,6 +144,8 @@ struct GumboApp: App {
         AppDelegate.player = player
         let downloads = DownloadManager()
         downloads.driveIDProvider = { [library] in library.catalogue.driveID }
+        downloads.remoteSourceProvider = { [model] in model.downloadSource(for: $0) }
+        model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
         // Downloads from before profiles existed belong to the first profile.
         if !UserDefaults.standard.bool(forKey: "downloads.ownersScoped"), let owner = profiles.owner {
             downloads.adoptLegacyOwners(into: owner.id)
@@ -190,8 +192,8 @@ struct GumboApp: App {
         }
         library.onContentChanged = reconcileDownloads
         // A song on this iPhone plays from disk, whether or not the server is reachable.
-        player.streamURLProvider = { [library, model, downloads] track in
-            downloads.localURL(for: track) ?? library.streamURL(for: track, quality: model.quality)
+        player.mediaSourceProvider = { [library, downloads] track in
+            downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track)
         }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
@@ -218,6 +220,7 @@ struct GumboApp: App {
             widgetFeed.refresh()
         }
         profiles.onDeactivate = { [model, player, library, downloads, widgetFeed, watchBridge] in
+            downloads.revokeForegroundDownloads()
             player.stop()
             library.metadataWriter.cancel()
             // The picker must not have the player sheet, with its favourite and playlist buttons, over it.
@@ -258,6 +261,29 @@ struct GumboApp: App {
             let profileName = active.name
             let catalogue = library.watchCatalogue(serverName: model.connection?.name ?? "Gumbo", profileName: profileName)
             return (catalogue, model.watchCredentials(), "\(profiles.sessionID?.uuidString ?? "locked")|\(library.catalogue.driveID)|\(library.catalogue.rootPath)")
+        }
+        watchBridge.audioFileProvider = { [model, library, profiles, downloads] playlist, watchTrack in
+            guard let profileSession = profiles.sessionID, profiles.active?.id == playlist.profileID,
+                  playlist.driveID == library.catalogue.driveID,
+                  let track = library.track(id: watchTrack.id), track.path == watchTrack.path,
+                  !library.isDemo else { throw CancellationError() }
+            let connectionToken = model.playbackConnectionToken
+            let revision = library.contentRevision
+            let sourceID = library.catalogue.driveID
+            let destination = FileManager.default.temporaryDirectory.appending(path: "gumbo-watch-audio-" + UUID().uuidString + "." + (watchTrack.path as NSString).pathExtension)
+            do {
+                if let local = downloads.localURL(for: track) {
+                    try await Task.detached { try FileManager.default.copyItem(at: local, to: destination) }.value
+                } else {
+                    guard let drive = library.drive as? any RemoteFileDrive, let path = track.path,
+                          let size = track.fileSize, size > 0 else { throw MetadataWriteError.notConnected }
+                    _ = try await WatchAudioPreparation.copy(drive: drive, path: path, to: destination, expectedBytes: size)
+                }
+                guard !Task.isCancelled, profiles.sessionID == profileSession, profiles.active?.id == playlist.profileID,
+                      model.playbackConnectionToken == connectionToken, library.contentRevision == revision,
+                      library.catalogue.driveID == sourceID, library.track(id: track.id)?.path == track.path else { throw CancellationError() }
+                return destination
+            } catch { try? FileManager.default.removeItem(at: destination); throw error }
         }
         watchBridge.artworkProvider = { [library] catalogue in
             library.watchArtworkSources(for: catalogue)
@@ -363,6 +389,7 @@ struct GumboApp: App {
                 .preferredColorScheme(model.appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
                     model.scenePhaseChanged(phase)
+                    downloads.setForegroundDownloadsActive(phase != .background)
                     if phase == .active || phase == .background { watchBridge.sync() }
                     if phase == .active, !Self.isLayoutFixture { Task { await cloud.refresh(reason: "foreground") } }
                     if phase == .background {

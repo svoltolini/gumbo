@@ -314,6 +314,11 @@ struct SettingsView: View {
                     NativeSettingsLabel("Find Missing Genres", symbol: "tag", subtitle: "Review suggestions before saving to your files")
                 }
                 .accessibilityIdentifier("settings.missingGenres")
+                if profiles.canManageProfiles {
+                    NavigationLink { TagServiceSettingsView() } label: {
+                        NativeSettingsLabel("Faster Tag Editing", symbol: "externaldrive", subtitle: "Optional helper that saves tags directly on your NAS")
+                    }
+                }
                 NavigationLink { ProblemFilesView() } label: {
                     NativeSettingsLabel("Problem Files", symbol: "doc.badge.ellipsis", subtitle: "Check music that won't play")
                 }
@@ -369,6 +374,7 @@ struct SettingsView: View {
             LabeledContent("App", value: "Gumbo Music")
             LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
             NavigationLink { ReleaseNotesView() } label: { Text("What's New") }
+            NavigationLink { ThirdPartyNoticesView() } label: { Text("Open Source Licenses") }
         }
     }
 

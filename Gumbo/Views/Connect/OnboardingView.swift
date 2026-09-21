@@ -16,7 +16,7 @@ struct OnboardingPage: Identifiable {
             OnboardingPage(
                 id: 0,
                 title: "Your music stays\nwhere it is.",
-                text: "Gumbo plays straight from the Synology you already own. Music stays on your NAS or downloads to your devices. Gumbo does not upload your music files to a Gumbo service.",
+                text: "Gumbo plays straight from your own NAS. Music stays on your NAS or downloads to your devices. Gumbo does not upload your music files to a Gumbo service.",
                 tint: Palette.neutralTint
             ),
             OnboardingPage(

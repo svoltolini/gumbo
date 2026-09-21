@@ -1,0 +1,28 @@
+# SMB dependency and security policy
+
+## Decision, 2026-09-21 (#191, #197)
+
+Use `Packages/GumboSMB`, a pinned, explicitly dynamic build of [libsmb2](https://github.com/sahlberg/libsmb2) at `557e837d3e00636b543f17ba1b9bdf872fa1644d`. Gumbo's Swift adapter is read-only and owns one serial C context on a background queue. It exposes the existing `RemoteFileDrive` operations and bounded random reads; passwords never enter URLs. iOS, macOS and tvOS link the library. watchOS has no C dependency and uses the phone relay for SMB files.
+
+[AMSMB2 4.0.3](https://github.com/amosavian/AMSMB2/tree/4.0.3) was evaluated: its dynamic packaging is useful, but its public API does not require signed SMB2 and its pinned libsmb2 (`aff9fa6ba9f41cfd3c15d184554601ec3f6d8d03`) predates the current mandatory-signature checks. Taking only its wrapper would still require a source fork and policy surface. [SwiftSMB](https://github.com/RuiNelson/SwiftSMB) currently requests Swift tools 6.4, above this project's 6.2 package baseline. The small direct C adapter avoids a second wrapper fork while retaining the upstream source and license.
+
+## Policies
+
+`encrypted` is the default and requires authenticated SMB3 encryption for post-authentication traffic. `signed` allows authenticated SMB2/3 with mandatory signing and accepts server-required encryption. There is no SMB1, guest/anonymous, plaintext HTTP or weaker-policy retry. Domain-qualified accounts use `DOMAIN\user`; a share is selected explicitly. SMB3 encryption is preferred for remote/VPN use. SMB2 signing protects integrity, not confidentiality.
+
+Current upstream checks missing/incorrect signatures and the final authenticated setup signature, but review found that its receive path matched only message ID before using an untrusted wire command for handshake exemptions. The Gumbo patch matches the response command to the queued request before payload parsing and derives exemptions from that queued command. The opt-in policy additionally rejects guest/null session flags, requires a valid session key, and enforces encryption on inbound post-authentication packets when requested, including header-only pending responses. The patch also retains signature verification when negotiation selects encryption. Negotiation/initial session setup cannot use an established session key; final setup is checked separately. An unsigned interim STATUS_PENDING is allowed in signed mode, but is never exposed as file data and its eventual completion must authenticate. AEAD validation remains upstream's implementation.
+
+`gumbo-policy.patch` records all changes from the pinned upstream files, including module packaging. A library update must re-review these hook locations and run both policy regressions and the real Samba fixture. Neither URL parsing nor fixture success substitutes for cryptographic/protocol review.
+
+## Limits and cancellation
+
+Each range request is limited to 8 MiB; artwork downloads to 64 MiB. Full offline downloads stream via `RemoteFileDrive.downloadFile`. C reads are capped to 1 MiB/server limit per call. Operations have a 10-second network timeout, check task cancellation before/after the blocking operation and between chunks, and retry one disconnected/timed-out read with the same policy. Cancellation never destroys a C context in use. It can therefore take until the current blocking call finishes. C directory enumeration fails completely before exceeding 100,000 entries, 4,096 pages, 64 MiB of reply data or 60 seconds, with cancellation checks between pages/entries; a current network call can still take up to its 10-second timeout. Directory record sizes, name lengths and next-entry offsets are validated before decoding, and duplicate names are refused; traversal paths and directory listings containing child separators are rejected; reported symlinks are excluded. SMB share/server permissions remain the boundary for server-side links or aliases.
+
+## Verification and distribution gates
+
+- `Packages/GumboSMB/Tests/run-security-tests.sh`: 21 actual receive-state-machine cases (forged command exemptions, signatures, AEAD, pending replies and valid handshakes/notifications), plus actual directory decoder short-buffer/name/offset and budget boundaries. No NAS or real credentials are used.
+- `SMBDriveTests`: settings, path and size bounds, literal Unicode names, cancellation, malformed/changed data, guest/null flags, unsigned/unencrypted packet policy.
+- `SMBLocalIntegrationTests`: opt-in isolated Samba fixture, actual encrypted/signed connections and authenticated range reads, concurrent requests, EOF, reconnect, bad password, missing files, SMB2-only encryption refusal, and guest-mapping refusal. See `Tools/SMBReadFixture/README.md`.
+- Verify each signed Release archive contains the separate GumboSMB framework and the app references it dynamically. Verify the Watch app contains no GumboSMB binary. Repeat on export; a package declaration alone does not prove embedding or signing.
+- Include `NOTICE.md` and `LICENCE-LGPL-2.1.txt` in the app's third-party notices, publish matching modified library source/build inputs with the release, and verify the applicable LGPL relinking/modification permissions and distribution conditions. See [GNU LGPL 2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html), especially sections 2, 4 and 6. This decision is an engineering record, not a legal or App Store approval.
+- Physical-device SMB/NAS interoperability, background transfers and encrypted seeking still require end-to-end acceptance with real devices. No real NAS files were changed by the fixture.

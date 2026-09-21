@@ -20,6 +20,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     private var errors: [String: String] = [:]
     private var currentCatalogue: WatchCatalogue?
     private var backgroundCompletion: (() -> Void)?
+    var credentialsProvider: (() -> WatchCredentials?)?
+    var relayRequest: ((WatchAudioRelayRequest) -> Void)?
+    var relayCancellation: ((WatchAudioRelayRequest) -> Void)?
+    private var relayJobs: [String: [WatchAudioRelayRequest]] = [:]
 
     private nonisolated static let root = AppDirectories.support.appending(path: "Gumbo/watch-playlists", directoryHint: .isDirectory)
     // The old manifest had no source identity. Keep its files untouched, but require a fresh download.
@@ -31,6 +35,9 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         configuration.sessionSendsLaunchEvents = true
         configuration.allowsCellularAccess = true
         configuration.timeoutIntervalForResource = 60 * 60 * 6
+        configuration.urlCredentialStorage = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
@@ -129,16 +136,46 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         errors[key] = nil
         saveManifests()
         do {
-            let dsm = try await SynologyClient.login(baseURL: credentials.baseURL, account: credentials.account, password: credentials.password, otpCode: nil)
+            if credentials.providerKind == .smb {
+                guard let relayRequest else { throw ProviderError.unavailableOnDevice }
+                for track in missing {
+                    guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation) else { continue }
+                    let request = WatchAudioRelayRequest(playlist: playlist, job: job)
+                    relayJobs[key, default: []].append(request)
+                    relayRequest(request)
+                }
+                return
+            }
+            let synology: SynologyDrive?
+            let webDAV: WebDAVDrive?
+            switch credentials.providerKind {
+            case .synology:
+                let dsm = try await SynologyClient.login(baseURL: credentials.baseURL, account: credentials.account, password: credentials.password, otpCode: nil)
+                synology = SynologyDrive(session: dsm, displayName: "NAS")
+                webDAV = nil
+            case .webDAV:
+                synology = nil
+                webDAV = try WebDAVDrive(baseURL: credentials.baseURL, username: credentials.account,
+                                        password: credentials.password, sourceID: credentials.driveID!)
+            default: throw ProviderError.unsupportedVersion
+            }
             guard manifests[key]?.generation == generation else { return }
-            let drive = SynologyDrive(session: dsm, displayName: "NAS")
             for track in missing {
                 guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation) else { continue }
-                guard let url = drive.streamURL(for: track.path) else {
+                let request: URLRequest
+                if let webDAV {
+                    var authenticated = try webDAV.authenticatedRequest(for: track.path)
+                    // Background redirects are controlled by the OS. Supply the password only
+                    // for an exact-origin challenge instead of a replayable Authorization header.
+                    authenticated.setValue(nil, forHTTPHeaderField: "Authorization")
+                    request = authenticated
+                } else if let url = synology?.streamURL(for: track.path) {
+                    request = URLRequest(url: url)
+                } else {
                     fail(job: job, message: "The server could not provide “\(track.title)”. Try again after reconnecting.")
                     continue
                 }
-                let task = session.downloadTask(with: url)
+                let task = session.downloadTask(with: request)
                 task.taskDescription = job.encoded
                 task.resume()
             }
@@ -154,6 +191,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     func cancel(_ playlist: WatchPlaylist) {
         guard let key = playlist.cacheID else { return }
         let generation = manifests[key]?.generation
+        for request in relayJobs.removeValue(forKey: key) ?? [] where request.job.generation == generation { relayCancellation?(request) }
         manifests[key]?.generation = nil
         expected[key] = nil
         errors[key] = "Download cancelled. Download again to finish; saved songs are kept."
@@ -178,6 +216,8 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     /// Clears all downloads and manifests. Called when the phone revokes access due to profile
     /// lock or switch — cached audio for another profile must not remain on the Watch.
     func clearAll() {
+        for request in relayJobs.values.flatMap({ $0 }) { relayCancellation?(request) }
+        relayJobs.removeAll()
         session.getAllTasks { @Sendable tasks in
             for task in tasks { task.cancel() }
         }
@@ -303,8 +343,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root))
             return
         }
-        let currentTrack = currentCatalogue?.playlists.first { $0.cacheID == job.playlistKey }?.tracks.first { $0.id == job.trackID }
-        if let failure = WatchDownloadValidation.failure(for: job.destination(in: Self.root), expectedBytes: currentTrack?.fileSize ?? job.expectedBytes) {
+        guard let currentTrack = currentCatalogue?.playlists.first(where: { $0.cacheID == job.playlistKey })?.tracks.first(where: { $0.id == job.trackID }) else {
+            try? FileManager.default.removeItem(at: job.destination(in: Self.root)); return
+        }
+        if let failure = WatchDownloadValidation.failure(for: job.destination(in: Self.root), expectedBytes: currentTrack.fileSize) {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root))
             fail(job: job, message: failure.localizedDescription)
             return
@@ -313,6 +355,28 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         expected[job.playlistKey]?.remove(job.trackID)
         if expected[job.playlistKey]?.isEmpty == true { expected[job.playlistKey] = nil }
         saveManifests()
+    }
+
+    func receiveRelay(_ request: WatchAudioRelayRequest, file: URL) {
+        let job = request.job
+        guard let currentCatalogue, request.isCurrent(in: currentCatalogue, manifest: manifests[job.playlistKey]) else { return }
+        if let failure = WatchDownloadValidation.failure(for: file, expectedBytes: job.expectedBytes) {
+            fail(job: job, message: failure.localizedDescription); return
+        }
+        let destination = job.destination(in: Self.root)
+        do {
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: file, to: destination)
+            record(job: job)
+            relayJobs[job.playlistKey]?.removeAll { $0 == request }
+        } catch { fail(job: job, message: "This song could not be saved. Try again.") }
+    }
+
+    func failRelay(_ request: WatchAudioRelayRequest) {
+        guard expected[request.job.playlistKey]?.contains(request.job.trackID) == true else { return }
+        relayJobs[request.job.playlistKey]?.removeAll { $0 == request }
+        fail(job: request.job, message: "Keep Gumbo open on your iPhone and try downloading again.")
     }
 
     private func fail(job: WatchDownloadJob, message: String) {
@@ -332,6 +396,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let job = WatchDownloadJob.decode(downloadTask.taskDescription) else { return }
         let response = downloadTask.response as? HTTPURLResponse
+        guard response?.url == downloadTask.originalRequest?.url else {
+            Task { @MainActor in self.fail(job: job, message: "The server redirected this download. Check its address on your iPhone.") }
+            return
+        }
         if let failure = WatchDownloadValidation.failure(for: location, expectedBytes: job.expectedBytes, statusCode: response?.statusCode ?? 200,
                                                         contentType: response?.mimeType) {
             Task { @MainActor in self.fail(job: job, message: failure.localizedDescription) }
@@ -358,6 +426,33 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         Task { @MainActor in
             self.backgroundCompletion?()
             self.backgroundCompletion = nil
+        }
+    }
+
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                                newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                                completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            completionHandler(.performDefaultHandling, nil); return
+        }
+        nonisolated(unsafe) let complete = completionHandler
+        let job = WatchDownloadJob.decode(task.taskDescription)
+        let original = task.originalRequest?.url
+        let current = task.currentRequest?.url
+        Task { @MainActor in
+            guard let job, let credentials = self.credentialsProvider?(), credentials.providerKind == .webDAV,
+                  let playlist = self.currentCatalogue?.playlists.first(where: { $0.cacheID == job.playlistKey }),
+                  credentials.matches(playlist), credentials.permitsWebDAVDownload(original: original, current: current),
+                  self.manifests[job.playlistKey]?.generation == job.generation,
+                  let origin = NASOrigin(url: credentials.baseURL) else { complete(.cancelAuthenticationChallenge, nil); return }
+            let scope = DownloadAuthentication(origin: origin, account: credentials.account, keychainAccount: "")
+            guard scope.permits(challenge.protectionSpace, original: original, current: current,
+                                failures: challenge.previousFailureCount) else { complete(.cancelAuthenticationChallenge, nil); return }
+            complete(.useCredential, URLCredential(user: credentials.account, password: credentials.password, persistence: .none))
         }
     }
 }

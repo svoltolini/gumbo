@@ -1,0 +1,18 @@
+services:
+  encrypted:
+    build: .
+    ports: ["127.0.0.1:14450:445"]
+    volumes:
+      - ./music:/music:ro
+  smb2:
+    build: .
+    ports: ["127.0.0.1:14451:445"]
+    volumes:
+      - ./music:/music:ro
+      - ./smb2.conf:/etc/samba/smb.conf:ro
+  guest:
+    build: .
+    ports: ["127.0.0.1:14452:445"]
+    volumes:
+      - ./music:/music:ro
+      - ./guest.conf:/etc/samba/smb.conf:ro

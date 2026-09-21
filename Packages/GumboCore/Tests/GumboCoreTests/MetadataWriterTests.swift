@@ -5,6 +5,7 @@ import Testing
 /// A music folder in memory with the write half of a drive, plus knobs for refusals and a hook
 /// that fires while a file is being uploaded.
 private actor WriterFixtureDrive: WritableRemoteDrive {
+    nonisolated let capabilities: RemoteCapabilities = [.read, .ranges, .upload, .rename, .delete, .replace]
     let id = "writer-fixture"
     let displayName = "Writer fixture"
     var files: [String: Data]

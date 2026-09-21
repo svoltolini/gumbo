@@ -21,6 +21,7 @@
 		12486E80F13637771EA219D7 /* ConnectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */; };
 		12BC2E1FD2FD6FAD738D6D2C /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58D27939FB42A50AF978D76 /* WatchBridge.swift */; };
 		13A059607D180D45BF71B354 /* DownloadStateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */; };
+		147A61EB4A849E8958619F89 /* TagServiceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE36BD546AA82000E90BB52 /* TagServiceSettingsView.swift */; };
 		18D0D2A1144359E576F5A6D3 /* MacNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51595F1F46FD2FE65983E3A1 /* MacNavigation.swift */; };
 		1903F76791150B574542F2F2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E5957FDBAB31BDDE6EB6BE2C /* PrivacyInfo.xcprivacy */; };
 		1A25EA814D45BEA48F2AC342 /* MacTrackTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2C06C80C460EE82EFB9AE9 /* MacTrackTable.swift */; };
@@ -66,6 +67,7 @@
 		4E8187040DC1E74E71B12B3C /* IndexingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A55C2869D8C7B0351AB45 /* IndexingView.swift */; };
 		5007A8E06440272AEB902D8D /* ReleaseSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02F98781BA2CEA844CF37B7 /* ReleaseSmokeTests.swift */; };
 		51AD4481590FA4572FE930FD /* LibraryHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */; };
+		51D008F06A3403BB73B9FDCB /* ThirdPartyNoticesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1AD1A90E102BBDBD862A22 /* ThirdPartyNoticesView.swift */; };
 		53382677C544259E9A9EF906 /* GumboMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4310D34A31FE13F9A95839F3 /* GumboMacApp.swift */; };
 		5432FEB03B957B8B36B82907 /* DownloadStateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E671A3D29B37EFC5A603A54 /* DownloadStateReader.swift */; };
 		56CEC909E179E897F3138961 /* ReleaseNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */; };
@@ -76,9 +78,11 @@
 		5DD4B997405D697AC1809D10 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B621334B1925BF0C9EF737 /* LibraryView.swift */; };
 		5F42640ACAFEBD655D4A125F /* PrivacyDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237691514B0B741CEC97A8D7 /* PrivacyDetailsView.swift */; };
 		5FC324752732FD970392FE51 /* MacNowPlayingInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 871A74E176E2ECAD6D738B16 /* MacNowPlayingInspector.swift */; };
+		6293E511F830FB3A3FB9DA58 /* ThirdPartyNoticesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1AD1A90E102BBDBD862A22 /* ThirdPartyNoticesView.swift */; };
 		62B7997FFB954BDE8BA7B844 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C404805D22DDA6CBD85B36B3 /* PlaylistDetailView.swift */; };
 		67D1E350A0BA8C97D4CCBBDF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D5460268D3572AB23AE33E /* OnboardingView.swift */; };
 		68BA8D3E3B0A9BA302E381B5 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7286D341526727D1D3C020BB /* DiagnosticsView.swift */; };
+		6C597EC02E809636DB1A1971 /* TagServiceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE36BD546AA82000E90BB52 /* TagServiceSettingsView.swift */; };
 		6C742AC728E846156912A283 /* ArtistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CEE010A2A5ECB163C31EBF /* ArtistView.swift */; };
 		6CC2EAC23E89588D4158C629 /* MacSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4E40D20C28EBBC3D8DB462 /* MacSetupView.swift */; };
 		6D2344CA1027CDECD2737E89 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D229CD864AFF39B01013B705 /* PlaylistsView.swift */; };
@@ -130,6 +134,7 @@
 		A4CD0337D0658C26B3B9C68F /* ProfilePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B8E3AC4EED1C7C2A527CBB /* ProfilePickerView.swift */; };
 		A5BA31604A2D2BEA4F12C2E2 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 870C2DD94349EC3F66196E46 /* CarPlaySceneDelegate.swift */; };
 		A726CE542A5ABEA0F901670B /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9652EC7FF5019EFC63864A69 /* InviteSheet.swift */; };
+		A7EAC12C0751B9E7460F6D00 /* ThirdPartyNoticesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1AD1A90E102BBDBD862A22 /* ThirdPartyNoticesView.swift */; };
 		A8EB09848EB13C002D42B209 /* SiriMediaIntentHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F18FC2F1FA068887A2F84CA /* SiriMediaIntentHandler.swift */; };
 		A8FAAC386345910CA62A4A23 /* AlbumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19A55DA694504D295E91AC /* AlbumView.swift */; };
 		A9FD9023DB44784684742DC6 /* ConnectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836D64EB25D9ADC5A43017C1 /* ConnectSheet.swift */; };
@@ -174,6 +179,7 @@
 		E223442A4EFB8A4C94F06948 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 65D17515AA2A0BB4C92708EA /* PrivacyInfo.xcprivacy */; };
 		E23959CF77A1E1374FF2475A /* SiriSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285143A888DE8D03E47EB20C /* SiriSettingsView.swift */; };
 		E265100365780AA19E7BD57E /* LibraryMaintenanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23445943226781EBB019469D /* LibraryMaintenanceView.swift */; };
+		E286B79CB5C80BDE25D435AC /* TagServiceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE36BD546AA82000E90BB52 /* TagServiceSettingsView.swift */; };
 		E316D96DA20D392266D84209 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945E5C03A0F645DBB7B9E87D /* Platform.swift */; };
 		E34D7A5844AD4F2A6D3B7C89 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5897B078B5A617366DA36E93 /* Theme.swift */; };
 		E4FAB486BC7192FBB140B4D7 /* GumboShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7880F336195EC2B7C6788C5F /* GumboShared */; };
@@ -283,12 +289,14 @@
 		471AC93C920E27576A515E4E /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		4A49C3A54F18A1CB6755E8B4 /* WatchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchStore.swift; sourceTree = "<group>"; };
 		4C2C06C80C460EE82EFB9AE9 /* MacTrackTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTrackTable.swift; sourceTree = "<group>"; };
+		4CE36BD546AA82000E90BB52 /* TagServiceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagServiceSettingsView.swift; sourceTree = "<group>"; };
 		4ECBE2D2AA948DE29EE88219 /* DownloadButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadButton.swift; sourceTree = "<group>"; };
 		51595F1F46FD2FE65983E3A1 /* MacNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNavigation.swift; sourceTree = "<group>"; };
 		53A1E7707B45804ECAF9C471 /* GumboTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GumboTVApp.swift; sourceTree = "<group>"; };
 		55B4E56CF14321B06E5E2368 /* WidgetPieces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPieces.swift; sourceTree = "<group>"; };
 		5897B078B5A617366DA36E93 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		59C1361F80E2A35710474D9C /* LoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginSheet.swift; sourceTree = "<group>"; };
+		5A1AD1A90E102BBDBD862A22 /* ThirdPartyNoticesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartyNoticesView.swift; sourceTree = "<group>"; };
 		5D459871BDCBDBD2385CA361 /* GumboMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GumboMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5D8D607F961CD6753DA85DEE /* LibraryHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryHomeView.swift; sourceTree = "<group>"; };
 		635CAEE6178E102936FBC21E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -464,6 +472,8 @@
 				EB8EC0EC62D617F6DBBEA5A8 /* ReleaseNotesView.swift */,
 				635CAEE6178E102936FBC21E /* SettingsView.swift */,
 				285143A888DE8D03E47EB20C /* SiriSettingsView.swift */,
+				4CE36BD546AA82000E90BB52 /* TagServiceSettingsView.swift */,
+				5A1AD1A90E102BBDBD862A22 /* ThirdPartyNoticesView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1003,7 +1013,9 @@
 				7FE6A3C76C8A21420688C623 /* SetupPage.swift in Sources */,
 				E7BC4607C17DF8E4FDC54106 /* SiriSettingsView.swift in Sources */,
 				B41B014CD89F73142BF170F4 /* TVRootView.swift in Sources */,
+				6C597EC02E809636DB1A1971 /* TagServiceSettingsView.swift in Sources */,
 				E34D7A5844AD4F2A6D3B7C89 /* Theme.swift in Sources */,
+				51D008F06A3403BB73B9FDCB /* ThirdPartyNoticesView.swift in Sources */,
 				410E19D013C906E58C320C07 /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1072,7 +1084,9 @@
 				F3112FF463C8F75E6EE877F2 /* SetupPage.swift in Sources */,
 				FAF08B07915C2775C58A624A /* SiriMediaIntentHandler.swift in Sources */,
 				FAB1557C97898D92C92AC113 /* SiriSettingsView.swift in Sources */,
+				E286B79CB5C80BDE25D435AC /* TagServiceSettingsView.swift in Sources */,
 				E0EF0C93E4E3EF81BE899F19 /* Theme.swift in Sources */,
+				A7EAC12C0751B9E7460F6D00 /* ThirdPartyNoticesView.swift in Sources */,
 				12BC2E1FD2FD6FAD738D6D2C /* WatchBridge.swift in Sources */,
 				3F980321EC024459ED35C047 /* WelcomeView.swift in Sources */,
 			);
@@ -1138,7 +1152,9 @@
 				D1321DFADD4FCFDEAA6BEC9B /* SetupPage.swift in Sources */,
 				A8EB09848EB13C002D42B209 /* SiriMediaIntentHandler.swift in Sources */,
 				E23959CF77A1E1374FF2475A /* SiriSettingsView.swift in Sources */,
+				147A61EB4A849E8958619F89 /* TagServiceSettingsView.swift in Sources */,
 				D98448F490A141918C91F9BB /* Theme.swift in Sources */,
+				6293E511F830FB3A3FB9DA58 /* ThirdPartyNoticesView.swift in Sources */,
 				2E638CDB94805134E0E249C1 /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -493,8 +493,8 @@ public final class LibraryIndexer {
                 if let info = try? await readFLAC(path: path, drive: drive), let picture = info.picture {
                     return (picture, "embedded art in \(path)")
                 }
-            } else if let url = drive.streamURL(for: path) {
-                if let artwork = await MediaProbe.probe(url: url).artwork {
+            } else if let source = RemoteMediaSource.resolve(drive: drive, path: path) {
+                if let artwork = await MediaProbe.probe(source: source).artwork {
                     return (artwork, "embedded art in \(path)")
                 }
             }
@@ -552,8 +552,8 @@ public final class LibraryIndexer {
         if let native = await readNatively(track: track, path: path, drive: drive) {
             probe = native
         } else {
-            guard let url = drive.streamURL(for: path) else { return EnrichmentResult(track: updated, cover: cover) }
-            probe = await MediaProbe.probe(url: url)
+            guard let source = RemoteMediaSource.resolve(drive: drive, path: path) else { return EnrichmentResult(track: updated, cover: cover) }
+            probe = await MediaProbe.probe(source: source)
         }
         // An unavailable or failed parser must not erase the last successful tags. A successful
         // parse may omit a removed tag, in which case filename/folder defaults apply again.

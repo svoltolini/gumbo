@@ -195,7 +195,7 @@ private struct MacWelcomeStep: View {
     @State private var isJoiningWithLink = false
 
     var body: some View {
-        StepPage(title: "Your music.\nAt home on your Mac.", subtitle: "Connect your Synology and bring your own library to Gumbo Music.") {
+        StepPage(title: "Your music.\nAt home on your Mac.", subtitle: "Connect your NAS and bring your own library to Gumbo Music.") {
             VStack(alignment: .leading, spacing: 24) {
                 welcomeRow("Your collection, ready to play", symbol: "externaldrive", detail: "Choose your music folder. Gumbo reads your songs, tags and covers directly from your NAS.")
                 welcomeRow("Listen your way", symbol: "headphones", detail: "Stream from your NAS or keep downloads on your devices for offline listening.")
@@ -364,94 +364,88 @@ private struct MacCloudLibraryButton: View {
 private struct MacServerStep: View {
     @Environment(AppModel.self) private var model
     @State private var selection: DiscoveredServer.ID?
-    @State private var address = ""
+    @State private var draft = NASConnectionDraft()
     @State private var isResolving = false
     @State private var error: String?
     @State private var isReadingGuide = false
 
     private var servers: [DiscoveredServer] { model.discovery.servers }
+    private var isBusy: Bool { isResolving || model.isJoiningFamily }
 
     var body: some View {
-        StepPage(title: "Find your server", subtitle: "Synology servers on this network appear here. Away from home, enter the address you set up in DSM.") {
+        StepPage(title: "Find your server", subtitle: "Choose a server found on this network, or enter its address and connection type.") {
             VStack(alignment: .leading, spacing: 14) {
                 MacCloudLibraryNotice(showsConnectButton: true)
-                Text("Or connect to a server")
-                    .font(.headline)
-                    .padding(.top, 8)
+                Text("Or connect to a server").font(.headline).padding(.top, 8)
                 List(servers, selection: $selection) { server in
                     HStack(spacing: 12) {
-                        Image(systemName: "externaldrive.fill")
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
+                        Image(systemName: "externaldrive.fill").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(server.name).font(.body.weight(.medium))
-                            Text(server.address).font(.caption).foregroundStyle(.secondary)
+                            Text("\(server.address) · \(server.providerKind.title)")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 2)
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
-                .frame(height: 170)
-                .disabled(model.isJoiningFamily)
+                .frame(height: servers.isEmpty ? 90 : 150)
+                .disabled(isBusy)
                 .overlay {
                     if servers.isEmpty {
                         HStack(spacing: 8) {
                             if model.discovery.isBrowsing { ProgressView().controlSize(.small) }
-                            Text(model.discovery.isBrowsing ? "Looking for music servers…" : "No servers found on this network")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                            Text(model.discovery.isBrowsing ? "Looking for servers…" : "No servers found on this network")
+                                .font(.callout).foregroundStyle(.secondary)
                         }
                     }
                 }
-                HStack(spacing: 8) {
-                    TextField("Address, such as myds.synology.me or 192.168.1.40", text: $address)
+                VStack(alignment: .leading, spacing: 12) {
+                    NASProviderFields(draft: $draft, submit: connect)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit(connect)
-                        .disabled(isResolving || model.isJoiningFamily)
-                    Button("Connect", action: connect)
-                        .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isResolving || model.isJoiningFamily)
-                    if isResolving { ProgressView().controlSize(.small) }
+                    Text(draft.explanation)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("HTTPS is the default and needs a trusted certificate matching the address. Tailscale provides network access, but its IP or MagicDNS name may not match DSM's certificate. For an HTTP-only NAS on a trusted private connection, enter its full http:// address and port, then review the warning before signing in.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .disabled(isBusy)
+                .frame(maxWidth: 620, alignment: .leading)
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout)
-                        .foregroundStyle(.red)
+                        .font(.callout).foregroundStyle(.red)
                 }
-                Button("How to reach your NAS from anywhere…") { isReadingGuide = true }
-                    .buttonStyle(.link)
-                    .font(.callout)
+                Button("Connecting your NAS…") { isReadingGuide = true }
+                    .buttonStyle(.link).font(.callout)
             }
         } buttons: {
             Button("Back") {
                 model.stage = .welcome
                 model.discovery.stop()
             }
-            .disabled(model.isJoiningFamily)
+            .disabled(isBusy)
             Spacer()
-            Button("Continue") {
-                if let server = servers.first(where: { $0.id == selection }) { model.select(server) }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Palette.accent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(selection == nil || model.isJoiningFamily)
+            if isResolving { ProgressView().controlSize(.small) }
+            Button("Continue", action: connect)
+                .buttonStyle(.borderedProminent).tint(Palette.accent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!draft.canConnect || isBusy)
         }
-        .sheet(isPresented: $isReadingGuide) {
-            RemoteAccessGuide()
+        .onChange(of: selection) {
+            guard !isBusy, let server = servers.first(where: { $0.id == selection }) else { return }
+            draft = NASConnectionDraft(server: server)
+            error = nil
         }
+        .sheet(isPresented: $isReadingGuide) { RemoteAccessGuide() }
     }
 
     private func connect() {
-        let entry = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !entry.isEmpty, !isResolving, !model.isJoiningFamily else { return }
+        guard draft.canConnect, !isBusy else { return }
+        let selected = draft
         isResolving = true
         error = nil
         Task {
             do {
-                try await model.connect(to: entry)
+                try await model.connect(to: selected.address, provider: selected.provider, share: selected.share,
+                                        domain: selected.domain, requiresEncryption: selected.requiresEncryption)
             } catch {
                 self.error = error.localizedDescription
             }
@@ -477,7 +471,7 @@ private struct MacSignInStep: View {
 
     var body: some View {
         let server = model.pendingServer
-        StepPage(title: "Sign in to \(server?.name ?? "your NAS")", subtitle: "Sign in with your DSM account. Gumbo reads your music through File Station, so nothing needs to be installed on the NAS.") {
+        StepPage(title: "Sign in to \(server?.name ?? "your NAS")", subtitle: server?.signInExplanation ?? "Sign in with the NAS account that can read your music folder.") {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 14) {
                 GridRow {
                     label("Server")
@@ -487,7 +481,7 @@ private struct MacSignInStep: View {
                 if let server {
                     GridRow {
                         Text("")
-                        NASTransportChoice(url: server.baseURL, httpAllowed: $httpAllowed) {
+                        NASTransportChoice(server: server, httpAllowed: $httpAllowed) {
                             guard let url = NASTransportSecurity.httpsAlternative(for: server.baseURL) else { return }
                             password = ""
                             otpCode = ""
@@ -575,7 +569,7 @@ private struct MacSignInStep: View {
             if let familyAccount = model.pendingFamilyAccount {
                 account = familyAccount
                 password = model.pendingFamilyPassword ?? ""
-            } else if let connection = model.connection, let server, NASOrigin(url: connection.baseURL) == NASOrigin(url: server.baseURL) {
+            } else if let connection = model.connection, let server, server.matches(connection: connection) {
                 account = connection.account
                 if let storedPassword = model.pendingReconnectPassword {
                     password = storedPassword
@@ -633,7 +627,7 @@ private struct MacSignInStep: View {
     }
 
     private var transportAllowed: Bool {
-        model.pendingServer.map { NASOrigin(url: $0.baseURL)?.isHTTPS == true || httpAllowed } ?? false
+        model.pendingServer?.allowsSignIn(httpAllowed: httpAllowed) ?? false
     }
 }
 
