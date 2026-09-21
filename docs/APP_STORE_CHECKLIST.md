@@ -1,140 +1,43 @@
-# App Store Connect checklist for Gumbo Music 1.0
+# App Store readiness — Gumbo Music
 
-This checklist documents the remaining App Store Connect (ASC) configuration steps required before public release. These items must be completed in the ASC web interface—they cannot be configured in the repository.
+Updated 21 September 2026 for App Store Connect app **6814252548**. The iOS, native Mac and TV 1.0 storefronts remain **Prepare for Submission**. TestFlight approval is separate from public App Store approval.
 
-## Current Gumbo identity — acceptance pending
+## Verified account and publication state
 
-The September 20 rename created a separate app identity. Source configuration, platform builds and a signed development iPhone build have been checked. The app/widget IDs, app group and CloudKit container are registered, and CarPlay is enabled for Gumbo. Explicit Watch registration, distribution profiles/archives, App Store Connect configuration, production CloudKit and fresh device/TestFlight acceptance remain pending. Track those gates in [#118](https://github.com/svoltolini/gumbo/issues/118) and evidence reconciliation in [#119](https://github.com/svoltolini/gumbo/issues/119).
+- App name: **Gumbo Music**.
+- Age rating: **4+**, calculated and saved from the app’s actual features; API read-back confirms the answers. The app includes no supplied explicit media, public content feed, messaging, browser, advertising, gambling or age-assurance system. User-controlled private NAS media is not a curated Gumbo catalogue; profile locks are not represented as parental content filtering.
+- Subtitle: **Your library. Your own space.**; primary category: **Music**. Both saved and independently read back on 21 September.
+- Privacy policy URL: **https://gumbo.one/privacy/**. Apple TV inline policy was saved and read back against the published text.
+- Support URL: **https://gumbo.one/support/**; marketing URL: **https://gumbo.one/**, saved and read back for all three platforms.
+- en-GB descriptions and keywords are saved and read back for all three platforms. They describe the currently published Synology beta, not unverified vendor compatibility.
+- Five native screenshots uploaded and processed **COMPLETE**, with dimensions and checksums independently verified: iPhone library/playlists (1320 × 2868), iPad library (2064 × 2752), native Mac library (2560 × 1600) and Apple TV library (3840 × 2160). They show the built-in fictional sample library; no private NAS library was uploaded. Capture notes distinguish isolated native Mac rendering from signed simulator captures.
+- App Privacy answers were published with the owner’s explicit agreement and independently read back on 21 September. Apple reports and voluntary TestFlight feedback are disclosed for App Functionality, potentially linked to identity, with no tracking. See [the rationale and verification](PRIVACY-RELEASE-CHECK.md).
+- CloudKit's optional `Family.providerConnection` Bytes field is now deployed and read back in Production; see [deployment evidence](CLOUDKIT-PROVIDER-DEPLOYMENT-2026-09-21.md).
 
-## Historical checklist entries — previous app identity
+## Build status
 
-The entries below are the prior release record, not verification of the new Gumbo identity. Historical evidence is preserved through [immutable references](evidence/README.md). Its external state was not reverified during the September 20 source remediation.
+Public TestFlight build **1.0 (202609211143)** was verified as VALID / IN_BETA_TESTING across iOS, Mac and TV at 11:33 UTC on 21 September. It predates the provider implementation in PR #205. Source fixes and later local signed exports are not an uploaded replacement build.
 
-- [x] **Privacy manifests** — All 5 targets (iOS, Widgets, Watch, Mac, TV) include `PrivacyInfo.xcprivacy`
-- [x] **Export compliance** — `ITSAppUsesNonExemptEncryption: false` in all Info.plist configurations
-- [x] **CarPlay entitlement** — Approved and present in signed iOS binary and provisioning profile
-- [x] **tvOS Top Shelf assets** — 1x and 2x images for both standard (1920×720, 3840×1440) and wide (2320×720, 4640×1440)
-- [x] **Watch app icons** — Complete set for all Watch sizes (38mm through 49mm)
-- [x] **iOS/Mac app icons** — Present in asset catalogue
-- [x] **tvOS brand assets** — App Icon stack layers present
-- [x] **Build version alignment** — `CURRENT_PROJECT_VERSION` consistent across all 5 targets
-- [x] **CloudKit entitlements** — Production environment configured
-- [x] **App Groups** — Configured for widget data sharing
-- [x] **Archive validation** — iOS/Watch/Widgets, Mac, and TV Release archives pass export validation
-- [x] **TestFlight upload** — All platforms verified as VALID / IN_BETA_TESTING (build 202609142150)
-- [ ] **App Review demo mode** — A visible sample-library entry is implemented in the September 20 remediation. Signed screen validation remains pending; see `APP_REVIEW_NOTES.md`.
+The provider implementation adds dynamic libsmb2 and its standard SMB cryptographic code on iOS, Mac and TV. The old blanket `ITSAppUsesNonExemptEncryption=false` declaration is no longer applied to those targets. The signed-in Apple questionnaire was inspected through step 3: the implementation uses standard encryption in addition to Apple’s APIs, and the remaining question is France availability. Keep this factual choice and any required French declaration explicit before the next TestFlight upload; do not mark the binary exempt to skip the question. Watch does not link libsmb2. See [review notes](APP_REVIEW_NOTES.md) and [dependency decision](SMB-DEPENDENCY.md).
 
-## App Store Connect — REQUIRED BEFORE PUBLIC RELEASE
+## Remaining public-release work
 
-### App information (General)
+- [x] Complete, publish and verify app-level App Privacy answers against the code and owner-confirmed practices.
+- [x] Upload and verify native iPhone, iPad, Mac and TV screenshots. Recheck them if the final submitted UI changes.
+- [ ] Complete remaining applicable content-rights and review information. Age-rating answers are saved and verified.
+- [ ] Resolve encryption documentation and distribution requirements for the provider binary; increment the build number for a new upload.
+- [ ] Confirm public-review notes and provide authorized real-audio review access if required. The visible sample library supports UI review but contains no bundled audio; do not promise a demo server or invent credentials.
+- [ ] Complete the physical NAS, iCloud, Watch, CarPlay and accessibility acceptance checks in #123.
+- [ ] Verify pricing/availability and any owner-only agreements before public submission.
 
-| Item | Status | Notes |
-|------|--------|-------|
-| App name | ⬜ Verify | "Gumbo Music" |
-| Subtitle | ⬜ Set | e.g., "Play music from your Synology NAS" |
-| Primary category | ⬜ Set | Music |
-| Secondary category | ⬜ Optional | Entertainment or Utilities |
-| Content rights | ⬜ Confirm | User-supplied music; no third-party content licensing |
-
-### App privacy (Data collection)
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Privacy policy URL | ⬜ Set | Requires public HTTPS URL; see `PRIVACY-POLICY.md` for draft text |
-| Privacy nutrition label | ⬜ Complete | Answer questions based on `PRIVACY-RELEASE-CHECK.md` rationale |
-| Tracking disclosure | ⬜ Confirm | App does not track (ATT not used) |
-
-Recommended privacy answers based on source review:
-- **Data Not Collected** is supportable if the owner confirms no server-side analytics or retained support data
-- If TestFlight crash reports or App Store analytics are used, classify appropriately
-- See `PRIVACY-RELEASE-CHECK.md` for detailed reasoning
-
-### App Review information
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Contact info | ⬜ Set | Name, phone, email for review team |
-| Demo account | ⬜ Optional | Not required—sample library available |
-| Review notes | ⬜ Set | Copy from `APP_REVIEW_NOTES.md` or link to this document |
-| Attachment | ⬜ Optional | Consider short video showing sample library navigation |
-
-### Pricing and availability
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Price | ⬜ Set | Free or paid tier |
-| Availability | ⬜ Set | Countries/regions |
-| Pre-order | ⬜ Decide | Optional |
-
-### Platform-specific metadata
-
-Each platform (iOS, macOS, tvOS) requires:
-
-| Item | Status |
-|------|--------|
-| Screenshots (required sizes) | ⬜ Capture |
-| App preview videos | ⬜ Optional |
-| Promotional text | ⬜ Write |
-| Description | ⬜ Write |
-| Keywords | ⬜ Set |
-| Support URL | ⬜ Set (requires public URL) |
-| Marketing URL | ⬜ Optional |
-| What's New text | ⬜ Write (for updates) |
-
-#### Screenshot requirements
-
-| Platform | Required sizes |
-|----------|----------------|
-| iPhone | 6.9" (1320×2868 or 1290×2796), 6.5" (1284×2778 or 1242×2688), 5.5" (1242×2208) |
-| iPad | 13" (2064×2752), 12.9" (2048×2732) |
-| Mac | 1280×800 minimum, 2880×1800 recommended |
-| Apple TV | 1920×1080 or 3840×2160 |
-
-### tvOS-specific
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Privacy policy text | ⬜ Set | tvOS requires inline text (no URL), 6000 char max |
-| Top Shelf extension | ✅ | Assets verified in repo |
-
-### Export compliance
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Uses encryption | ✅ Set | `ITSAppUsesNonExemptEncryption: false` in Info.plist |
-| CCATS/ERN | ⬜ N/A | Not required; only Apple-provided encryption |
-
-No additional export documentation is required. The app uses only:
-- Apple HTTPS/TLS (exempt)
-- Apple CloudKit (exempt)
-- Apple Keychain (exempt)
-
-### In-app purchases
-
-| Item | Status | Notes |
-|------|--------|-------|
-| IAPs configured | ⬜ N/A | None planned for 1.0 |
-
-### App clips
-
-| Item | Status | Notes |
-|------|--------|-------|
-| App Clip configured | ⬜ N/A | None planned for 1.0 |
-
-## Before external TestFlight / public submission
-
-1. ⬜ Complete all "REQUIRED" items above
-2. ⬜ Host privacy policy at public HTTPS URL
-3. ⬜ Capture final screenshots on shipping build
-4. ⬜ Set App Review notes (see `APP_REVIEW_NOTES.md`)
-5. ⬜ Submit for external beta review (if using external testers)
-6. ⬜ Address any review feedback
-7. ⬜ Submit for App Store review
+The user has authorized engineering, metadata preparation and TestFlight deployment. Request missing factual information only where it cannot be established from the code or account; do not treat every unchecked row as a new approval requirement.
 
 ## References
 
-- [App Store Connect Help](https://developer.apple.com/help/app-store-connect/)
-- [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
-- [App Privacy Details](https://developer.apple.com/app-store/app-privacy-details/)
-- [Screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/screenshot-specifications/)
-- [Export compliance](https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations)
+- [Current packaging evidence and reusable validation](APP-STORE-PACKAGING-VALIDATION.md)
+- [Privacy inventory](PRIVACY-RELEASE-CHECK.md)
+- [Public-store issue #119](https://github.com/svoltolini/gumbo/issues/119)
+- [Physical acceptance issue #123](https://github.com/svoltolini/gumbo/issues/123)
+- [Apple screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/)
+
+Historical Skyr-era checklist results remain in the dated [release audit](RELEASE-AUDIT-2026-09-14.md) and [immutable evidence references](evidence/README.md); they are not current Gumbo acceptance evidence.

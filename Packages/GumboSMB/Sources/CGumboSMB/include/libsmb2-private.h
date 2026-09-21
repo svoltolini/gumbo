@@ -165,6 +165,7 @@ struct smb2_context {
         /* Gumbo: opt-in strict authenticated, optionally encrypted client policy. */
         int gumbo_require_authenticated;
         int gumbo_require_encryption;
+        int gumbo_read_snapshot;
         int (*gumbo_should_cancel)(void *);
         void *gumbo_cancellation_data;
 

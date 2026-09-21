@@ -25,9 +25,23 @@ public nonisolated enum RemoteDownloadSource: Sendable {
     case file(drive: any RemoteFileDrive, path: String)
 }
 
+/// Implementations must verify every persisted prefix byte against one protected representation
+/// before appending. Merely comparing size/mtime does not satisfy this contract.
+public nonisolated protocol ResumableRemoteFileDrive: RemoteFileDrive {
+    func copyVerified(_ path: String, to checkpoint: URL, expectedBytes: Int64?,
+                      progress: @escaping @Sendable (Double) async -> Void) async throws -> Int64
+}
+
 nonisolated enum ForegroundFileTransfer {
     @concurrent static func copy(drive: any RemoteFileDrive, path: String, destination: URL, expectedBytes: Int64?,
-                     progress: @escaping @Sendable (Double) async -> Void) async throws -> Int64 {
+                     checkpoint: URL? = nil, progress: @escaping @Sendable (Double) async -> Void) async throws -> Int64 {
+        if let checkpoint, let resumable = drive as? any ResumableRemoteFileDrive {
+            let size = try await resumable.copyVerified(path, to: checkpoint, expectedBytes: expectedBytes, progress: progress)
+            try Task.checkCancellation()
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: checkpoint, to: destination)
+            return size
+        }
         let original = try await drive.info(path)
         guard !original.isDirectory, let size = original.size, size > 0,
               expectedBytes == nil || expectedBytes == size else { throw ProviderError.changed }

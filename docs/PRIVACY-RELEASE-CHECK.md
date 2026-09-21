@@ -1,6 +1,6 @@
 # Privacy release evidence
 
-This is an engineering inventory and publication checklist, not a claim that App Store privacy answers have been published.
+This is an engineering inventory and publication record. The current Gumbo declaration was published on 21 September 2026; see the final section for owner-confirmed practices and read-back evidence. Earlier sections retain their dated context.
 
 ## Website policy source — 21 September 2026
 
@@ -28,7 +28,7 @@ App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b914
 | Website | Static content with no analytics scripts, sign-up form, or cookies/browser storage set by site code; Vercel processes hosting/security requests, separately from the NAS library | `website/index.html`, `website/site.js`, `website/vercel.json`, `website/privacy/index.html` |
 | Biometrics | Operating-system authentication result; no biometric template exposed to Gumbo | `ProfileStore.swift` |
 
-The package manifests include GumboCore and GumboShared, with no third-party SDK dependency. The project targets include privacy manifests declaring required UserDefaults/file-timestamp reasons, no tracking, and no developer-collected data types. These manifests are not substitutes for the app-level App Store answers.
+The packages include GumboCore, GumboShared and the dynamic GumboSMB transport library. GumboSMB provides SMB networking and cryptography, not analytics or a developer-operated collection service. The project targets include privacy manifests declaring required UserDefaults/file-timestamp reasons, no tracking, and no developer-collected data types. These manifests are not substitutes for the app-level App Store answers.
 
 ## Proposed App Store answer rationale to confirm before publication
 
@@ -44,7 +44,7 @@ The no-tracking manifest declaration is consistent with the reviewed source. The
 
 1. Verify the deployed policy at `https://gumbo.one/privacy/`. Confirm an approved public support email and support-retention practice beyond the current TestFlight contact route.
 2. Set that public URL and Apple TV policy text, then verify read-back through App Store Connect. The website change does not perform these store updates.
-3. Review, save and publish the app-level privacy answers for the final release. This has not been performed by these source changes.
+3. App-level answers were saved, published with owner confirmation, and read back on 21 September 2026. Reconcile them again if the release changes data handling.
 4. Confirm onboarding and Settings behavior on the signed TestFlight builds across platforms.
 
 Apple requires a public privacy-policy URL and tvOS policy text before public release: [Manage app privacy](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy).
@@ -52,3 +52,11 @@ Apple requires a public privacy-policy URL and tvOS policy text before public re
 ## Related documentation
 
 - [App Store Packaging Validation](APP-STORE-PACKAGING-VALIDATION.md) — Complete checklist for archive builds, entitlements, privacy manifests, TestFlight uploads, and App Store metadata requirements.
+
+## Current Gumbo declaration preparation — 21 September 2026
+
+The owner confirmed: Apple usage/crash reports are used to fix bugs; feedback stays in TestFlight. The current app is `6814252548`. Privacy URL, tvOS policy and support URLs have been saved and independently read back.
+
+The published App Privacy declaration contains eight categories: Name, Email Address, Photos or Videos, Customer Support, Product Interaction, Crash Data, Performance Data and Other Diagnostic Data. Each is used for App Functionality, potentially linked to identity, and not used for tracking. This covers developer-accessible Apple reports and voluntarily supplied TestFlight feedback/contact details/screenshots; it does not claim that Gumbo uploads private music or CloudKit profile libraries to a developer backend. Optional feedback is disclosed rather than assuming every submission qualifies for Apple's optional-disclosure exception. Apple can associate beta reports with invited testers or submitted contact details, so the declaration does not promise universal anonymization.
+
+The owner explicitly approved Apple’s final accuracy/compliance/update statement. The declaration was then published and the page reloaded: **Published a few seconds ago by Sam Voltolini**, with all eight data types still present, each used for App Functionality and linked to identity. No category is used for tracking. This publishes privacy responses, not an App Store version or new TestFlight build.

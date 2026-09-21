@@ -88,6 +88,47 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
         }
     }
 
+    func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
+                      progress: @escaping @Sendable (Double) -> Void) async throws -> Int64 {
+        // The protected handle spans the whole file. Give it its own authenticated context so
+        // playback/seek, artwork and listing requests can still use the ordinary session queue.
+        let transfer = SMBCSession(settings: settings, password: password)
+        return try await transfer.perform { client, cancellation in
+            let context = try client.connected(cancellation)
+            guard let file = gumbo_smb2_open_read_snapshot(context, path) else { throw client.failure() }
+            defer { _ = smb2_close(context, file) }
+            var before = smb2_stat_64()
+            try client.check(smb2_fstat(context, file, &before))
+            guard before.smb2_type == SMB2_TYPE_FILE,
+                  before.smb2_attributes & UInt32(SMB2_FILE_ATTRIBUTE_REPARSE_POINT) == 0,
+                  before.smb2_size > 0, before.smb2_size <= UInt64(Int64.max),
+                  expectedBytes == nil || expectedBytes == Int64(before.smb2_size) else { throw ProviderError.changed }
+            let maximum = min(smb2_get_max_read_size(context), 1024 * 1024)
+            let copied = try VerifiedSMBTransfer.copy(size: Int64(before.smb2_size), maximumChunk: Int(maximum),
+                                                      destination: destination, checkCancellation: cancellation.check) { range in
+                var bytes = [UInt8](repeating: 0, count: range.count)
+                let count = smb2_pread(context, file, &bytes, UInt32(bytes.count), UInt64(range.lowerBound))
+                try client.check(count)
+                guard count >= 0, count <= bytes.count else { throw SMBDriveError.invalidResponse }
+                return Data(bytes.prefix(Int(count)))
+            } progress: { fraction in progress(fraction) }
+            try cancellation.check()
+            var after = smb2_stat_64()
+            try client.check(smb2_fstat(context, file, &after))
+            // Detect observed out-of-protocol/local writers too. These attributes are never a
+            // strong persisted validator; the protected handle plus byte verification does that.
+            guard before.smb2_type == after.smb2_type, before.smb2_ino == after.smb2_ino,
+                  before.smb2_size == after.smb2_size, before.smb2_mtime == after.smb2_mtime,
+                  before.smb2_mtime_nsec == after.smb2_mtime_nsec, before.smb2_ctime == after.smb2_ctime,
+                  before.smb2_ctime_nsec == after.smb2_ctime_nsec, before.smb2_btime == after.smb2_btime,
+                  before.smb2_btime_nsec == after.smb2_btime_nsec else {
+                try? FileManager.default.removeItem(at: destination)
+                throw ProviderError.changed
+            }
+            return copied.bytes
+        }
+    }
+
     private func perform<T: Sendable>(_ operation: @escaping @Sendable (SMBCSession, SMBOperationCancellation) throws -> T) async throws -> T {
         let cancellation = SMBOperationCancellation()
         return try await withTaskCancellationHandler {

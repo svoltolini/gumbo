@@ -137,7 +137,7 @@ struct SettingsView: View {
                 #if !os(tvOS)
                 NavigationLink(value: LibraryRoute.downloads) {
                     LabeledContent {
-                        Text(downloads.totalBytes == 0 ? "None" : ByteText.format(downloads.totalBytes)).foregroundStyle(.secondary)
+                        Text(downloads.totalBytes + downloads.retainedPartialBytes == 0 ? "None" : ByteText.format(downloads.totalBytes + downloads.retainedPartialBytes)).foregroundStyle(.secondary)
                     } label: { NativeSettingsLabel("Downloads", symbol: "arrow.down.circle") }
                 }
                 #endif

@@ -11,7 +11,7 @@
 +#include "gumbo-smb-policy.h"
 --- /dev/null
 +++ b/include/gumbo-smb-policy.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,18 @@
 +/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
 + * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
 +/* Gumbo policy additions, Copyright 2026 Samuel Voltolini. LGPL-2.1-or-later.
@@ -20,6 +20,9 @@
 +#define GUMBO_SMB_POLICY_H
 +#include <stdint.h>
 +struct smb2_context;
++struct smb2fh;
++/* One read handle denies cooperating SMB writers/deleters until close. No lease fallback. */
++struct smb2fh *gumbo_smb2_open_read_snapshot(struct smb2_context *context, const char *path);
 +void gumbo_smb2_require_secure_session(struct smb2_context *context, int require_encryption);
 +void gumbo_smb2_set_cancellation(struct smb2_context *context, int (*callback)(void *), void *data);
 +int gumbo_smb2_directory_budget(uint64_t entries, uint64_t pages, uint64_t bytes, uint64_t elapsed_seconds);
@@ -35,22 +38,23 @@
  /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
  /*
     Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
-@@ -160,6 +162,12 @@
- 
+@@ -160,6 +162,13 @@
+
  struct smb2_context {
- 
+
 +        /* Gumbo: opt-in strict authenticated, optionally encrypted client policy. */
 +        int gumbo_require_authenticated;
 +        int gumbo_require_encryption;
++        int gumbo_read_snapshot;
 +        int (*gumbo_should_cancel)(void *);
 +        void *gumbo_cancellation_data;
 +
          t_socket fd;
- 
+
          struct smb2_server *owning_server;
-@@ -389,6 +397,7 @@
+@@ -389,6 +398,7 @@
  };
- 
+
  struct smb2dir {
 +        uint64_t gumbo_entries, gumbo_pages, gumbo_bytes, gumbo_started;
          smb2_command_cb cb;
@@ -127,10 +131,87 @@
  /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
  /*
     Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
-@@ -950,3 +952,20 @@
+@@ -47,6 +49,7 @@
+
+ #include <stdarg.h>
+ #include <stdio.h>
++#include <pthread.h>
+
+ #ifdef HAVE_TIME_H
+ #include <time.h>
+@@ -94,6 +97,9 @@
+  * here to tell the server when a context is destroyed, but this works
+  */
+ static struct smb2_context *active_contexts;
++/* Gumbo client contexts use independent queues. The upstream list macros mutate the list
++ * head during removal, so even unrelated context lifetimes must be serialized here. */
++static pthread_mutex_t context_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+
+ static int
+ smb2_parse_args(struct smb2_context *smb2, char *args)
+@@ -399,7 +405,9 @@
+         static int ctr;
+
+         /* Only seeds the fallback path in smb2_random_bytes(). */
++        pthread_mutex_lock(&context_registry_lock);
+         srandom((unsigned)time(NULL) ^ getpid() ^ ctr++);
++        pthread_mutex_unlock(&context_registry_lock);
+
+         smb2 = calloc(1, sizeof(struct smb2_context));
+         if (smb2 == NULL) {
+@@ -424,7 +432,9 @@
+
+         smb2->session_key = NULL;
+
++        pthread_mutex_lock(&context_registry_lock);
+         SMB2_LIST_ADD(&active_contexts, smb2);
++        pthread_mutex_unlock(&context_registry_lock);
+
+         return smb2;
+ }
+@@ -511,26 +521,35 @@
+             free_c_data(smb2, smb2->connect_data);  /* sets smb2->connect_data to NULL */
+         }
+
++        pthread_mutex_lock(&context_registry_lock);
+         SMB2_LIST_REMOVE(&active_contexts, smb2);
++        pthread_mutex_unlock(&context_registry_lock);
+         free(smb2);
+ }
+
+ struct smb2_context *smb2_active_contexts(void)
+ {
++        /* Legacy server iterator: the caller must still serialize its whole traversal with
++         * server context lifetimes. Gumbo's client adapter never uses this raw iterator. */
+         return active_contexts;
+ }
+
+ int smb2_context_active(struct smb2_context *smb2)
+ {
+-        struct smb2_context *context = active_contexts;
++        struct smb2_context *context;
++        int found = 0;
++        pthread_mutex_lock(&context_registry_lock);
++        context = active_contexts;
+
+         while (context) {
+                 if (smb2 == context) {
+-                        return 1;
++                        found = 1;
++                        break;
+                 }
+                 context = context->next;
+         }
+-        return 0;
++        pthread_mutex_unlock(&context_registry_lock);
++        return found;
+ }
+
+ void smb2_free_iovector(struct smb2_context *smb2, struct smb2_io_vectors *v)
+@@ -950,3 +969,20 @@
  }
  #endif
- 
+
 +
 +/* Gumbo policy entry point; never silently negotiate guest or weaker protection. */
 +void gumbo_smb2_require_secure_session(struct smb2_context *context, int encrypted)
@@ -158,11 +239,11 @@
     Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
 @@ -58,6 +60,7 @@
  #endif
- 
+
  #include <errno.h>
 +#include <time.h>
  #include <stdio.h>
- 
+
  #ifdef HAVE_SYS_POLL_H
 @@ -102,6 +105,7 @@
  #include "libsmb2.h"
@@ -175,7 +256,7 @@
 @@ -355,6 +359,32 @@
          }
  }
- 
+
 +static uint64_t
 +gumbo_monotonic_seconds(void)
 +{
@@ -208,7 +289,7 @@
 @@ -372,20 +402,20 @@
                          return -1;
                  }
- 
+
 +                int budget = gumbo_directory_check(smb2, dir, 1);
 +                if (budget != 0) return budget;
 +                tmp_vec.buf = &vec->buf[offset];
@@ -239,7 +320,7 @@
 @@ -450,8 +480,12 @@
                  vec.buf = rep->output_buffer;
                  vec.len = rep->output_buffer_length;
- 
+
 -                if (decode_dirents(smb2, dir, &vec) < 0) {
 -                        dir->cb(smb2, -ENOMEM, NULL, dir->cb_data);
 +                dir->gumbo_pages++;
@@ -256,13 +337,13 @@
          dir->cb = cb;
          dir->cb_data = cb_data;
 +        dir->gumbo_started = gumbo_monotonic_seconds();
- 
+
          memset(&req, 0, sizeof(struct smb2_create_request));
          req.requested_oplock_level = SMB2_OPLOCK_LEVEL_NONE;
 @@ -795,6 +830,14 @@
                  return;
          }
- 
+
 +        if (smb2->gumbo_require_authenticated && gumbo_smb2_validate_session(rep->session_flags) != 0) {
 +                smb2_close_context(smb2);
 +                smb2_set_error(smb2, "Guest or anonymous SMB session refused");
@@ -292,6 +373,28 @@
                          smb2_close_context(smb2);
                          smb2_set_error(smb2, "Session setup reply is not "
                                         "signed but signing is required");
+@@ -1601,7 +1644,7 @@
+          * caller's back, since the retry would silently drop the lease
+          * request, so those are left to report the symlink as an error.
+          */
+-        if (!lease_state) {
++        if (!lease_state && !smb2->gumbo_read_snapshot) {
+                 fh->path = strdup(path);
+                 if (fh->path == NULL) {
+                         smb2_set_error(smb2, "Failed to allocate path");
+@@ -1611,6 +1654,12 @@
+         }
+
+         open_flags_to_create_request(&req, path, flags, oplock_level);
++        if (smb2->gumbo_read_snapshot) {
++                /* Resume verification and tail reads use this same open. Do not follow
++                 * symlinks or silently grant write/delete sharing on a retry. */
++                req.share_access = SMB2_FILE_SHARE_READ;
++                req.create_options |= SMB2_FILE_OPEN_REPARSE_POINT;
++        }
+
+         if (lease_state && lease_key) {
+                 req.create_context_length = SMB2_CREATE_REQUEST_LEASE_SIZE + 24;
 --- a/lib/smb2-cmd-query-directory.c
 +++ b/lib/smb2-cmd-query-directory.c
 @@ -1,3 +1,5 @@
@@ -308,7 +411,7 @@
 +        uint32_t name_len, next;
          uint64_t t;
 +        memset(fs, 0, sizeof(*fs));
- 
+
          /* Make sure the name fits before end of vector.
           * As the name is the final part of this blob this guarantees
           * that all other fields also fit within the remainder of the
@@ -328,7 +431,7 @@
 @@ -82,7 +87,17 @@
          smb2_get_uint32(vec, 64, &fs->ea_size);
          smb2_get_uint64(vec, 72, &fs->file_id);
- 
+
 +        for (uint32_t i = 0; i < name_len; i += 2) {
 +                if (vec->buf[80 + i] == 0 && vec->buf[81 + i] == 0) {
 +                        smb2_set_error(smb2, "Embedded NUL in directory name");
@@ -340,7 +443,7 @@
 +                smb2_set_error(smb2, "Invalid directory name");
 +                return -1;
 +        }
- 
+
          smb2_get_uint64(vec, 8, &t);
          smb2_win_to_timeval(t, &fs->creation_time);
 --- a/lib/socket.c
@@ -358,7 +461,7 @@
 +#include "gumbo-smb-policy.h"
  #include "portable-endian.h"
  #include <errno.h>
- 
+
 @@ -534,6 +537,34 @@
                  else if (smb2_is_server(smb2) && (smb2->hdr.flags & SMB2_FLAGS_SERVER_TO_REDIR)) {
                          smb2_set_error(smb2, "received non-request");
@@ -397,7 +500,7 @@
 @@ -883,6 +914,14 @@
                  return -1;
          }
- 
+
 +        if (smb2_is_server(smb2) && smb2->gumbo_require_authenticated &&
 +            gumbo_smb2_validate_packet(smb2->gumbo_require_encryption, 1,
 +                                      smb2->hdr.command, smb2->enc != NULL,
@@ -421,4 +524,29 @@
 +            (pdu->header.command != SMB2_SESSION_SETUP) &&
              !smb2->enc) {
                  uint8_t signature[16] _U_;
- 
+
+--- a/lib/sync.c
++++ b/lib/sync.c
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: protected read handle for verified download resume.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source/license details. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -236,6 +238,16 @@
+         cb_data->ptr = command_data;
+ }
+
++struct smb2fh *gumbo_smb2_open_read_snapshot(struct smb2_context *smb2, const char *path)
++{
++        struct smb2fh *result;
++        /* The caller serializes this context. Keep the flag set throughout any callbacks. */
++        smb2->gumbo_read_snapshot = 1;
++        result = smb2_open(smb2, path, 0);
++        smb2->gumbo_read_snapshot = 0;
++        return result;
++}
++
+ struct smb2fh *smb2_open(struct smb2_context *smb2, const char *path, int flags)
+ {
+         struct smb2_pdu *pdu;

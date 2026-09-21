@@ -49,6 +49,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <pthread.h>
 
 #ifdef HAVE_TIME_H
 #include <time.h>
@@ -96,6 +97,9 @@
  * here to tell the server when a context is destroyed, but this works
  */
 static struct smb2_context *active_contexts;
+/* Gumbo client contexts use independent queues. The upstream list macros mutate the list
+ * head during removal, so even unrelated context lifetimes must be serialized here. */
+static pthread_mutex_t context_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int
 smb2_parse_args(struct smb2_context *smb2, char *args)
@@ -401,7 +405,9 @@ struct smb2_context *smb2_init_context(void)
         static int ctr;
 
         /* Only seeds the fallback path in smb2_random_bytes(). */
+        pthread_mutex_lock(&context_registry_lock);
         srandom((unsigned)time(NULL) ^ getpid() ^ ctr++);
+        pthread_mutex_unlock(&context_registry_lock);
 
         smb2 = calloc(1, sizeof(struct smb2_context));
         if (smb2 == NULL) {
@@ -426,7 +432,9 @@ struct smb2_context *smb2_init_context(void)
 
         smb2->session_key = NULL;
 
+        pthread_mutex_lock(&context_registry_lock);
         SMB2_LIST_ADD(&active_contexts, smb2);
+        pthread_mutex_unlock(&context_registry_lock);
 
         return smb2;
 }
@@ -513,26 +521,35 @@ void smb2_destroy_context(struct smb2_context *smb2)
             free_c_data(smb2, smb2->connect_data);  /* sets smb2->connect_data to NULL */
         }
 
+        pthread_mutex_lock(&context_registry_lock);
         SMB2_LIST_REMOVE(&active_contexts, smb2);
+        pthread_mutex_unlock(&context_registry_lock);
         free(smb2);
 }
 
 struct smb2_context *smb2_active_contexts(void)
 {
+        /* Legacy server iterator: the caller must still serialize its whole traversal with
+         * server context lifetimes. Gumbo's client adapter never uses this raw iterator. */
         return active_contexts;
 }
 
 int smb2_context_active(struct smb2_context *smb2)
 {
-        struct smb2_context *context = active_contexts;
+        struct smb2_context *context;
+        int found = 0;
+        pthread_mutex_lock(&context_registry_lock);
+        context = active_contexts;
 
         while (context) {
                 if (smb2 == context) {
-                        return 1;
+                        found = 1;
+                        break;
                 }
                 context = context->next;
         }
-        return 0;
+        pthread_mutex_unlock(&context_registry_lock);
+        return found;
 }
 
 void smb2_free_iovector(struct smb2_context *smb2, struct smb2_io_vectors *v)

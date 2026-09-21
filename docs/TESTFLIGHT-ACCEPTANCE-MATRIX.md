@@ -87,10 +87,7 @@ Verify required capabilities in signed binaries:
 
 ### Export Compliance
 
-All Info.plist files must declare:
-```
-ITSAppUsesNonExemptEncryption: false
-```
+Reassess the actual binary before each upload. Provider-aware iOS/Mac/TV builds include libsmb2 cryptography, so their former blanket `ITSAppUsesNonExemptEncryption=false` answer has been removed pending the encryption questionnaire and any required documentation. Watch uses Apple services and has no libsmb2 dependency. See [review notes](APP_REVIEW_NOTES.md).
 
 ---
 

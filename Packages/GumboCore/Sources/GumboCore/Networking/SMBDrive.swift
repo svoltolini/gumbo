@@ -108,10 +108,19 @@ nonisolated protocol SMBReadSession: Sendable {
     func info(_ path: String) async throws -> SMBFileInfo
     func read(_ path: String, range: Range<Int64>) async throws -> Data
     func disconnect() async
+    func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
+                      progress: @escaping @Sendable (Double) -> Void) async throws -> Int64
+}
+
+nonisolated extension SMBReadSession {
+    func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
+                      progress: @escaping @Sendable (Double) -> Void) async throws -> Int64 {
+        throw SMBDriveError.unavailableOnPlatform
+    }
 }
 
 /// Read-only SMB2/3 shared folder. No mount, URL credentials or HTTP downgrade is involved.
-public actor SMBDrive: RemoteFileDrive {
+public actor SMBDrive: RemoteFileDrive, ResumableRemoteFileDrive {
     public nonisolated let id: String
     public nonisolated let displayName: String
     public nonisolated let share: String
@@ -146,6 +155,27 @@ public actor SMBDrive: RemoteFileDrive {
 
     public func connect() async throws { try await session.connect() }
     public func disconnect() async { await session.disconnect() }
+
+    public func copyVerified(_ path: String, to checkpoint: URL, expectedBytes: Int64?,
+                             progress: @escaping @Sendable (Double) async -> Void) async throws -> Int64 {
+        let relative = try SMBConnectionSettings.relativePath(path)
+        try Task.checkCancellation()
+        let updates = AsyncStream<Double>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let relay = Task { for await fraction in updates.stream { await progress(fraction) } }
+        do {
+            let size = try await session.copyVerified(relative, to: checkpoint, expectedBytes: expectedBytes) { fraction in
+                updates.continuation.yield(fraction)
+            }
+            updates.continuation.finish()
+            await relay.value
+            try Task.checkCancellation()
+            return size
+        } catch {
+            updates.continuation.finish()
+            await relay.value
+            throw error
+        }
+    }
 
     public func roots() async throws -> [RemoteEntry] {
         try Task.checkCancellation()

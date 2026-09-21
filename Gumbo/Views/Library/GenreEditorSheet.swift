@@ -147,7 +147,9 @@ struct GenreEditorSheet: View {
                 library.metadataWriter.cancel()
             }
         } footer: {
-            Text("Each song is downloaded, its genre tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
+            Text(library.activeTagService != nil
+                 ? "Your metadata helper updates the genre tags on your server without downloading the music to this device. Songs already written stay written if you stop."
+                 : "Each song is downloaded, its genre tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -181,9 +183,16 @@ struct GenreEditorSheet: View {
             return "The genre tag of \(songs) is rewritten on your NAS. Other tags stay as they are; with many songs this can take a while."
         }
         if let mergeTarget {
-            return "“\(genre.name)” disappears and its \(genre.countText) join “\(mergeTarget.name)” on this \(Device.noun). Connect to your server to change the files themselves."
+            return "“\(genre.name)” disappears and its \(genre.countText) join “\(mergeTarget.name)” on this \(Device.noun). \(fileEditingGuidance)"
         }
-        return "Albums tagged “\(genre.name)” show under this name on this \(Device.noun). Connect to your server to change the files themselves."
+        return "Albums tagged “\(genre.name)” show under this name on this \(Device.noun). \(fileEditingGuidance)"
+    }
+
+    private var fileEditingGuidance: String {
+        if library.canInspectFiles && library.drive?.capabilities.supportsTagReplacement != true {
+            return "This server connection is read-only. Your library host can set up the optional metadata helper in Advanced Settings to edit the files."
+        }
+        return "Connect to your server to change the files themselves."
     }
 
     private func save() {
