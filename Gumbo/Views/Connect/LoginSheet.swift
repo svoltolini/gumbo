@@ -9,6 +9,7 @@ struct LoginSheet: View {
     @State private var password = ""
     @State private var otpCode = ""
     @State private var remember = true
+    @State private var syncCredentials = false
     @State private var httpAllowed = false
     @FocusState private var focus: Field?
 
@@ -46,10 +47,21 @@ struct LoginSheet: View {
                             .focused($focus, equals: .otp)
                     }
                     Toggle("Remember me", isOn: $remember)
+                        .disabled(model.isSigningIn)
+                    if model.supportsCredentialSync {
+                        Toggle("Sync sign-in with iCloud Keychain", isOn: $syncCredentials)
+                            .disabled(!remember || model.isSigningIn)
+                            .accessibilityIdentifier("signIn.syncCredentials")
+                    }
                 } header: {
                     Text("DSM account")
                 } footer: {
-                    Text("Signs in with your DiskStation account. Your music is read through File Station, so nothing needs to be installed on the NAS.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Signs in with your DiskStation account. Nothing needs to be installed on the NAS.")
+                        if model.supportsCredentialSync {
+                            Text("Optional sign-in sync uses iCloud Keychain on your iPhone, iPad and Mac with the same Apple Account. It does not share your password with your Gumbo family. Turn on Passwords & Keychain in iCloud settings on each device.")
+                        }
+                    }
                 }
                 if let error = model.signInError {
                     Section {
@@ -80,6 +92,7 @@ struct LoginSheet: View {
             .interactiveDismissDisabled(model.isSigningIn)
             .onAppear {
                 httpAllowed = NASTransportSecurity.isAllowed(server.baseURL)
+                syncCredentials = model.syncCredentialsAcrossDevices
                 if let familyAccount = model.pendingFamilyAccount {
                     account = familyAccount
                     password = model.pendingFamilyPassword ?? ""
@@ -95,7 +108,22 @@ struct LoginSheet: View {
                     focus = account.isEmpty ? .account : .password
                 }
             }
+            .onChange(of: model.needsOTP) {
+                guard model.needsOTP else { return }
+                if let pendingPassword = model.pendingReconnectPassword {
+                    password = pendingPassword
+                }
+                focus = .otp
+            }
+            .onChange(of: account) {
+                // A different NAS account needs its own explicit choice to sync its password.
+                if account != (model.pendingFamilyAccount ?? model.connection?.account) { syncCredentials = false }
+            }
+            .onChange(of: remember) {
+                if !remember { syncCredentials = false }
+            }
             .onChange(of: server.id) {
+                syncCredentials = model.syncCredentialsAcrossDevices
                 account = model.pendingFamilyAccount ?? ""
                 password = model.pendingFamilyPassword ?? ""
                 otpCode = ""
@@ -108,7 +136,7 @@ struct LoginSheet: View {
     private func submit() {
         guard !account.isEmpty, !password.isEmpty, transportAllowed else { return }
         Task {
-            await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember)
+            await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember, syncCredentials: remember && syncCredentials)
         }
     }
 

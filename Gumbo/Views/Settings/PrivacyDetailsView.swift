@@ -7,7 +7,7 @@ struct PrivacyDetailsView: View {
     private let sections: [(title: String, paragraphs: [String])] = [
         ("Your music", [
             "Gumbo reads music, tags and covers from the NAS you connect. Music streams directly from your NAS or plays from downloads on your device. Gumbo does not upload your music files to a Gumbo service.",
-            "Your NAS receives the sign-in details and file requests needed to connect and play music. Its administrator controls the server and its logs. Gumbo saves your personal NAS password in the device Keychain."
+            "Your NAS receives the sign-in details and file requests needed to connect and play music. Its administrator controls the server and its logs. If you choose Remember Me, Gumbo saves your personal NAS password in the device Keychain."
         ]),
         ("Album artwork", [
             Self.artworkDisclosure
@@ -15,6 +15,10 @@ struct PrivacyDetailsView: View {
         ("Optional genre lookup and file maintenance", [
             "When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for genres. It does not send audio, file paths or NAS sign-in details. You can enter genres yourself without using online lookup.",
             "Saving reviewed genres writes tags into the original NAS music files. Problem Files can permanently delete selected, rechecked damaged files after confirmation. These changes affect everyone using that NAS; they are different from removing a download from your device."
+        ]),
+        ("Your sign-in across devices", [
+            "On iPhone, iPad and Mac, Sync sign-in with iCloud Keychain is optional and off by default. When enabled, your saved NAS address, account and password sync through Apple’s iCloud Keychain to Gumbo on devices using the same Apple Account with Passwords & Keychain enabled. It does not share your password with your Gumbo family or save it in family CloudKit records.",
+            "You can turn this off in Settings → Music Server. This removes the synced copy while keeping sign-ins already remembered on individual devices. Signing out of one device removes its local sign-in, but does not remove the synced copy. Two-factor codes and NAS sessions are not synced this way. Apple TV does not use this sign-in sync."
         ]),
         ("iCloud and family sharing", [
             "When iCloud is available, Gumbo syncs profile names, chosen profile photos, favourites, playlists, recent plays, searches and settings through Apple's CloudKit service. It also syncs the information needed to reconcile your changes between devices.",

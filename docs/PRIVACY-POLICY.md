@@ -6,7 +6,13 @@ The public policy is maintained in [`website/privacy/index.html`](../website/pri
 
 Gumbo Music connects to the NAS you select to read your music files, tags and cover images. Music streams directly from that NAS or plays from downloads on your device. Gumbo does not operate a music-storage service and does not upload your music files to a Gumbo server.
 
-Your NAS receives the credentials, folder requests and media requests needed for these features. Its administrator controls its permissions, logging and retention. Your personal NAS password is saved in the device Keychain. NAS addresses, account names, selected folders and library metadata are saved locally so Gumbo can reconnect and display the library.
+Your NAS receives the credentials, folder requests and media requests needed for these features. Its administrator controls its permissions, logging and retention. If you choose Remember Me, your personal NAS password is saved in the device Keychain. NAS addresses, account names, selected folders and library metadata are saved locally so Gumbo can reconnect and display the library.
+
+## Optional sign-in sync
+
+On iPhone, iPad and Mac, **Sync sign-in with iCloud Keychain** is optional and off by default. When enabled, the saved NAS address, account and password sync through Apple's iCloud Keychain to Gumbo on devices using the same Apple Account with Passwords & Keychain enabled. This does not add personal credentials to the family CloudKit record or share them with Gumbo family members. Two-factor codes and NAS sessions are not synced this way. Apple TV does not use this sign-in sync.
+
+Turn it off in Settings → Music Server to remove the synced copy. Local passwords already remembered by individual devices remain; signing out of one device removes its local sign-in without removing the synced copy. iCloud Keychain changes require connectivity and Apple's sync service to reach other devices.
 
 ## Album artwork
 

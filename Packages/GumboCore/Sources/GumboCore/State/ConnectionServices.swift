@@ -10,6 +10,10 @@ struct ConnectionServices {
     var password: (String) -> String? = { KeychainStore.password(for: $0) }
     var savePassword: (String, String) -> Void = { KeychainStore.save(password: $0, for: $1) }
     var deletePassword: (String) -> Void = { KeychainStore.delete(account: $0) }
+    var supportsCredentialSync: () -> Bool = { SyncedServerCredentialStore.isSupported }
+    var syncedPassword: (ServerConnection) -> String? = { SyncedServerCredentialStore.password(for: $0) }
+    var saveSyncedPassword: (String, ServerConnection) -> Bool = { SyncedServerCredentialStore.save(password: $0, for: $1) }
+    var deleteSyncedPassword: (ServerConnection) -> Bool = { SyncedServerCredentialStore.delete(for: $0) }
     var loadCatalogue: () -> Catalogue? = { LibraryStore.loadCachedCatalogue() }
     var deleteCatalogue: () -> Void = { LibraryStore.deleteCache() }
     var log: (String) -> Void = { DiagnosticsLog.shared.record($0) }

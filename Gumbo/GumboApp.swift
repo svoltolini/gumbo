@@ -219,7 +219,9 @@ struct GumboApp: App {
             widgetFeed.refresh()
         }
         cloud.familyInfoProvider = { [model] in model.familyInfo }
-        cloud.onFamilyInfo = { [model] info in model.familyArrived(info) }
+        cloud.onFamilyInfo = { [model, weak cloud] info in
+            model.familyArrived(info, isOwner: cloud?.currentUserRecordName != nil && cloud?.isOwner == true)
+        }
         model.onFamilyAccessChanged = { [cloud] in Task { await cloud.refresh(reason: "family access changed") } }
         player.settingsChanged = { [profiles] repeatMode, shuffle in
             profiles.updateSettings {

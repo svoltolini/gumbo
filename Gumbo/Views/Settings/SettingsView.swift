@@ -238,24 +238,46 @@ struct SettingsView: View {
     }
 
     private var serverSections: some View {
-        Section {
-            LabeledContent("Server", value: model.serverTitle)
-            LabeledContent("Status", value: model.isConnected ? "Connected" : "Offline")
-            if model.connection != nil, permissions.canManageServer {
-                NavigationLink { FolderPickerView(mode: .settings) } label: {
-                    LabeledContent("Music Folder", value: model.musicFolderLabel)
-                }
-                if !model.isConnected {
-                    Button(model.isReconnecting ? "Reconnecting…" : "Reconnect") {
-                        Task { await model.reconnect() }
+        Group {
+            Section {
+                LabeledContent("Server", value: model.serverTitle)
+                LabeledContent("Status", value: model.isConnected ? "Connected" : "Offline")
+                if model.connection != nil, permissions.canManageServer {
+                    NavigationLink { FolderPickerView(mode: .settings) } label: {
+                        LabeledContent("Music Folder", value: model.musicFolderLabel)
                     }
-                    .disabled(model.isReconnecting)
+                    if !model.isConnected {
+                        Button(model.isReconnecting ? "Reconnecting…" : "Reconnect") {
+                            Task { await model.reconnect() }
+                        }
+                        .disabled(model.isReconnecting)
+                    }
+                    if let error = model.signInError, !model.isReconnecting {
+                        Text(error).foregroundStyle(.red)
+                    }
                 }
-                if let error = model.signInError, !model.isReconnecting {
-                    Text(error).foregroundStyle(.red)
+                Button("Connect Away from Home") { isShowingRemoteAccessHelp = true }
+            }
+            if model.supportsCredentialSync, model.connection != nil, !model.isDemo, permissions.canLeave {
+                Section {
+                    Toggle("Sync sign-in with iCloud Keychain", isOn: Binding(
+                        get: { model.syncCredentialsAcrossDevices },
+                        set: { model.setCredentialSyncEnabled($0) }
+                    ))
+                    .accessibilityIdentifier("settings.syncCredentials")
+                    .disabled(model.isSigningIn || model.isReconnecting || model.isJoiningFamily)
+                    if let error = model.credentialSyncError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } header: {
+                    Text("Your Devices")
+                } footer: {
+                    Text("Use your saved NAS account and password on your iPhone, iPad and Mac with the same Apple Account. Turn on Passwords & Keychain in iCloud settings on each device. Your password is not shared with your Gumbo family. Turning this off removes the synced copy; devices that already remember your sign-in stay connected.")
                 }
             }
-            Button("Connect Away from Home") { isShowingRemoteAccessHelp = true }
         }
     }
 

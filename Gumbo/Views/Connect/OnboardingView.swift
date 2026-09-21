@@ -22,7 +22,7 @@ struct OnboardingPage: Identifiable {
             OnboardingPage(
                 id: 1,
                 title: "Your sign-in\nis yours.",
-                text: "Your NAS password is saved in the Keychain on this \(Device.noun). There is no Gumbo account to create. Gumbo shares the NAS credentials you choose for Family Access. Use a separate read-only NAS account.",
+                text: "Your NAS password is saved in Keychain. On iPhone, iPad and Mac, you can choose to sync it with iCloud Keychain across your own devices. This does not share it with your Gumbo family. Family Access uses the NAS account you separately choose; use a read-only account.",
                 tint: Color(hex: "#9a8fd0")
             ),
             OnboardingPage(
