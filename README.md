@@ -50,6 +50,8 @@ Passing a build or local simulator check is not sufficient release evidence. Pro
 
 Recent feature notes: [optional personal sign-in sync](docs/ICLOUD-KEYCHAIN-2026-09-21.md) and [owner-reviewed album deletion](docs/ALBUM-DELETION-2026-09-21.md).
 
+Voice controls: [Siri and Shortcuts setup](docs/SIRI.md). See [playback feedback and Mac genre-save validation](docs/PLAYBACK-GENRE-SIRI-2026-09-21.md) for implementation evidence and remaining physical acceptance.
+
 ## Current audit
 
 The release-readiness review from 14 September 2026 is in [docs/RELEASE-AUDIT-2026-09-14.md](docs/RELEASE-AUDIT-2026-09-14.md). The tracked backlog is in [GitHub Issues](https://github.com/svoltolini/gumbo/issues).

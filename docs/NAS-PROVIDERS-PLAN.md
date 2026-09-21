@@ -107,6 +107,8 @@ Read-only libraries must support normal browsing and playback. Metadata/tag main
 
 Revalidate authority, root, file version and permissions before each confirmed operation. Album deletion acts on reviewed exact music files only; never delete a folder recursively or infer that an uncertain request succeeded. Keep artwork/unrelated files unless separately reviewed. Handle partial completion explicitly and propagate confirmed removals through existing catalogue/download/Watch cleanup. Tag replacement preserves the original until a verified replacement and rollback path are available. Provider tests use disposable fixtures; no automatic deletion of users' libraries.
 
+Performance follow-up [#201](https://github.com/svoltolini/gumbo/issues/201) evaluates an optional server-side tag-edit capability so only metadata changes cross the network. Synology documents Audio Station's editing UI, but a supported integration API still needs verification; a restricted NAS helper is an alternative requiring separate setup. Do not mistake WebDAV properties or unguarded SMB byte writes for safe embedded-tag updates. The client rewrite remains the fallback, and installing a helper is not required for ordinary listening or provider compatibility.
+
 ## Delivery and tracking
 
 Create bounded child issues for the following work. The parent remains open until both transports and the documented cross-platform experience are delivered or its scope is explicitly revised.

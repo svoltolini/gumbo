@@ -25,12 +25,21 @@ struct MacTrackTable: View {
         let displayed = input.contentReady && presentation?.input.scope == input.scope ? presentation : nil
         Table(displayed?.rows ?? [], selection: $selection, sortOrder: $sortOrder) {
             TableColumn("#", value: \.position) { row in
-                Text((row.position + 1).formatted()).foregroundStyle(.secondary)
+                let state = player.playbackState(for: row.entry.track, sourceID: displayed?.input.scope.sourceID ?? "")
+                Group {
+                    if state == .inactive {
+                        Text((row.position + 1).formatted()).foregroundStyle(.secondary)
+                    } else {
+                        TrackPlaybackIndicator(state: state)
+                    }
+                }
+                .frame(width: 24, alignment: .center)
             }
             .width(min: 34, ideal: 40, max: 56)
             TableColumn("Title", value: \.title) { row in
                 HStack(spacing: 8) {
                     Text(row.title).lineLimit(1)
+                        .fontWeight(player.playbackState(for: row.entry.track, sourceID: displayed?.input.scope.sourceID ?? "") == .inactive ? .regular : .semibold)
                     MacSongStatus(track: row.entry.track, library: library, downloads: downloads)
                 }
             }

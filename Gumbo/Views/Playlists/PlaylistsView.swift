@@ -160,6 +160,7 @@ struct PlaylistDetailView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
     @Environment(DownloadManager.self) private var downloads
+    @Environment(ProfileStore.self) private var profiles
     @State private var addingTrack: Track?
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -182,7 +183,9 @@ struct PlaylistDetailView: View {
     }
 
     private func content(_ playlist: Playlist) -> some View {
-        ScrollView {
+        let sourceID = library.catalogue.driveID
+        let sessionID = profiles.sessionID
+        return ScrollView {
             VStack(spacing: 0) {
                 DetailHeader(coverSize: 200) {
                     PlaylistCover(playlist: playlist, cornerRadius: 14)
@@ -195,9 +198,15 @@ struct PlaylistDetailView: View {
                         .foregroundStyle(.secondary)
                 } actions: {
                     HStack(spacing: 10) {
-                        PlayActions {
-                            player.play(queue: playlist.tracks, startingAt: 0, title: playlist.name)
+                        PlayActions(playbackState: player.playbackState(for: playlist.tracks, sourceID: sourceID)) {
+                            guard sourceID == library.catalogue.driveID, library.contentSourceID == sourceID,
+                                  sessionID != nil, profiles.sessionID == sessionID,
+                                  library.playlist(id: playlist.id) == playlist else { return }
+                            player.togglePlayback(of: playlist.tracks, sourceID: sourceID, title: playlist.name)
                         } shuffle: {
+                            guard sourceID == library.catalogue.driveID, library.contentSourceID == sourceID,
+                                  sessionID != nil, profiles.sessionID == sessionID,
+                                  library.playlist(id: playlist.id) == playlist else { return }
                             player.play(queue: playlist.tracks.shuffled(), startingAt: 0, title: playlist.name)
                         }
                         #if !os(tvOS)
@@ -344,10 +353,17 @@ private struct PlaylistTrackRow: View {
     @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
     @Environment(DownloadManager.self) private var downloads
+    @Environment(ProfileStore.self) private var profiles
 
     var body: some View {
+        let sourceID = library.catalogue.driveID
+        let sessionID = profiles.sessionID
+        let state = player.playbackState(for: track, sourceID: sourceID)
         HStack(spacing: 0) {
             Button {
+                guard sourceID == library.catalogue.driveID, library.contentSourceID == sourceID,
+                      sessionID != nil, profiles.sessionID == sessionID,
+                      library.playlist(id: playlist.id) == playlist else { return }
                 player.play(queue: playlist.tracks, startingAt: position, title: playlist.name)
             } label: {
                 HStack(spacing: 14) {
@@ -360,8 +376,13 @@ private struct PlaylistTrackRow: View {
                             .frame(width: 44, height: 44)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        FadingText(track.title)
-                            .font(.body.weight(player.isCurrent(track: track) ? .semibold : .regular))
+                        HStack(spacing: 6) {
+                            FadingText(track.title)
+                                .font(.body.weight(state == .inactive ? .regular : .semibold))
+                            TrackPlaybackIndicator(state: state)
+                                .font(.caption)
+                                .accessibilityHidden(true)
+                        }
                         FadingText(library.album(for: track).map { "\($0.artist) · \($0.title)" } ?? track.artist ?? " ")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -398,6 +419,7 @@ private struct PlaylistTrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(RowPressStyle())
+            .accessibilityValue(state.accessibilityDescription)
 
             TrackActionsMenu(
                 track: track,

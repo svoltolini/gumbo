@@ -143,9 +143,9 @@ struct AlbumView: View {
                         .padding(.top, 5)
                 } actions: {
                     HStack(spacing: 10) {
-                        PlayActions {
+                        PlayActions(playbackState: player.playbackState(for: album.tracks, sourceID: library.catalogue.driveID)) {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                            player.play(album: album)
+                            player.togglePlayback(of: album.tracks, sourceID: library.catalogue.driveID)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
                             player.play(queue: album.tracks.shuffled(), startingAt: 0, title: album.title)
@@ -771,7 +771,10 @@ struct TrackRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAddingToPlaylist = false
 
-    private var isCurrent: Bool { player.isCurrent(track: track) }
+    private var playbackState: PlayerModel.CollectionPlaybackState {
+        player.playbackState(for: track, sourceID: library.catalogue.driveID)
+    }
+    private var isCurrent: Bool { playbackState != .inactive }
 
     var body: some View {
         let scope = AlbumActionScope(library: library, profiles: profiles)
@@ -785,10 +788,7 @@ struct TrackRow: View {
                 HStack(spacing: 14) {
                     Group {
                         if isCurrent {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .symbolEffect(.variableColor.iterative, isActive: player.isPlaying)
-                                .symbolEffectsRemoved(reduceMotion)
-                                .foregroundStyle(album.primaryColor)
+                            TrackPlaybackIndicator(state: playbackState)
                         } else {
                             Text(track.number, format: .number)
                                 .foregroundStyle(.secondary)
@@ -834,6 +834,7 @@ struct TrackRow: View {
             }
             .buttonStyle(RowPressStyle())
             .accessibilityLabel("\(track.number). \(track.title), \(TimeText.clock(track.duration))")
+            .accessibilityValue(playbackState.accessibilityDescription)
 
             TrackActionsMenu(track: track, isAddingToPlaylist: $isAddingToPlaylist)
                 .padding(.leading, 2)

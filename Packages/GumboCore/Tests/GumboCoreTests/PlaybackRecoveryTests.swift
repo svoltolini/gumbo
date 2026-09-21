@@ -572,6 +572,134 @@ import Testing
         #expect(fixture.transports.count == 3)
     }
 
+    @Test func collectionButtonPausesAndResumesCurrentSongWithoutRestartingQueue() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.sourceIDProvider = { "source-a" }
+        let album = [track("first"), track("second")]
+        let mixedQueue = [track("other"), album[1], album[0], album[1]]
+        fixture.model.play(queue: mixedQueue, startingAt: 1, title: "My playlist")
+        fixture.model.toggleShuffle()
+        let queue = fixture.model.queue
+        let index = fixture.model.index
+        fixture.transports[0].positionChanged?(37)
+        #expect(fixture.model.playbackState(for: album, sourceID: "source-a") == .playing)
+        fixture.model.togglePlayback(of: album, sourceID: "source-a")
+        #expect(fixture.model.playbackState(for: album[1], sourceID: "source-a") == .paused)
+        #expect(fixture.model.playbackState(for: album[0], sourceID: "source-a") == .inactive)
+        #expect(!fixture.model.isPlaying)
+        fixture.model.togglePlayback(of: album, sourceID: "source-a")
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.model.position == 37)
+        #expect(fixture.model.queue == queue)
+        #expect(fixture.model.index == index)
+        #expect(fixture.model.queueTitle == "My playlist")
+        #expect(fixture.model.isShuffling)
+        #expect(fixture.transports.count == 1)
+    }
+
+    @Test func pausedAtZeroRemainsTheCurrentSongUntilStopped() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.sourceIDProvider = { "source-a" }
+        let song = track("first")
+        fixture.model.play(queue: [song], title: nil)
+        fixture.model.pause()
+        #expect(fixture.model.position == 0)
+        #expect(fixture.model.isCurrent(track: song))
+        #expect(fixture.model.playbackState(for: song, sourceID: "source-a") == .paused)
+        fixture.model.togglePlayback(of: [song], sourceID: "source-a")
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports.count == 1)
+        fixture.model.stop()
+        #expect(!fixture.model.isCurrent(track: song))
+        #expect(fixture.model.playbackState(for: song, sourceID: "source-a") == .inactive)
+        #expect(fixture.model.playbackSourceID == nil)
+    }
+
+    @Test func collectionWithSameTitleButDifferentFilesStartsRequestedMusic() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.sourceIDProvider = { "source-a" }
+        fixture.model.play(queue: [track("old")], title: "Same title")
+        fixture.transports[0].positionChanged?(51)
+        let requested = [track("new-first"), track("new-second")]
+        #expect(fixture.model.playbackState(for: requested, sourceID: "source-a") == .inactive)
+        fixture.model.togglePlayback(of: requested, sourceID: "source-a", title: "Same title")
+        #expect(fixture.model.queue == requested)
+        #expect(fixture.model.track?.id == "new-first")
+        #expect(fixture.model.position == 0)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports.count == 2)
+    }
+
+    @Test func collectionControlsNeverMatchIdenticalFileIDsFromAnotherSource() {
+        let fixture = PlaybackFixture(status: .ready)
+        var source = "source-a"
+        fixture.model.sourceIDProvider = { source }
+        let songs = [track("same-path")]
+        fixture.model.play(queue: songs, title: nil)
+        fixture.transports[0].positionChanged?(25)
+        source = "source-b"
+        #expect(!fixture.model.isCurrent(track: songs[0]))
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-b") == .inactive)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .inactive)
+        let revision = fixture.model.commandRevision
+        fixture.model.togglePlayback(of: songs, sourceID: "source-a")
+        #expect(fixture.model.commandRevision == revision)
+        #expect(fixture.model.position == 25)
+        fixture.model.togglePlayback(of: songs, sourceID: "source-b")
+        #expect(fixture.model.playbackSourceID == "source-b")
+        #expect(fixture.model.position == 0)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports.count == 2)
+    }
+
+    @Test func collectionPauseDuringLoadingPreventsLateAutoplay() {
+        let fixture = PlaybackFixture(status: .loading)
+        fixture.model.sourceIDProvider = { "source-a" }
+        let songs = [track("first")]
+        fixture.model.play(queue: songs, title: nil)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .loading)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a").canPause)
+        fixture.model.togglePlayback(of: songs, sourceID: "source-a")
+        fixture.transports[0].status = .ready
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .paused)
+        #expect(fixture.transports[0].playCount == 0)
+        fixture.model.togglePlayback(of: songs, sourceID: "source-a")
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports[0].playCount == 1)
+        #expect(fixture.transports.count == 1)
+    }
+
+    @Test func failedCollectionShowsUnavailableAndPlayRetriesSelectedSong() {
+        let fixture = PlaybackFixture(status: .failed("Cannot open song"))
+        fixture.model.sourceIDProvider = { "source-a" }
+        let songs = [track("first"), track("second")]
+        fixture.model.play(queue: songs, startingAt: 1, title: "Playlist")
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .failed)
+        #expect(!fixture.model.playbackState(for: songs, sourceID: "source-a").canPause)
+        #expect(fixture.model.playbackState(for: songs[1], sourceID: "source-a") == .failed)
+        fixture.nextStatus = .ready
+        fixture.model.togglePlayback(of: songs, sourceID: "source-a")
+        #expect(fixture.model.track == songs[1])
+        #expect(fixture.model.queue == songs)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .playing)
+        #expect(fixture.transports.count == 2)
+    }
+
+    @Test func metadataRefreshKeepsCurrentFileIndicatorAndEmptyCollectionDoesNothing() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.sourceIDProvider = { "source-a" }
+        let original = track("first")
+        fixture.model.play(queue: [original], title: nil)
+        var renamed = original
+        renamed.title = "Updated title"
+        #expect(fixture.model.playbackState(for: renamed, sourceID: "source-a") == .playing)
+        #expect(fixture.model.playbackState(for: [renamed], sourceID: "source-a") == .playing)
+        let revision = fixture.model.commandRevision
+        fixture.model.togglePlayback(of: [], sourceID: "source-a")
+        #expect(fixture.model.commandRevision == revision)
+        #expect(fixture.model.isPlaying)
+    }
+
     private func preparedRecovery() -> PlaybackFixture {
         let fixture = PlaybackFixture(status: .ready)
         fixture.model.play(queue: [track("first")], title: nil)
