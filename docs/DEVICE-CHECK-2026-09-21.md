@@ -45,3 +45,7 @@ The selected phone album was already downloaded; this does not establish fresh N
 ## Still pending
 
 Spoken Siri, Mac Shortcuts dispatch, direct-touch scrolling/software-keyboard behavior, two-account family behavior, paired Watch, CarPlay, named additional NAS appliances and controlled NAS helper deployment remain separate acceptance checks. See [Siri registration limits](SIRI.md) and [the provider matrix](PROVIDER-COMPATIBILITY.md).
+
+## Follow-up simulator checks
+
+On iOS 27.0, the isolated iPhone 17e simulator passed both `testLibraryPullSettlesAndScrollingWorksDuringSlowScan` and `testSearchTypingScrollingAndClearing` (two tests, zero failures). The production Library view settled after repeated pull-to-refresh gestures while the simulated scan remained active, scrolled vertically, opened/dismissed scan details, and opened the album collection. Search matched the sample query, released the visible keyboard area, scrolled, showed no results for an unknown query and cleared back to Recent Searches. These checks use sample data and do not establish the physical phone's direct-touch behavior or real NAS scan performance.

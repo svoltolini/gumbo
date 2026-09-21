@@ -41,6 +41,11 @@ struct PlayMusicIntent: AudioPlaybackIntent {
                requestDisambiguationDialog: "Which one would you like?")
     var music: GumboMusicEntity
 
+    // Spotlight can expose an action only when its summary includes every required parameter.
+    static var parameterSummary: some ParameterSummary {
+        Summary("Play \(\.$music)")
+    }
+
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
         let controller = try GumboVoiceRouter.requireController()
         let command = controller.beginRequest()
