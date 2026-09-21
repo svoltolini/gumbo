@@ -8,7 +8,7 @@ public nonisolated enum SMBSecurityPolicy: String, Codable, Sendable {
 
 public nonisolated enum SMBDriveError: Error, LocalizedError, Sendable, Equatable {
     case invalidEndpoint, invalidShare, invalidPath, credentialsRequired, authenticationRequired, unavailableOnPlatform
-    case missingPath, permissionDenied, disconnected, timedOut, invalidResponse, securityPolicy, io(Int32)
+    case missingPath, permissionDenied, fileBusy, disconnected, timedOut, invalidResponse, securityPolicy, io(Int32)
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +20,7 @@ public nonisolated enum SMBDriveError: Error, LocalizedError, Sendable, Equatabl
         case .unavailableOnPlatform: "This device receives SMB music through your iPhone."
         case .missingPath: "This file or folder is no longer on the server."
         case .permissionDenied: "Your server account cannot open this file or folder."
+        case .fileBusy: "Another app is using this file. Let it finish, then try again."
         case .disconnected: "The connection to the shared folder was interrupted. Try again."
         case .timedOut: "The server took too long to respond. Try again."
         case .invalidResponse: "The server returned an incomplete or invalid file response."
@@ -108,23 +109,32 @@ nonisolated protocol SMBReadSession: Sendable {
     func info(_ path: String) async throws -> SMBFileInfo
     func read(_ path: String, range: Range<Int64>) async throws -> Data
     func disconnect() async
+    var supportsReviewedDeletion: Bool { get }
+    func reviewDeletion(_ path: String) async throws -> RemoteEntry
+    func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws
     func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
                       progress: @escaping @Sendable (Double) -> Void) async throws -> Int64
 }
 
 nonisolated extension SMBReadSession {
+    var supportsReviewedDeletion: Bool { false }
+    func reviewDeletion(_ path: String) async throws -> RemoteEntry { throw RemoteWriteError.unsupported }
+    func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
+        throw RemoteWriteError.unsupported
+    }
     func copyVerified(_ path: String, to destination: URL, expectedBytes: Int64?,
                       progress: @escaping @Sendable (Double) -> Void) async throws -> Int64 {
         throw SMBDriveError.unavailableOnPlatform
     }
 }
 
-/// Read-only SMB2/3 shared folder. No mount, URL credentials or HTTP downgrade is involved.
-public actor SMBDrive: RemoteFileDrive, ResumableRemoteFileDrive {
+/// SMB2/3 reads and reviewed exact-file deletion. Tag replacement remains unsupported.
+public actor SMBDrive: RemoteDeletionDrive, ResumableRemoteFileDrive {
     public nonisolated let id: String
     public nonisolated let displayName: String
     public nonisolated let share: String
     public nonisolated let security: SMBSecurityPolicy
+    public nonisolated let capabilities: RemoteCapabilities
     /// Each metadata/media bridge request stays bounded; large media downloads stream in chunks.
     public nonisolated static let maximumReadBytes: Int64 = 8 * 1024 * 1024
     public nonisolated static let maximumDownloadBytes: Int64 = 64 * 1024 * 1024
@@ -143,6 +153,7 @@ public actor SMBDrive: RemoteFileDrive, ResumableRemoteFileDrive {
         self.displayName = displayName ?? endpoint.host() ?? "Music server"
         self.share = share
         self.security = security
+        capabilities = session.supportsReviewedDeletion ? [.read, .ranges, .delete] : [.read, .ranges]
     }
 
     init(settings: SMBConnectionSettings, sourceID: String, session: any SMBReadSession) {
@@ -151,10 +162,24 @@ public actor SMBDrive: RemoteFileDrive, ResumableRemoteFileDrive {
         share = settings.share
         security = settings.security
         self.session = session
+        capabilities = session.supportsReviewedDeletion ? [.read, .ranges, .delete] : [.read, .ranges]
     }
 
     public func connect() async throws { try await session.connect() }
     public func disconnect() async { await session.disconnect() }
+
+    public func reviewDeletion(_ path: String) async throws -> RemoteEntry {
+        let relative = try SMBConnectionSettings.relativePath(path)
+        guard !relative.isEmpty, path == "/" + relative else { throw SMBDriveError.invalidPath }
+        return try await session.reviewDeletion(relative)
+    }
+
+    public func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
+        let relative = try SMBConnectionSettings.relativePath(entry.path)
+        guard !relative.isEmpty, entry.path == "/" + relative, !entry.isDirectory,
+              entry.version?.hasPrefix("smb-delete-v1:") == true else { throw RemoteWriteError.changed }
+        try await session.deleteReviewed(entry, authorized: authorized)
+    }
 
     public func copyVerified(_ path: String, to checkpoint: URL, expectedBytes: Int64?,
                              progress: @escaping @Sendable (Double) async -> Void) async throws -> Int64 {

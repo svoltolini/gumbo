@@ -6,7 +6,7 @@ Gumbo uses **libsmb2**, copyright Ronnie Sahlberg and the contributors credited 
 - Exact source revision: `557e837d3e00636b543f17ba1b9bdf872fa1644d`
 - Full library source used here: `Sources/CGumboSMB/`
 - Full license: `LICENCE-LGPL-2.1.txt`; component overview: `COPYING`
-- Gumbo's changes: `gumbo-policy.patch`, dated 2026-09-21. The added policy/receive-validation/directory-bounds/protected-read/context-lifetime/Apple-entropy C source and changes to LGPL files are LGPL-2.1-or-later. The package/module packaging is also supplied for rebuilding.
+- Gumbo's changes: `gumbo-policy.patch`, dated 2026-09-21. The added policy/receive-validation/directory-bounds/protected-read/reviewed-deletion/context-lifetime/Apple-entropy C source and changes to LGPL files are LGPL-2.1-or-later. The package/module packaging is also supplied for rebuilding.
 - Public release source: https://github.com/svoltolini/gumbo/tree/main/Packages/GumboSMB
 
 The package is an explicitly **dynamic** library. It must remain a separate library/framework in distributed applications. Preserve this notice, the license and per-file copyright notices, provide the corresponding modified source/build inputs, and retain the LGPL permissions to modify the library and reverse engineer the combined work for debugging modifications. The dynamic-link mechanism must support the applicable LGPL section 6 conditions; Apple signing, distribution terms and installation restrictions need release-specific verification. A successful build does not establish App Store approval or resolve every distribution obligation. Do not replace this product with static linkage without arranging and verifying an appropriate relinking route.

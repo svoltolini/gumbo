@@ -1,7 +1,7 @@
 import Foundation
 
 /// The write half of a remote drive: enough to put a rewritten song back where it came from.
-public nonisolated protocol WritableRemoteDrive: RemoteFileDrive {
+public nonisolated protocol WritableRemoteDrive: RemoteDeletionDrive {
     /// Size and modification time of one file; throws a missing-path error when it is gone.
     func info(_ path: String) async throws -> RemoteEntry
     /// Streams a whole file to disk, refusing anything longer than `maxBytes`.
@@ -22,6 +22,7 @@ public nonisolated enum RemoteWriteError: LocalizedError, Sendable, Equatable {
     /// The copy on the server does not have the size it should; nothing was replaced.
     case incompleteTransfer
     case changed
+    case deletionUnconfirmed
     case recoveryNeeded(String)
 
     public var errorDescription: String? {
@@ -30,6 +31,7 @@ public nonisolated enum RemoteWriteError: LocalizedError, Sendable, Equatable {
         case .readOnly: "This account can only read the music folder, so its files can't be changed."
         case .missing: "The file is no longer on the server."
         case .changed: "The file changed on the server. Update your library and try again."
+        case .deletionUnconfirmed: "The server may have deleted this song, but its reply was lost. Deletion has stopped. Refresh your library before reviewing any more files."
         case .recoveryNeeded(let path): "The replacement could not be confirmed. Check the original file and its backup at \(path) in File Station before trying again."
         case .incompleteTransfer: "The file didn't transfer completely, so it was left unchanged."
         }
@@ -43,6 +45,7 @@ nonisolated extension Error {
             return [105, 403, 404, 405, 407, 411].contains(code)
         }
         if let write = self as? RemoteWriteError { return write == .readOnly }
+        if let smb = self as? SMBDriveError { return smb == .permissionDenied }
         return false
     }
 }

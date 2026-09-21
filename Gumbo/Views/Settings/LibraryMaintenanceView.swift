@@ -266,7 +266,7 @@ struct ProblemFilesView: View {
                         Text(finding.track.title).font(.headline)
                         Text(finding.track.path ?? "No file path").font(.caption).foregroundStyle(.secondary).selectableText()
                         Text(finding.explanation).font(.callout)
-                        if finding.canDelete && library.canDeleteFiles {
+                        if finding.canDelete && library.canDeleteInspectedFiles {
                             Toggle("Select for deletion", isOn: Binding(
                                 get: { selected.contains(finding.id) },
                                 set: { if $0 { selected.insert(finding.id) } else { selected.remove(finding.id) } }
@@ -276,7 +276,7 @@ struct ProblemFilesView: View {
                     }
                 }
             }
-            if !chosen.isEmpty && library.canDeleteFiles {
+            if !chosen.isEmpty && library.canDeleteInspectedFiles {
                 Section {
                     Button("Delete \(chosen.count) Files from NAS", role: .destructive) { confirmingDelete = true }
                         .disabled(!canStart)
@@ -336,7 +336,7 @@ struct ProblemFilesView: View {
     }
 
     private func deleteChosen() {
-        guard canStart, library.canDeleteFiles else { return }
+        guard canStart, library.canDeleteInspectedFiles else { return }
         let review = chosen
         let scope = context
         isWorking = true

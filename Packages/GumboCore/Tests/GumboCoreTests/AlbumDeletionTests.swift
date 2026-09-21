@@ -10,6 +10,7 @@ private actor AlbumDeletionDrive: WritableRemoteDrive {
     var deleted: [String] = []
     var attempts: [String] = []
     var failPaths: Set<String> = []
+    var uncertainPaths: Set<String> = []
     var onInfo: (@Sendable (String) async -> Void)?
     var onDelete: (@Sendable (String) async -> Void)?
     var pendingDelete: CheckedContinuation<Void, Never>?
@@ -30,6 +31,11 @@ private actor AlbumDeletionDrive: WritableRemoteDrive {
     }
     func delete(_ path: String) async throws {
         attempts.append(path)
+        if uncertainPaths.contains(path) {
+            entries.removeValue(forKey: path)
+            if let onDelete { await onDelete(path) }
+            throw RemoteWriteError.deletionUnconfirmed
+        }
         if failPaths.contains(path) { throw RemoteWriteError.readOnly }
         if holdDeletes { await withCheckedContinuation { pendingDelete = $0 } }
         if let onDelete { await onDelete(path) }
@@ -37,6 +43,7 @@ private actor AlbumDeletionDrive: WritableRemoteDrive {
         deleted.append(path)
     }
     func setFailures(_ paths: Set<String>) { failPaths = paths }
+    func setUncertain(_ paths: Set<String>) { uncertainPaths = paths }
     func setInfoHook(_ hook: @escaping @Sendable (String) async -> Void) { onInfo = hook }
     func setDeleteHook(_ hook: @escaping @Sendable (String) async -> Void) { onDelete = hook }
     func setEntry(_ entry: RemoteEntry) { entries[entry.path] = entry }
@@ -109,6 +116,21 @@ private actor AlbumDeletionDrive: WritableRemoteDrive {
 }
 
 @Suite @MainActor struct AlbumDeletionTests {
+    @Test(arguments: [false, true]) func unconfirmedDeletionStopsBatchWithoutReplayOrUnprovenCacheRemoval(stop: Bool) async throws {
+        let f = try AlbumDeletionFixture(); defer { f.cleanUp() }
+        let request = try await f.library.prepareAlbumDeletion(f.target)
+        await f.drive.setUncertain([f.firstPath])
+        if stop { await f.drive.setDeleteHook { _ in await f.library.cancelAlbumDeletion() } }
+        let report = await f.library.deleteAlbum(request)
+        #expect(report.deleted.isEmpty && report.remainingCount == 2)
+        #expect(report.failures.count == 1)
+        #expect(report.wasCancelled == stop)
+        #expect(await f.drive.attempts == [f.firstPath])
+        #expect(f.target.tracks.count == 2 && f.notifications.isEmpty)
+        #expect(!f.library.canDeleteAlbum(using: request))
+        #expect(await f.library.deleteAlbum(request).deleted.isEmpty)
+        #expect(await f.drive.attempts == [f.firstPath])
+    }
     @Test func preparationNeverDeletesAndFinalDeletionTouchesOnlyReviewedAudioFiles() async throws {
         let f = try AlbumDeletionFixture(); defer { f.cleanUp() }
         let request = try await f.library.prepareAlbumDeletion(f.target)

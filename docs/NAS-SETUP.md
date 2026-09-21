@@ -37,7 +37,7 @@ There is **no direct SMB socket connection on Apple Watch**. Keep Gumbo open on 
 
 ## Optional metadata editing
 
-Normal listening does not need another service. The initial WebDAV and SMB adapters are read-only, so they cannot by themselves rename an album, rewrite tags or delete originals from your NAS.
+Normal listening does not need another service. WebDAV remains read-only. SMB supports deleting an album after the library owner reviews its exact music files; the account must have delete permission and the files must be unchanged and free of conflicting SMB writers. A file-by-file fingerprint check can take time for a large album. Only acknowledged deletions leave the catalogue; an uncertain reply stops the batch and requires a refresh and new review. Artwork and other files are kept. Native tag replacement, damaged-file cleanup and account administration remain unavailable for these providers.
 
 The [optional Gumbo metadata helper](../Tools/GumboTagService/README.md) can edit album, album-artist and genre tags on a server where you deliberately install and configure it. It uses a separate HTTPS address/token and an explicit mapping to the selected library folder. It is under validation and does not install itself, provision NAS accounts or delete files. Read its setup/recovery instructions before enabling it; broad NAS compatibility or deployment is not established by the local fixture tests.
 

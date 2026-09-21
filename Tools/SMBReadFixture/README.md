@@ -1,6 +1,6 @@
 # Isolated SMB read fixture
 
-This fixture serves only generated data on loopback. It never mounts a NAS or reads real account details. Music shares are read-only. The encrypted server also has a disposable `resume-tests` share inside its container: resume tests create their own generated files there to verify concurrent-write exclusion and changed-file recovery. It has no writable host mount. The test-only password is `fixture-only`.
+This fixture serves only generated data on loopback. It never mounts a NAS or reads real account details. Music shares are read-only. The encrypted server also has a disposable `resume-tests` share inside its container: resume and deletion tests create their own generated files there to verify concurrent-write exclusion, changed-file recovery and reviewed exact-file deletion. The reply-loss test starts an ephemeral loopback relay with a fixed destination at this disposable share; it drops a real encrypted reply without inspecting its contents. It has no writable host mount. The test-only password is `fixture-only`.
 
 From the repository root, with Docker Desktop running:
 

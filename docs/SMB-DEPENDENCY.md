@@ -2,7 +2,7 @@
 
 ## Decision, 2026-09-21 (#191, #197)
 
-Use `Packages/GumboSMB`, a pinned, explicitly dynamic build of [libsmb2](https://github.com/sahlberg/libsmb2) at `557e837d3e00636b543f17ba1b9bdf872fa1644d`. Gumbo's Swift adapter is read-only and owns each C context on a serial background queue. It exposes the existing `RemoteFileDrive` operations and bounded random reads; passwords never enter URLs. iOS, macOS and tvOS link the library. watchOS has no C dependency and uses the phone relay for SMB files.
+Use `Packages/GumboSMB`, a pinned, explicitly dynamic build of [libsmb2](https://github.com/sahlberg/libsmb2) at `557e837d3e00636b543f17ba1b9bdf872fa1644d`. Gumbo's Swift adapter owns each C context on a serial background queue. It supports reads and owner-reviewed exact-file deletion; tag replacement remains unavailable. It exposes the existing `RemoteFileDrive` operations and bounded random reads; passwords never enter URLs. iOS, macOS and tvOS link the library. watchOS has no C dependency and uses the phone relay for SMB files.
 
 [AMSMB2 4.0.3](https://github.com/amosavian/AMSMB2/tree/4.0.3) was evaluated: its dynamic packaging is useful, but its public API does not require signed SMB2 and its pinned libsmb2 (`aff9fa6ba9f41cfd3c15d184554601ec3f6d8d03`) predates the current mandatory-signature checks. Taking only its wrapper would still require a source fork and policy surface. [SwiftSMB](https://github.com/RuiNelson/SwiftSMB) currently requests Swift tools 6.4, above this project's 6.2 package baseline. The small direct C adapter avoids a second wrapper fork while retaining the upstream source and license.
 
@@ -61,3 +61,5 @@ The [same Apple probe](../Tools/SMBReadFixture/AppleRuntime/README.md) was rebui
 | Native macOS | `e42a09e3171aef5ecd5f80952ab4302dabb725c6ec632f878173790922653f69` |
 
 The corrected source patch SHA-256 is `455b6d4255481bbf83983b61d142757b70f19e96cc83a29c5ec0adc4cb85b5c0`, verified to apply to the pinned upstream commit. Local evidence is `work/smb-runtime-proof/entropy-runtime-evidence.json`, `entropy-{ios,tv,mac}-build.log`, `/tmp/gumbo-smb-entropy-security.log` and `/tmp/gumbo-smb-entropy-core.log`. These remain isolated ad-hoc harnesses (Mac unsandboxed), not App Store distribution archives, physical-device/real-NAS certification, background-lifecycle acceptance, or encryption/export approval. No real NAS or user credentials were used.
+
+Reviewed deletion adds a DELETE-access variant of the protected open and a same-handle FileDispositionInformation request. It never requests DELETE_ON_CLOSE during review, and never retries a submitted mutation. The active cryptographic algorithms and sizes are unchanged. See [deletion proof and limits](PROVIDER-COMPATIBILITY.md#reviewed-smb-album-deletion). The earlier runtime framework hashes above describe that earlier source revision, not this later binary.

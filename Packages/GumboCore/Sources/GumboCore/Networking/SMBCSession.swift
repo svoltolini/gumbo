@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS) || os(tvOS)
 import Foundation
+import CryptoKit
 import CGumboSMB
 import Darwin
 
@@ -10,6 +11,8 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
     private let settings: SMBConnectionSettings
     private let password: String
     private var context: OpaquePointer?
+    private var deletionHandle: OpaquePointer?
+    var supportsReviewedDeletion: Bool { true }
 
     init(settings: SMBConnectionSettings, password: String) {
         self.settings = settings
@@ -129,6 +132,109 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
         }
     }
 
+    func reviewDeletion(_ path: String) async throws -> RemoteEntry {
+        let transaction = SMBCSession(settings: settings, password: password)
+        do {
+            let entry = try await transaction.openDeletion(path)
+            await transaction.disconnect()
+            return entry
+        } catch {
+            await transaction.disconnect()
+            throw error
+        }
+    }
+
+    func deleteReviewed(_ entry: RemoteEntry, authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
+        let transaction = SMBCSession(settings: settings, password: password)
+        do {
+            let path = try SMBConnectionSettings.relativePath(entry.path)
+            let current = try await transaction.openDeletion(path)
+            guard current == entry else { throw RemoteWriteError.changed }
+            try Task.checkCancellation()
+            guard await authorized() else { throw CancellationError() }
+            // Keep the verified handle locked while authority is checked. Once dispatched, wait
+            // for the mutation's acknowledgement even if the caller cancels. Never reconnect/replay.
+            try await transaction.commitDeletion()
+            await transaction.disconnect()
+        } catch {
+            await transaction.disconnect()
+            throw error
+        }
+    }
+
+    private func openDeletion(_ path: String) async throws -> RemoteEntry {
+        try await perform { client, cancellation in
+            let context = try client.connected(cancellation)
+            guard client.deletionHandle == nil,
+                  let file = gumbo_smb2_open_delete_snapshot(context, path) else { throw client.failure() }
+            client.deletionHandle = file
+            var before = smb2_stat_64()
+            try client.check(smb2_fstat(context, file, &before))
+            guard before.smb2_type == SMB2_TYPE_FILE,
+                  before.smb2_attributes & UInt32(SMB2_FILE_ATTRIBUTE_REPARSE_POINT) == 0,
+                  before.smb2_size <= UInt64(Int64.max) else { throw SMBDriveError.invalidPath }
+            let maximum = min(smb2_get_max_read_size(context), 1024 * 1024)
+            guard maximum > 0 else { throw SMBDriveError.invalidResponse }
+            // Size/mtime alone can miss converters preserving timestamps. Review every byte,
+            // under one server handle which denies SMB writes, rename and deletion.
+            var hash = SHA256()
+            var offset: UInt64 = 0
+            let deadline = ContinuousClock.now + .seconds(120)
+            while offset < before.smb2_size {
+                try cancellation.check()
+                guard ContinuousClock.now < deadline else { throw SMBDriveError.timedOut }
+                let count = UInt32(min(UInt64(maximum), before.smb2_size - offset))
+                var bytes = [UInt8](repeating: 0, count: Int(count))
+                let read = smb2_pread(context, file, &bytes, count, offset)
+                try client.check(read)
+                guard read > 0, read <= count else { throw SMBDriveError.invalidResponse }
+                hash.update(data: Data(bytes.prefix(Int(read))))
+                offset += UInt64(read)
+            }
+            var after = smb2_stat_64()
+            try client.check(smb2_fstat(context, file, &after))
+            let identity: @Sendable (smb2_stat_64) -> [UInt64] = { stat in
+                [stat.smb2_ino, stat.smb2_size, stat.smb2_mtime, UInt64(stat.smb2_mtime_nsec),
+                 stat.smb2_ctime, UInt64(stat.smb2_ctime_nsec), stat.smb2_btime, UInt64(stat.smb2_btime_nsec)]
+            }
+            guard before.smb2_type == after.smb2_type, before.smb2_attributes == after.smb2_attributes,
+                  identity(before) == identity(after) else { throw RemoteWriteError.changed }
+            let fingerprint = hash.finalize().map { String(format: "%02x", $0) }.joined()
+            let version = "smb-delete-v1:" + identity(before).map(String.init).joined(separator: ":") + ":" + fingerprint
+            let info = try Self.fileInfo(before, name: (path as NSString).lastPathComponent)
+            return RemoteEntry(path: "/" + path, name: info.name, isDirectory: false,
+                               size: info.size, modified: info.modified, version: version)
+        }
+    }
+
+    private func commitDeletion() async throws {
+        try Task.checkCancellation()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [self] in
+                guard let context, let file = deletionHandle else {
+                    continuation.resume(throwing: SMBDriveError.disconnected)
+                    return
+                }
+                // No cancellation callback and no retry after the destructive request is sent.
+                gumbo_smb2_set_cancellation(context, nil, nil)
+                let marked = gumbo_smb2_mark_delete(context, file)
+                deletionHandle = nil
+                if marked < 0 {
+                    closeContext()
+                    continuation.resume(throwing: RemoteWriteError.deletionUnconfirmed)
+                    return
+                }
+                let closed = smb2_close(context, file)
+                if closed < 0 {
+                    closeContext()
+                    continuation.resume(throwing: RemoteWriteError.deletionUnconfirmed)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     private func perform<T: Sendable>(_ operation: @escaping @Sendable (SMBCSession, SMBOperationCancellation) throws -> T) async throws -> T {
         let cancellation = SMBOperationCancellation()
         return try await withTaskCancellationHandler {
@@ -202,6 +308,7 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
     }
 
     private func closeContext() {
+        deletionHandle = nil
         if let context {
             // Destroy closes the socket and releases pending state without another network wait.
             smb2_destroy_context(context)
@@ -217,11 +324,15 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
         // Never forward a server-provided message (which can contain paths or credentials) to UI/logs.
         let message = context.flatMap { smb2_get_error($0) }.map { String(cString: $0).lowercased() } ?? ""
         if ["signing", "signature", "encrypt", "guest", "anonymous", "required protection"].contains(where: message.contains) { return .securityPolicy }
-        let raw = status ?? -Int32(errno == 0 ? EIO : errno)
+        // Pointer-returning opens carry NTSTATUS, not a reliable thread-local errno.
+        let serverStatus = context.map { UInt32(bitPattern: smb2_get_nterror($0)) } ?? 0
+        let openError = serverStatus == 0 ? Int32(errno == 0 ? EIO : errno) : nterror_to_errno(serverStatus)
+        let raw = status ?? -openError
         let code = raw == Int32.min ? EIO : abs(raw)
         switch code {
         case ENOENT: return .missingPath
-        case EACCES, EPERM: return .permissionDenied
+        case EACCES, EPERM, EROFS: return .permissionDenied
+        case EBUSY, ETXTBSY, EDEADLK: return .fileBusy
         case ETIMEDOUT: return .timedOut
         case ENOTCONN, ECONNRESET, ECONNABORTED, EPIPE, ECONNREFUSED, ENETDOWN, ENETUNREACH, EHOSTUNREACH: return .disconnected
         default: return .io(code)
