@@ -1,9 +1,10 @@
 # Gumbo 1.0 — TestFlight Acceptance Matrix
 
-This document defines the complete acceptance testing required before making Gumbo 1.0 publicly available. It consolidates requirements from [#12](https://github.com/svoltolini/gumbo/issues/12) and the [release audit](RELEASE-AUDIT-2026-09-14.md).
+This document defines the acceptance testing required before Gumbo 1.0's public App Store release. The TestFlight beta is already available. It consolidates historical requirements from [#12](https://github.com/svoltolini/gumbo/issues/12) and the [release audit](RELEASE-AUDIT-2026-09-14.md); current physical/provider results belong in [#123](https://github.com/svoltolini/gumbo/issues/123).
 
-**Historical build reference**: 1.0 (202609151900); this is not a verified TestFlight build for the separate Gumbo identity. See [#118](https://github.com/svoltolini/gumbo/issues/118) and [#119](https://github.com/svoltolini/gumbo/issues/119).
-**Audit baseline**: `73f85b74ab60a9707de2f744161b172d21ef5b4e`
+**Current candidate**: 1.0 (**202609211143**), main `c6313140709805ac4361ed410aac5c0441bef063`. All iOS, native Mac and TV builds were **VALID / IN_BETA_TESTING** internally and externally at **11:33 UTC on 21 September 2026**. iOS includes Watch, widgets and CarPlay. Signed exports and 561 Release core tests passed; no physical acceptance row below is marked complete by those checks. See [current release evidence](https://github.com/svoltolini/gumbo/issues/123#issuecomment-5759326550) and [external-beta status](EXTERNAL-BETA-2026-09-20.md).
+
+**Historical reference**: build 1.0 (202609151900) and audit baseline `73f85b74ab60a9707de2f744161b172d21ef5b4e` were used when this matrix was first prepared. They are not the current separate-identity TestFlight candidate. Identity/distribution work is recorded in [#118](https://github.com/svoltolini/gumbo/issues/118); public-store metadata/privacy remains in [#119](https://github.com/svoltolini/gumbo/issues/119).
 
 ## Testing Layers
 
@@ -55,11 +56,11 @@ All targets must share the same version numbers:
 
 | Target | MARKETING_VERSION | CURRENT_PROJECT_VERSION |
 | --- | --- | --- |
-| Gumbo (iOS) | 1.0 | 202609151900 |
-| GumboWidgets | 1.0 | 202609151900 |
-| GumboWatch | 1.0 | 202609151900 |
-| GumboMac | 1.0 | 202609151900 |
-| GumboTV | 1.0 | 202609151900 |
+| Gumbo (iOS) | 1.0 | 202609211143 |
+| GumboWidgets | 1.0 | 202609211143 |
+| GumboWatch | 1.0 | 202609211143 |
+| GumboMac | 1.0 | 202609211143 |
+| GumboTV | 1.0 | 202609211143 |
 
 ### Privacy Manifest Validation
 
@@ -82,6 +83,7 @@ Verify required capabilities in signed binaries:
 - **Mac**: Sandbox, Network Client, CloudKit, Push Notifications
 - **TV**: CloudKit, Push Notifications
 - **Watch**: Companion app bundle identifier
+- **iOS/Mac**: Matching personal Keychain access group for optional sign-in sync
 
 ### Export Compliance
 
@@ -118,8 +120,9 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 | | Offline playback verification | | | | |
 | **Widgets** | Widget action launches app | | | | |
 | | Now Playing widget updates | | | | |
-| **Live Activity** | Activity appears during playback | | | | |
-| | Activity updates on track change | | | | |
+| **Live Activity** | Activity appears and updates during a download | | | | |
+| | Download completion/cancellation finishes the activity | | | | |
+| | Activity deep link opens the current profile's download view | | | | |
 | **Profiles** | Profile lock with PIN | | | | |
 | | Profile switch | | | | |
 | | Family owner invite | | | | |
@@ -133,6 +136,10 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 | | Insufficient storage handling | | | | |
 | | Incoming call during playback | | | | |
 | | Headphone disconnect | | | | |
+| **Shared-file maintenance** | Owner reviews exact album files and confirms deletion of a disposable fixture | | | | |
+| | Member profile cannot initiate deletion; denied NAS permissions leave files intact | | | | |
+| | Stop and interrupted replies report confirmed versus unconfirmed deletions | | | | |
+| | Complete refresh removes deleted songs/downloads; partial refresh preserves valid copies | | | | |
 
 ### Mac (Native)
 
@@ -140,6 +147,8 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 | --- | --- | --- | --- | --- | --- |
 | **Setup** | Fresh DSM connection | | | | |
 | | Connection with OTP account | | | | |
+| | Optional personal sign-in sync from iPhone; correct server/account/folder and OTP behavior | | | | |
+| | Delayed Keychain arrival, changed password, opt-out and local sign-out | | | | |
 | **Navigation** | Window resize handling | | | | |
 | | Multiple window sizes | | | | |
 | | Keyboard navigation | | | | |
@@ -156,7 +165,7 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 | Category | Test Case | Build | Device | Result | Notes |
 | --- | --- | --- | --- | --- | --- |
 | **Setup** | Fresh DSM connection | | | | |
-| | Connection reuse from iCloud | | | | |
+| | Family Access connection reuse from iCloud (personal Keychain sync is unavailable on TV) | | | | |
 | **Navigation** | Remote focus navigation | | | | |
 | | Profile picker | | | | |
 | **Playback** | Streaming playback | | | | |
@@ -174,6 +183,9 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 | | Multiple track download | | | | |
 | **Playback** | Offline independent playback | | | | |
 | | Playback without iPhone | | | | |
+| **Artwork** | Source covers, missing-cover fallback and refreshed covers in the native player | | | | |
+| | Older catalogue delivery cannot revert newer artwork or deletion state | | | | |
+| **Shared-file deletion** | Paired iPhone sync removes deleted songs/downloads, including after an offline interval | | | | |
 | **Limitations** | Route limitation messaging | | | | |
 | | OTP account limitation messaging | | | | |
 
@@ -192,7 +204,7 @@ These tests **require physical devices and a real Synology NAS**. Record build n
 
 ## CloudKit Multi-Device Matrix
 
-These tests require **two Apple devices signed into the same Apple Account** running the TestFlight build.
+Personal sync checks require **two Apple devices signed into the same Apple Account** running the TestFlight build. Family owner/member checks additionally require controlled, distinct Apple Accounts. Record which configuration each result uses.
 
 | Test Case | Device A | Device B | Result | Notes |
 | --- | --- | --- | --- | --- |
@@ -201,7 +213,7 @@ These tests require **two Apple devices signed into the same Apple Account** run
 | Simultaneous offline edits merge correctly | | | | |
 | Profile deletion on A removes from B | | | | |
 | Family member invite acceptance | | | | |
-| Account change on A clears local B state | | | | |
+| Account change on A revokes its old-account access without erasing B's unrelated data | | | | |
 
 ---
 
@@ -244,7 +256,7 @@ These tests require **two Apple devices signed into the same Apple Account** run
 
 ## Sign-Off
 
-All P1 device acceptance rows must pass before public release. Attach diagnostics for any failures.
+All P1 device acceptance rows must pass before public App Store release. Attach diagnostics for failures and record only observed device/provider results; TestFlight availability and automated tests do not fill these rows.
 
 | Sign-off | Name | Date | Build |
 | --- | --- | --- | --- |
@@ -260,7 +272,9 @@ All P1 device acceptance rows must pass before public release. Attach diagnostic
 
 ## References
 
-- [Issue #12: Run the signed TestFlight acceptance matrix](https://github.com/svoltolini/gumbo/issues/12)
+- [Issue #123: Current physical/provider acceptance](https://github.com/svoltolini/gumbo/issues/123)
+- [Issue #119: Public-store metadata and privacy](https://github.com/svoltolini/gumbo/issues/119)
+- [Issue #12: Historical TestFlight acceptance matrix](https://github.com/svoltolini/gumbo/issues/12)
 - [Release Audit](RELEASE-AUDIT-2026-09-14.md)
 - [Remediation Batch 4](REMEDIATION-2026-09-14-BATCH-4.md)
 - [Privacy Release Check](PRIVACY-RELEASE-CHECK.md)
