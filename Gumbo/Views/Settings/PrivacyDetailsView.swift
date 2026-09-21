@@ -14,7 +14,7 @@ struct PrivacyDetailsView: View {
         ]),
         ("Optional genre lookup and file maintenance", [
             "When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for genres. It does not send audio, file paths or NAS sign-in details. You can enter genres yourself without using online lookup.",
-            "Saving reviewed genres writes tags into the original NAS music files. Problem Files can permanently delete selected, rechecked damaged files after confirmation. These changes affect everyone using that NAS; they are different from removing a download from your device."
+            "Saving reviewed genres writes tags into the original NAS music files. The library owner can permanently delete an album or selected, rechecked damaged files after reviewing and confirming the original files. These changes affect everyone using that NAS; they are different from removing a download from your device."
         ]),
         ("Your sign-in across devices", [
             "On iPhone, iPad and Mac, Sync sign-in with iCloud Keychain is optional and off by default. When enabled, your saved NAS address, account and password sync through Apple’s iCloud Keychain to Gumbo on devices using the same Apple Account with Passwords & Keychain enabled. It does not share your password with your Gumbo family or save it in family CloudKit records.",
@@ -27,7 +27,7 @@ struct PrivacyDetailsView: View {
         ]),
         ("Your devices", [
             "Gumbo stores its catalogue, preferences, covers and downloads on your devices. Downloads are copies: removing them in Gumbo does not delete the original music on your NAS. Apple TV may clear cached data to recover space.",
-            "The paired Watch can receive playlist metadata, colours for playlist mosaics, and your current NAS address, account and password from your iPhone, then download music from the NAS. The password is saved in the Watch Keychain. Gumbo does not send cover image files to the Watch. Widgets, Now Playing, AirPlay and CarPlay use the information needed to show and control playback.",
+            "The paired Watch can receive playlist metadata, small cover thumbnails from your library, colours for playlist mosaics, and your current NAS address, account and password from your iPhone, then download music from the NAS. The password is saved in the Watch Keychain. Cover thumbnails stay on your devices and are used by the Watch player; they are not uploaded to a Gumbo service. Widgets, Now Playing, AirPlay and CarPlay use the information needed to show and control playback.",
             "Face ID and Touch ID are handled by the operating system. Gumbo receives an authentication result, not your biometric data."
         ]),
         ("Diagnostics and choices", [

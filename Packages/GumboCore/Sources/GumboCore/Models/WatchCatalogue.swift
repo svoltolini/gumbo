@@ -7,6 +7,8 @@ public nonisolated struct WatchTrack: Codable, Hashable, Sendable, Identifiable 
     public var title: String
     public var artist: String
     public var album: String
+    /// Optional for catalogues sent by older phones. Artwork is shared once per album.
+    public var albumID: String?
     public var duration: TimeInterval
     /// Path on the drive, the same one File Station streams from.
     public var path: String
@@ -14,11 +16,12 @@ public nonisolated struct WatchTrack: Codable, Hashable, Sendable, Identifiable 
     public var format: String
     public var isLossless: Bool
 
-    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, path: String, fileSize: Int64, format: String, isLossless: Bool) {
+    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, path: String, fileSize: Int64, format: String, isLossless: Bool, albumID: String? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
         self.album = album
+        self.albumID = albumID
         self.duration = duration
         self.path = path
         self.fileSize = fileSize
@@ -160,6 +163,25 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
 
     public init() {}
 
+    /// Returns only safe relative paths belonging to confirmed source-scoped deletions.
+    /// A playlist edit alone never calls this. Retiring its generation rejects late downloads.
+    public mutating func removeServerFiles(deletedCacheKeys: Set<String>, removedTrackIDs: Set<String>) -> (paths: [String], affected: Bool) {
+        var paths: [String] = []
+        var affected = !desired.isDisjoint(with: removedTrackIDs)
+        desired.subtract(removedTrackIDs)
+        for (id, path) in files {
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
+                  deletedCacheKeys.contains((String(parts[1]) as NSString).deletingPathExtension) else { continue }
+            paths.append(path)
+            files[id] = nil
+            desired.remove(id)
+            affected = true
+        }
+        if affected { generation = nil }
+        return (paths, affected)
+    }
+
     /// Includes partial or invalid saved files so the user can always remove their storage.
     public var hasStoredFiles: Bool { !files.isEmpty }
 
@@ -232,6 +254,14 @@ public nonisolated struct WatchCatalogue: Codable, Sendable {
     public var profileName: String?
     public var playlists: [WatchPlaylist]
     public var generatedAt: Date
+    /// Small source-library thumbnails, never full-sized cover files or external artwork.
+    public var artwork: [String: Data] = [:]
+    /// Confirmed NAS deletions, scoped independently of a profile's playlist membership.
+    public var serverDeletedTrackIDs: [String: [String]] = [:]
+    public var serverSourceID: String?
+    public var serverDeletionRevision: UInt64 = 0
+    /// Monotonic within one Watch authorization, including snapshots whose only change is artwork.
+    public var snapshotRevision: UInt64 = 0
     public private(set) var artworkPolicyVersion: Int
 
     public init(serverName: String, profileName: String?, playlists: [WatchPlaylist], generatedAt: Date = .now) {
@@ -248,7 +278,15 @@ public nonisolated struct WatchCatalogue: Codable, Sendable {
         profileName = try values.decodeIfPresent(String.self, forKey: .profileName)
         playlists = try values.decode([WatchPlaylist].self, forKey: .playlists)
         generatedAt = try values.decode(Date.self, forKey: .generatedAt)
+        serverDeletedTrackIDs = try values.decodeIfPresent([String: [String]].self, forKey: .serverDeletedTrackIDs) ?? [:]
+        serverSourceID = try values.decodeIfPresent(String.self, forKey: .serverSourceID)
+        serverDeletionRevision = try values.decodeIfPresent(UInt64.self, forKey: .serverDeletionRevision) ?? 0
+        snapshotRevision = try values.decodeIfPresent(UInt64.self, forKey: .snapshotRevision) ?? 0
         let storedPolicy = try? values.decode(Int.self, forKey: .artworkPolicyVersion)
+        if storedPolicy == ArtworkPolicy.version {
+            artwork = WatchArtwork.bounded(try values.decodeIfPresent([String: Data].self, forKey: .artwork) ?? [:],
+                                           albumIDs: Set(playlists.flatMap(\.tracks).compactMap(\.albumID)))
+        }
         if storedPolicy != ArtworkPolicy.version {
             // Apply this to every decode, including queued messages from an older phone.
             // Playlist/track identities and download ownership remain unchanged.
@@ -263,11 +301,39 @@ public nonisolated struct WatchCatalogue: Codable, Sendable {
         artworkPolicyVersion = ArtworkPolicy.version
     }
 
+    public var deletedCacheKeys: Set<String> {
+        Set(serverDeletedTrackIDs.flatMap { source, ids in
+            ids.map { DownloadManager.cacheKey(trackID: $0, driveID: source) }
+        })
+    }
+
+    /// Filter even a queued/stale playlist snapshot while its derived UI rows catch up.
+    public mutating func applyServerDeletions(_ deletions: [String: [String]]) {
+        serverDeletedTrackIDs = deletions
+        for index in playlists.indices {
+            guard let source = playlists[index].driveID, let removed = deletions[source] else { continue }
+            let ids = Set(removed)
+            let before = playlists[index].tracks.count
+            playlists[index].tracks.removeAll { ids.contains($0.id) }
+            playlists[index].totalSongs = max(playlists[index].tracks.count, playlists[index].totalSongs - before + playlists[index].tracks.count)
+        }
+        artwork = WatchArtwork.bounded(artwork, albumIDs: Set(playlists.flatMap(\.tracks).compactMap(\.albumID)))
+    }
+
     /// The same catalogue with the timestamp removed, so two builds of the same content compare equal.
     public var contentKey: Data? {
         var copy = self
         copy.generatedAt = .distantPast
-        return try? JSONEncoder().encode(copy)
+        copy.snapshotRevision = 0
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(copy)
+    }
+
+    /// Compare only after matching authorization; a new authorization clears the previous snapshot.
+    /// Revision zero preserves old-phone compatibility until a newer phone has sent an ordered snapshot.
+    public func isAtLeastAsRecent(as previous: WatchCatalogue) -> Bool {
+        snapshotRevision >= previous.snapshotRevision && serverDeletionRevision >= previous.serverDeletionRevision
     }
 
     /// Navigation values are snapshots; resolve them against this catalogue before taking action.
@@ -312,7 +378,7 @@ extension LibraryStore {
                 return WatchTrack(
                     id: track.id, title: track.title, artist: track.artist ?? album?.artist ?? "",
                     album: album?.title ?? "", duration: track.duration, path: path,
-                    fileSize: track.fileSize ?? 0, format: track.format, isLossless: track.isLossless
+                    fileSize: track.fileSize ?? 0, format: track.format, isLossless: track.isLossless, albumID: track.albumID
                 )
             }
             guard !tracks.isEmpty else { return nil }
@@ -323,6 +389,24 @@ extension LibraryStore {
                 driveID: catalogue.driveID, profileID: profiles?.active?.id ?? profiles?.lastActiveID
             )
         }
-        return WatchCatalogue(serverName: serverName, profileName: profileName, playlists: converted)
+        var result = WatchCatalogue(serverName: serverName, profileName: profileName, playlists: converted)
+        result.serverSourceID = catalogue.driveID
+        return result
+    }
+
+    /// Snapshot local NAS-derived covers on the main actor; decoding happens off the UI actor.
+    public func watchArtworkSources(for snapshot: WatchCatalogue) -> [WatchArtworkSource] {
+        guard snapshot.serverSourceID == catalogue.driveID else { return [] }
+        var seen = Set<String>()
+        var sources: [WatchArtworkSource] = []
+        for playlist in snapshot.playlists {
+            for track in playlist.tracks {
+                guard let id = track.albumID, seen.insert(id).inserted,
+                      let album = album(id: id), let url = coverURL(for: album) else { continue }
+                sources.append(WatchArtworkSource(albumID: id, url: url, version: coverVersion(for: album)))
+                if sources.count == WatchArtwork.albumLimit { return sources }
+            }
+        }
+        return sources
     }
 }

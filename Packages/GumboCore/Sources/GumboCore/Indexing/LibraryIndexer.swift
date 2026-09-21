@@ -121,7 +121,7 @@ public final class LibraryIndexer {
     }
 
     /// Scans `rootPath` on the drive; `onCatalogue` receives the catalogue when the structure is known and again as tags arrive.
-    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, forceMetadataReread: Bool = false, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
+    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, forceMetadataReread: Bool = false, onVerifiedListing: (@MainActor (Catalogue) -> Void)? = nil, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
         cancel()
         let run = IndexingRun()
         currentRun = run
@@ -178,7 +178,10 @@ public final class LibraryIndexer {
                         if existing != nil {
                             // Every folder was read and none holds music: the library really is empty now.
                             recordDiagnostics("Scan found no music under \(rootPath); the library is now empty.")
-                            onCatalogue(Catalogue(serverName: serverName, albums: [], indexedAt: .now, rootPath: rootPath, driveID: drive.id))
+                            let empty = Catalogue(serverName: serverName, albums: [], indexedAt: .now, rootPath: rootPath, driveID: drive.id)
+                            onVerifiedListing?(empty)
+                            try checkActive(run)
+                            onCatalogue(empty)
                             try checkActive(run)
                             phase = .done
                             return
@@ -200,6 +203,10 @@ public final class LibraryIndexer {
                     }.value
                     try checkActive(run)
                     tracksFound = catalogue.trackCount
+                    // Only a complete, successful listing can prove which files disappeared.
+                    // Missing-root errors and partial scans must never purge offline downloads.
+                    onVerifiedListing?(catalogue)
+                    try checkActive(run)
                     onCatalogue(catalogue)
                     try checkActive(run)
                     phase = .enriching

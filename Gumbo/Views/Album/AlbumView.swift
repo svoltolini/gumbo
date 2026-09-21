@@ -4,11 +4,13 @@ import SwiftUI
 /// A retained row or confirmation can outlive the library or authenticated profile that opened it.
 private struct AlbumActionScope: Equatable {
     let sourceID: String
+    let rootPath: String
     let profileID: String?
     let sessionID: UUID?
 
     init(library: LibraryStore, profiles: ProfileStore) {
         sourceID = library.catalogue.driveID
+        rootPath = library.catalogue.rootPath
         profileID = profiles.activeID
         sessionID = profiles.sessionID
     }
@@ -25,6 +27,12 @@ private struct AlbumRemovalRequest {
     let scope: AlbumActionScope
 }
 
+private struct AlbumDeletionPresentation: Identifiable {
+    let id = UUID()
+    let album: Album
+    let scope: AlbumActionScope
+}
+
 struct AlbumView: View {
     let album: Album
     @Environment(AppModel.self) private var model
@@ -32,18 +40,23 @@ struct AlbumView: View {
     @Environment(PlayerModel.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(ProfileStore.self) private var profiles
+    @Environment(CloudSync.self) private var cloud
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isFlipped = false
     @State private var isConfirmingRemoval = false
     @State private var removalRequest: AlbumRemovalRequest?
     @State private var isRenaming = false
+    @State private var deletionPresentation: AlbumDeletionPresentation?
+    @State private var shouldCloseAfterDeletion = false
     /// The album's id once a rename gave it a new one; the page follows the album rather than the old id.
     @State private var renamedID: String?
     /// A new id whose album is still being derived after a rename.
     @State private var pendingID: String?
 
     private var currentID: String { renamedID ?? album.id }
+    private var permissions: Permissions { Permissions(profiles: profiles, cloud: cloud) }
 
     var body: some View {
         Group {
@@ -59,6 +72,20 @@ struct AlbumView: View {
                     .windowTitle("Album Unavailable")
             }
         }
+        #if !os(tvOS)
+        // Keep the operation sheet alive when deleting the last song removes albumContent.
+        .sheet(item: $deletionPresentation, onDismiss: {
+            if shouldCloseAfterDeletion {
+                shouldCloseAfterDeletion = false
+                dismiss()
+            }
+        }) { presentation in
+            AlbumDeletionSheet(presentation: presentation) { removedAlbum in
+                shouldCloseAfterDeletion = removedAlbum
+            }
+            .id(presentation.id)
+        }
+        #endif
         .onChange(of: library.contentRevision) { _, _ in
             guard let pending = pendingID, library.album(id: pending) != nil else { return }
             renamedID = pending
@@ -160,6 +187,18 @@ struct AlbumView: View {
                 ToolbarItem(placement: .trailingBar) {
                     Menu {
                         Button("Rename Album…", systemImage: "pencil") { isRenaming = true }
+                        if permissions.isHost {
+                            Divider()
+                            Button("Delete Album…", systemImage: "trash", role: .destructive) {
+                                guard scope.isCurrent(library: library, profiles: profiles),
+                                      permissions.isHost, library.canDeleteAlbums,
+                                      library.album(id: album.id) == album else { return }
+                                shouldCloseAfterDeletion = false
+                                deletionPresentation = AlbumDeletionPresentation(album: album, scope: scope)
+                            }
+                            .disabled(!library.canDeleteAlbums)
+                            .accessibilityIdentifier("album.deleteFromNAS")
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
@@ -241,6 +280,290 @@ struct AlbumView: View {
 
 
 }
+
+#if !os(tvOS)
+/// A read-only review precedes the destructive action. Keeping the request in this sheet binds
+/// confirmation to the exact files checked for this album, server and unlocked host profile.
+private struct AlbumDeletionSheet: View {
+    let presentation: AlbumDeletionPresentation
+    let onFinished: (Bool) -> Void
+    @Environment(LibraryStore.self) private var library
+    @Environment(ProfileStore.self) private var profiles
+    @Environment(CloudSync.self) private var cloud
+    @Environment(\.dismiss) private var dismiss
+    @State private var request: AlbumDeletionRequest?
+    @State private var report: AlbumDeletionReport?
+    @State private var preparationError: String?
+    @State private var isPreparing = false
+    @State private var isDeleting = false
+    @State private var isStopping = false
+    @State private var job: Task<Void, Never>?
+    @State private var isPresentationActive = true
+
+    private var scope: AlbumActionScope { AlbumActionScope(library: library, profiles: profiles) }
+    private var isHost: Bool { Permissions(profiles: profiles, cloud: cloud).isHost }
+    private var isCurrent: Bool { isPresentationActive && isHost && presentation.scope.isCurrent(library: library, profiles: profiles) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 14) {
+                        ArtworkView(album: presentation.album, cornerRadius: 8, size: .row)
+                            .frame(width: 56, height: 56)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(presentation.album.title)
+                                .font(.headline)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(presentation.album.artist)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                if isDeleting {
+                    deletionProgress
+                } else if let report {
+                    resultSections(report)
+                } else if isPreparing {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView().controlSize(.small).tint(Palette.accent)
+                            Text("Checking album files…")
+                        }
+                    } footer: {
+                        Text("Nothing will be deleted until you confirm.")
+                    }
+                } else if let preparationError {
+                    Section {
+                        Label("Couldn’t prepare this album", systemImage: "exclamationmark.triangle")
+                            .font(.headline)
+                        Text(preparationError)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Try Again", action: prepare)
+                            .disabled(!isCurrent || !library.canDeleteAlbums)
+                    } footer: {
+                        Text("No files have been deleted.")
+                    }
+                } else if let request {
+                    reviewSections(request)
+                }
+            }
+            .groupedForm()
+            .navigationTitle(report == nil ? "Delete Album" : "Deletion Results")
+            .inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if !isDeleting, report == nil {
+                        Button("Cancel") { endPresentationWork(); dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if report != nil {
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+        }
+        .sheetDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(isDeleting)
+        #if os(macOS)
+        .frame(minWidth: 440, idealWidth: 500, minHeight: 440)
+        #endif
+        .onAppear { if request == nil, report == nil, preparationError == nil { prepare() } }
+        .onChange(of: scope) { _, _ in
+            guard !isCurrent else { return }
+            endPresentationWork()
+            dismiss()
+        }
+        .onChange(of: isHost) { _, host in
+            guard !host else { return }
+            endPresentationWork()
+            dismiss()
+        }
+        .onDisappear(perform: endPresentationWork)
+    }
+
+    @ViewBuilder private func reviewSections(_ request: AlbumDeletionRequest) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Permanently delete \(request.fileCount) \(request.fileCount == 1 ? "music file" : "music files") from your NAS?")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("This removes the original songs for everyone who uses this library. Gumbo cannot undo this.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Other devices remove the songs and downloaded copies after a successful library refresh. Apple Watch updates when it syncs with iPhone. Offline devices update after reconnecting.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Delete from NAS", role: .destructive) { delete(request) }
+                    .foregroundStyle(.red)
+                    .disabled(!isCurrent || !library.canDeleteAlbum(using: request))
+                    .accessibilityIdentifier("album.confirmDeleteFromNAS")
+                    .accessibilityLabel("Permanently delete \(request.fileCount) files from \(request.albumTitle) on the NAS")
+                    .accessibilityHint("Deletes the original music files for everyone using this library. Gumbo cannot undo this.")
+                if !library.canDeleteAlbums {
+                    Text("Connect to your NAS and wait for other library changes to finish before deleting.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !library.canDeleteAlbum(using: request) {
+                    Text("This album or connection changed. Close this review and open the album again to check its current files.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        Section {
+            DisclosureGroup("Review \(request.fileCount) \(request.fileCount == 1 ? "File" : "Files")") {
+                ForEach(request.tracks) { track in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(track.title)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let path = track.path {
+                            Text(path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .selectableText()
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } footer: {
+            Text("Only these music files are selected. Album folders, cover images and other files are kept.")
+                .font(.footnote)
+                .fontWeight(.regular)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var deletionProgress: some View {
+        Section {
+            let progress = library.albumDeletionProgress
+            OperationProgressView(
+                title: "Deleting from NAS",
+                currentItem: progress?.title,
+                fractionCompleted: progress.flatMap { $0.total > 0 ? Double($0.completed) / Double($0.total) : nil },
+                counter: progress.map { "\($0.completed) of \($0.total) files" },
+                isStopping: isStopping,
+                onStop: stop
+            )
+        } footer: {
+            Text("Stopping finishes the current file. Files already deleted stay deleted.")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private func resultSections(_ report: AlbumDeletionReport) -> some View {
+        Section {
+            Label(resultTitle(report), systemImage: report.remainingCount == 0 ? "checkmark.circle" : "exclamationmark.triangle")
+                .font(.headline)
+            Text("Deleted \(report.deleted.count) \(report.deleted.count == 1 ? "file" : "files") from the NAS.")
+                .fixedSize(horizontal: false, vertical: true)
+            if report.remainingCount > 0 {
+                Text("Deletion wasn’t confirmed for \(report.remainingCount) \(report.remainingCount == 1 ? "file" : "files"). Refresh the album before retrying.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        if let persistenceError = report.persistenceError {
+            Section {
+                Label("Library Refresh Needed", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                Text(persistenceError)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        if !report.failures.isEmpty {
+            Section("Deletion Not Confirmed") {
+                ForEach(report.failures) { failure in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(failure.title)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(failure.message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func resultTitle(_ report: AlbumDeletionReport) -> String {
+        if report.remainingCount == 0 { return "Album Deleted" }
+        if report.wasCancelled { return "Deletion Stopped" }
+        return report.deleted.isEmpty ? "Deletion Not Confirmed" : "Some Files Deleted"
+    }
+
+    private func prepare() {
+        guard !isPreparing, !isDeleting else { return }
+        guard isCurrent else {
+            preparationError = "Your library or profile changed. Close this review and open the album again."
+            return
+        }
+        guard library.canDeleteAlbums else {
+            preparationError = "Connect as the library owner and wait for the library to finish updating, then try again."
+            return
+        }
+        isPreparing = true
+        preparationError = nil
+        job = Task { @MainActor in
+            defer { isPreparing = false; job = nil }
+            do {
+                let prepared = try await library.prepareAlbumDeletion(presentation.album)
+                guard !Task.isCancelled, isCurrent else { return }
+                request = prepared
+            } catch {
+                guard !Task.isCancelled, isCurrent else { return }
+                preparationError = error.localizedDescription
+            }
+        }
+    }
+
+    private func delete(_ request: AlbumDeletionRequest) {
+        guard !isDeleting, isCurrent, library.canDeleteAlbum(using: request) else { return }
+        isDeleting = true
+        isStopping = false
+        job = Task { @MainActor in
+            let outcome = await library.deleteAlbum(request)
+            isDeleting = false
+            isStopping = false
+            job = nil
+            guard isCurrent else { return }
+            report = outcome
+            onFinished(!outcome.deleted.isEmpty && outcome.remainingCount == 0)
+        }
+    }
+
+    private func stop() {
+        guard isDeleting else { return }
+        isStopping = true
+        library.cancelAlbumDeletion()
+    }
+
+    private func endPresentationWork() {
+        isPresentationActive = false
+        // Let an already-sent delete finish so its acknowledgement can be accounted for.
+        // Preparation is read-only and can be canceled immediately.
+        if isDeleting { stop() }
+        else { job?.cancel() }
+    }
+}
+#endif
 
 /// Renames an album for good by writing the new title into the album tag of each of its songs on
 /// the NAS, keeping the release together with its album artist while preserving song credits.

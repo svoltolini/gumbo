@@ -5,10 +5,20 @@ public nonisolated final class SynologyDrive: RemoteDrive {
     public let session: DSMSession
     public let displayName: String
     private let urlSession: URLSession
+    private let listingRequest: @Sendable (URL) async throws -> SynologyFileList
 
-    public init(session: DSMSession, displayName: String) {
+    public convenience init(session: DSMSession, displayName: String) {
+        self.init(session: session, displayName: displayName, listingRequest: { url in
+            try await SynologyClient.request(url, as: SynologyFileList.self, api: "SYNO.FileStation.List")
+        })
+    }
+
+    /// The listing transport can be replaced in tests without sending requests to a NAS.
+    init(session: DSMSession, displayName: String,
+         listingRequest: @escaping @Sendable (URL) async throws -> SynologyFileList) {
         self.session = session
         self.displayName = displayName
+        self.listingRequest = listingRequest
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 40
         configuration.httpMaximumConnectionsPerHost = 6
@@ -29,12 +39,16 @@ public nonisolated final class SynologyDrive: RemoteDrive {
         do {
             return try await list(path, minimal: false, rawPath: false)
         } catch {
+            try Task.checkCancellation()
+            guard !(error is SynologyListingError), !(error is CancellationError) else { throw error }
             diagnostics("List failed for \(path): \(error.localizedDescription). Retrying with minimal parameters.")
             do {
                 let entries = try await list(path, minimal: true, rawPath: false)
                 diagnostics("Minimal listing worked for \(path): \(entries.count) entries.")
                 return entries
             } catch {
+                try Task.checkCancellation()
+                guard !(error is SynologyListingError), !(error is CancellationError) else { throw error }
                 do {
                     let entries = try await list(path, minimal: true, rawPath: true)
                     diagnostics("Unquoted listing worked for \(path): \(entries.count) entries.")
@@ -50,8 +64,11 @@ public nonisolated final class SynologyDrive: RemoteDrive {
     private func list(_ path: String, minimal: Bool, rawPath: Bool) async throws -> [RemoteEntry] {
         var entries: [RemoteEntry] = []
         var offset = 0
+        var expectedTotal: Int?
+        var seenPaths: Set<String> = []
         let pageSize = 1000
         while true {
+            try Task.checkCancellation()
             var params: [String: SynologyParam] = [
                 "folder_path": rawPath ? .raw(path) : .string(path), "offset": .int(offset), "limit": .int(pageSize),
             ]
@@ -64,10 +81,33 @@ public nonisolated final class SynologyDrive: RemoteDrive {
             guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list", params: params) else {
                 throw RemoteDriveError.notSignedIn
             }
-            let page = try await SynologyClient.request(url, as: SynologyFileList.self, api: "SYNO.FileStation.List")
+            let page = try await listingRequest(url)
+            try Task.checkCancellation()
+            // A partial listing must never become evidence that previously indexed files vanished.
+            // Detect changed/ignored pagination rather than publishing an incomplete catalogue.
+            guard page.offset == nil || page.offset == offset,
+                  page.files.count <= pageSize else { throw SynologyListingError.incomplete }
+            if let total = page.total {
+                guard total >= 0, expectedTotal == nil || expectedTotal == total else {
+                    throw SynologyListingError.incomplete
+                }
+                expectedTotal = total
+            }
+            let nextOffset = offset + page.files.count
+            if let expectedTotal {
+                guard nextOffset <= expectedTotal,
+                      !page.files.isEmpty || offset == expectedTotal else { throw SynologyListingError.incomplete }
+            }
+            for file in page.files {
+                guard seenPaths.insert(file.path).inserted else { throw SynologyListingError.incomplete }
+            }
             entries.append(contentsOf: page.files.map(\.entry))
-            offset += page.files.count
-            if page.files.isEmpty || offset >= (page.total ?? 0) { break }
+            offset = nextOffset
+            if let expectedTotal {
+                if offset == expectedTotal { break }
+            } else if page.files.count < pageSize {
+                break
+            }
         }
         return entries
     }
@@ -123,6 +163,14 @@ public nonisolated final class SynologyDrive: RemoteDrive {
         let name = path.split(separator: "/").last.map(String.init) ?? "file"
         components.path += "/" + name
         return components.url
+    }
+}
+
+nonisolated enum SynologyListingError: LocalizedError, Equatable {
+    case incomplete
+
+    var errorDescription: String? {
+        "The server returned an incomplete folder listing. Refresh your library to try again."
     }
 }
 

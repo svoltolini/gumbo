@@ -134,9 +134,14 @@ private nonisolated func sourceFLAC() -> Data {
             for album in catalogue.albums { #expect(try Data(contentsOf: CoverStore.fileURL(for: album.id)) == sourceImage) }
             let library = LibraryStore()
             library.replace(with: catalogue, drive: drive)
+            #expect(library.artworkRevision > 0, "Newly discovered covers must trigger Watch artwork delivery")
+            let artworkRevision = library.artworkRevision
+            let beforePlaylists = library.playlists
             let album = try #require(library.albums.first)
             let result = await library.refreshCover(for: album)
             #expect(result.hasPrefix("Cover taken from folder image"))
+            #expect(library.artworkRevision > artworkRevision, "Refreshing an identical-looking cover must still notify connected devices")
+            #expect(library.playlists == beforePlaylists)
             #expect(try Data(contentsOf: CoverStore.fileURL(for: album.id)) == sourceImage)
         }
     }

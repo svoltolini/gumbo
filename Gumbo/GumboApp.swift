@@ -161,6 +161,17 @@ struct GumboApp: App {
         }
         // An album renamed in its files keeps its downloads under its new identity.
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        library.onServerTracksDeleted = { [library, downloads, player, watchBridge] sourceID, trackIDs in
+            downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
+            if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {
+                player.stop()
+            }
+            watchBridge.serverTracksDeleted(sourceID: sourceID, trackIDs: trackIDs)
+        }
+        model.onVerifiedServerListing = { [watchBridge] sourceID, presentIDs in
+            watchBridge.reconcileServerDeletions(sourceID: sourceID, presentTrackIDs: presentIDs)
+        }
+
         // Membership restored from iCloud meets the files already in the downloads folder: songs still
         // here are reused rather than fetched again, and anything no download uses is surfaced. Runs
         // whenever either side changes: a profile opening, its document arriving, or the catalogue loading.
@@ -239,6 +250,9 @@ struct GumboApp: App {
             let profileName = active.name
             let catalogue = library.watchCatalogue(serverName: model.connection?.name ?? "Gumbo", profileName: profileName)
             return (catalogue, model.watchCredentials(), "\(profiles.sessionID?.uuidString ?? "locked")|\(library.catalogue.driveID)|\(library.catalogue.rootPath)")
+        }
+        watchBridge.artworkProvider = { [library] catalogue in
+            library.watchArtworkSources(for: catalogue)
         }
         // Play tapped on a widget cover: the system performs the intent inside the app, in the
         // background when it has to launch it for that.
@@ -363,6 +377,12 @@ struct GumboApp: App {
                     UIApplication.shared.isIdleTimerDisabled = keeps && (model.isScanning || library.metadataWriter.isWriting)
                 }
                 .onChange(of: library.playlists) { watchBridge.sync() }
+                .task(id: library.artworkRevision) {
+                    // A scan can discover many covers together. Send only the settled batch.
+                    do { try await Task.sleep(for: .milliseconds(400)) }
+                    catch { return }
+                    watchBridge.sync()
+                }
                 .onChange(of: model.stage) { watchBridge.sync() }
         }
     }

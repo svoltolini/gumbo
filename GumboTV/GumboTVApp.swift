@@ -53,6 +53,13 @@ struct GumboTVApp: App {
             }
         }
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        library.onServerTracksDeleted = { [library, downloads, player] sourceID, trackIDs in
+            downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
+            if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {
+                player.stop()
+            }
+        }
+
         player.streamURLProvider = { [library, model] track in library.streamURL(for: track, quality: model.quality) }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
