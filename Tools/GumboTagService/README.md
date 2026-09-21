@@ -10,7 +10,7 @@ This implementation is under validation. Automated fixtures pass; installation o
 
 ## Scope and safeguards
 
-- Supports MP3, native FLAC, and AAC/ALAC in M4A, up to 2 GiB per file with at most 32 MiB of parsed metadata. Only **album**, **albumArtist**, and **genre** may change. Omitted fields stay unchanged; this baseline does not delete tags or files.
+- Supports MP3, native FLAC, and AAC/ALAC in M4A, up to 2 GiB per file with at most 32 MiB of parsed metadata. Only **album**, **albumArtist**, and **genre** may change. Omitted fields stay unchanged; this baseline does not delete tags. Exact-file deletion is a separate, disabled-by-default capability.
 - Requires an explicit bearer token on every endpoint and trusted HTTPS. Requests use relative paths under one mounted music folder. Absolute paths, parent traversal, symbolic links, hard links, reserved recovery paths and non-regular files are refused.
 - Runs as the music file owner, with no privilege escalation. The parent folders must be writable. Mixed-owner libraries need an appropriate separate configuration; the helper does not silently change file ownership or bypass permissions.
 - Every edit requires the file's size, nanosecond modification time and SHA-256. Source metadata and content are checked again before replacement. Missing-genre edits inspect the actual current tags and leave an existing genre unchanged.
@@ -37,6 +37,8 @@ GUMBO_CERTIFICATE_PATH=/srv/gumbo-tags-secrets/cert.pem
 GUMBO_PRIVATE_KEY_PATH=/srv/gumbo-tags-secrets/key.pem
 # Defaults to 127.0.0.1. Choose the NAS's private interface explicitly for device access.
 GUMBO_LISTEN_IP=192.168.1.10
+# Optional. Leave unset/0 to prohibit deletion, even for an authenticated app.
+GUMBO_ALLOW_DELETION=0
 ```
 
 5. Review [compose.yaml](compose.yaml), then run `docker compose build --pull` and `docker compose up -d` from this directory. The image runs with a read-only root filesystem, dropped capabilities, a non-root UID and bounded resources. Only the chosen music folder and private job-state folder are writable mounts. Pin the base-image digest in your deployment if reproducible image rebuilds are required.
@@ -54,6 +56,8 @@ All responses are JSON with `version: 1`. Authenticate with `Authorization: Bear
 | --- | --- | --- |
 | GET | `/v1/capabilities` | Supported fields, formats and limits |
 | POST | `/v1/files/stat` | `{"path":"Artist/Album/01.flac"}` → `path`, `expected` and actual `fields` |
+| POST | `/v1/files/inspect-range` | When enabled: relative path, expected fingerprint, offset and count → matching base64 bytes (at most 1 MiB) |
+| POST | `/v1/files/review-delete` | When enabled: relative music path → full-file deletion fingerprint; no mutation |
 | PUT | `/v1/jobs/<lowercase-UUID>` | Submit the following request; 202 when newly queued, 200 for the same durable request |
 | GET | `/v1/jobs/<lowercase-UUID>` | Read per-file results and overall state |
 | POST | `/v1/jobs/<lowercase-UUID>/cancel` | Body `{}`; request cancellation, then keep polling for final outcomes |
@@ -79,7 +83,17 @@ Use actual values returned by stat, not the illustrative values above. `onlyIfGe
 
 The same job UUID with the same request returns its existing state and never edits again. Reusing it with different data returns `job_conflict`. A lost HTTP acknowledgement must be recovered with **the same ID**; don't invent a new job and repeat a potentially completed operation.
 
-Job states: `queued`, `running`, `completed`, `cancelled`, `partial`, `interrupted`. Per-file states: `pending`, `running`, `succeeded`, `unchanged`, `validated` (dry run), `failed`, `cancelled`, `unconfirmed`. Confirmed outcomes carry `before` and `after`; `after` includes current `size`, `mtimeNs`, `sha256` and `fields: {album, albumArtist, genre}`. An unchanged existing genre is returned so the app can correct stale cached metadata without overwriting the file.
+Job states: `queued`, `running`, `completed`, `cancelled`, `partial`, `interrupted`. Per-file states: `pending`, `running`, `succeeded`, `unchanged`, `validated` (dry run), `deleted`, `failed`, `cancelled`, `unconfirmed`. Confirmed tag outcomes carry `before` and `after`; `after` includes current `size`, `mtimeNs`, `sha256` and `fields: {album, albumArtist, genre}`. An unchanged existing genre is returned so the app can correct stale cached metadata without overwriting the file.
+
+## Optional reviewed file deletion
+
+Set `GUMBO_ALLOW_DELETION=1` (or pass `--allow-reviewed-deletion`) only when you want the helper to delete reviewed music files. In the app, explicitly enable **Allow reviewed file deletion** while connecting the helper. Existing configurations stay off. The helper token is not shared with family members; app operations additionally require the current owner profile, source, folder and connection. The token grants the enabled server operations, so do not give it to untrusted clients.
+
+Gumbo uses native reviewed deletion for DSM/SMB. For a read-only provider such as WebDAV, the optional helper can delete an album after the owner reviews its exact song list. The app compares the complete file hash through both connections to catch differing mapped files. Identical copied libraries cannot prove the folder mapping, so the owner must still verify the mount; preparing a deletion review therefore reads music bytes and can take time. This is separate from tag editing, whose file rewrite stays on the NAS. The same helper can authorize reviewed damaged-file cleanup: each inspection range is captured during the full-file hash pass, then returned only if the expected fingerprint matches. Gumbo keeps recent files, unrecognized formats and connection failures; only verified empty files or confirmed MP4 structural damage can be selected. Deletion is never automatic.
+
+The API accepts `{"version":1,"operation":"delete","files":[{"path":"Artist/Album/song.flac","expected":{...}}]}` with actual `expected` values from `/v1/files/review-delete`. No `changes` field is accepted. Supported deletion extensions are the app's audio formats, including empty damaged files; non-music paths, folders, links and files over 2 GiB are refused. A `deleted` result carries `before` and no `after`. A dry run returns `validated` without mutation. Requests and recovery use the same durable job-ID rules as edits. Unconfirmed outcomes stop the batch; remaining files are cancelled.
+
+Deletion reserves a private `.gumbo-tag-<job-id>-<index>.deleting` directory, moves the exact candidate into it, and verifies its inode and fingerprint before unlinking it. A changed candidate or cancellation is restored only if its original path remains absent. Restoration never overwrites a newly created file. If restoration or durable acknowledgement fails, the result is **unconfirmed**; inspect the original path and any `original` file inside the recovery directory. Do not delete that recovery directory automatically. Directory paths remain excluded from the music index. These operations still require other writers to respect locks, as described above.
 
 ## Recovery
 
@@ -95,6 +109,6 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The tests exercise generated MP3/FLAC/M4A audio, unrelated tags, permissions, dry run, conflict/low-disk rejection, traversal/symlink/hard-link refusal, rollback, missing-genre protection, durable replay/restart, lost acknowledgements, cancellation and authentication. They do not install a service, access real credentials or contact a NAS. Container/Linux filesystem and real-device integration acceptance remain separate.
+The tests exercise generated MP3/FLAC/M4A audio, unrelated tags, permissions, dry run, conflict/low-disk rejection, traversal/symlink/hard-link refusal, rollback, missing-genre protection, durable replay/restart, lost acknowledgements, cancellation and authentication. Deletion tests also cover same-size/same-time changes, path replacement, cancellation after capture, recovery without overwriting a new file, empty audio, disabled permissions and durable acknowledgement loss. They do not install a service, access real credentials or contact a NAS. Container/Linux filesystem and real-device integration acceptance remain separate.
 
 The opt-in [transfer benchmark](../../docs/METADATA-HELPER-BENCHMARK-2026-09-21.md) compares actual helper JSON traffic against whole-file download/edit/upload using generated files. On the recorded loopback run the helper saved more than 99.97% of body bytes but took longer; no real-NAS speed claim is made.

@@ -8,6 +8,7 @@ struct TagServiceSettingsView: View {
     @State private var address = ""
     @State private var token = ""
     @State private var confirmsFolder = false
+    @State private var allowsDeletion = false
     @State private var isChecking = false
     @State private var message: String?
 
@@ -24,8 +25,9 @@ struct TagServiceSettingsView: View {
                     LabeledContent("Status", value: "Enabled")
                     LabeledContent("Helper", value: configured.endpoint.host() ?? "")
                     LabeledContent("Music folder", value: configured.libraryRoot)
+                    LabeledContent("Reviewed file deletion", value: configured.allowsReviewedDeletion == true ? "Enabled" : "Off")
                     Button("Turn Off", role: .destructive) { model.disableTagService(); message = nil }
-                        .disabled(!profiles.canManageProfiles || library.metadataWriter.isWriting)
+                        .disabled(!profiles.canManageProfiles || library.metadataWriter.isWriting || library.isDeletingFiles)
                 } footer: {
                     Text("Gumbo uses this helper for tag edits. If it can't confirm an edit, it reports the problem so you can check the file before trying again.")
                 }
@@ -36,16 +38,20 @@ struct TagServiceSettingsView: View {
                     SecureField("Private helper token", text: $token)
                         .noAutocapitalization().autocorrectionDisabled()
                     Toggle("The helper's music folder matches this library", isOn: $confirmsFolder)
+                    Toggle("Allow reviewed file deletion", isOn: $allowsDeletion)
+                    Text("Optional. The helper must also allow deletion. Albums and damaged files still need your review and confirmation before permanent deletion.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     if let path = model.musicPath { Text(path).font(.footnote).foregroundStyle(.secondary) }
                     Button(isChecking ? "Checking…" : "Check and Enable") {
                         let expectedSession = profiles.sessionID
                         let expectedConnection = model.connection
                         let submittedAddress = address, submittedToken = token
+                        let submittedAllowsDeletion = allowsDeletion
                         isChecking = true; message = nil
                         Task {
                             guard profiles.sessionID == expectedSession, model.connection == expectedConnection,
                                   profiles.canManageProfiles else { isChecking = false; return }
-                            do { try await model.configureTagService(address: submittedAddress, token: submittedToken); token = "" }
+                            do { try await model.configureTagService(address: submittedAddress, token: submittedToken, allowsReviewedDeletion: submittedAllowsDeletion); token = "" }
                             catch {
                                 if profiles.sessionID == expectedSession, model.connection == expectedConnection {
                                     message = error.localizedDescription
@@ -54,7 +60,7 @@ struct TagServiceSettingsView: View {
                             isChecking = false
                         }
                     }
-                    .disabled(isChecking || !confirmsFolder || address.isEmpty || token.isEmpty || !profiles.canManageProfiles || !model.isConnected)
+                    .disabled(isChecking || !confirmsFolder || address.isEmpty || token.isEmpty || !profiles.canManageProfiles || !model.isConnected || library.metadataWriter.isWriting || library.isDeletingFiles)
                 } header: { Text("Connect the Helper") } footer: {
                     Text("Mount the selected library folder as the helper's music root. The private token is saved on this device, separately from your NAS password. Family members don't receive it.")
                 }
@@ -64,8 +70,8 @@ struct TagServiceSettingsView: View {
         .groupedForm()
         .navigationTitle("Faster Tag Editing")
         .onAppear { address = model.tagServiceConfiguration?.endpoint.absoluteString ?? "" }
-        .onChange(of: profiles.sessionID) { _, _ in token = ""; confirmsFolder = false; message = nil }
-        .onChange(of: model.connection) { _, _ in token = ""; confirmsFolder = false; message = nil }
+        .onChange(of: profiles.sessionID) { _, _ in token = ""; confirmsFolder = false; allowsDeletion = false; message = nil }
+        .onChange(of: model.connection) { _, _ in token = ""; confirmsFolder = false; allowsDeletion = false; message = nil }
         .onDisappear { token = "" }
     }
 }

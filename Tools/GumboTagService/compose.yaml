@@ -9,6 +9,8 @@ services:
     mem_limit: 512m
     cpus: 1
     init: true
+    environment:
+      GUMBO_ALLOW_DELETION: ${GUMBO_ALLOW_DELETION:-0}
     stop_grace_period: 45s
     ports:
       # Bind to one explicitly chosen private interface; never publish this to the internet.

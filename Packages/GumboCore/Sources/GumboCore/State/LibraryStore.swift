@@ -403,11 +403,36 @@ public final class LibraryStore {
     }
     public var canDeleteFiles: Bool {
         profiles?.canManageProfiles == true && profiles?.sessionID != nil && canInspectFiles
-            && drive is any RemoteDeletionDrive && drive?.capabilities.contains(.delete) == true
+            && (hasNativeDeletion || deletionHelper != nil)
             && fileDeletionConnectionTokenProvider?() != nil
     }
-    /// Damaged-file inspection still uses the legacy write provider's reinspection contract.
-    public var canDeleteInspectedFiles: Bool { canDeleteFiles && drive is any WritableRemoteDrive }
+    private var hasNativeDeletion: Bool { drive is any RemoteDeletionDrive && drive?.capabilities.contains(.delete) == true }
+    private var deletionHelper: TagServiceConfiguration? {
+        guard !hasNativeDeletion, let helper = activeTagService, helper.allowsReviewedDeletion == true else { return nil }
+        return helper
+    }
+    var deletionServiceFactory: (TagServiceConfiguration) throws -> any ReviewedDeletionService = { try $0.client() }
+    private func albumDeletionDrive() throws -> any RemoteDeletionDrive {
+        if hasNativeDeletion, let native = drive as? any RemoteDeletionDrive { return native }
+        guard let helper = deletionHelper, let base = drive as? any RemoteFileDrive else { throw RemoteWriteError.unsupported }
+        return HelperDeletionDrive(base: base, configuration: helper, service: try deletionServiceFactory(helper))
+    }
+    public var canDeleteInspectedFiles: Bool { canDeleteFiles }
+
+    public func inspectFile(_ track: Track) async -> MusicFileInspection {
+        let source = catalogue.driveID, root = catalogue.rootPath, profile = profiles?.sessionID, helper = deletionHelper
+        do {
+            guard canInspectFiles, let base = drive as? any RemoteFileDrive else { throw RemoteWriteError.unsupported }
+            let inspectionDrive: any RemoteFileDrive = canDeleteInspectedFiles ? try albumDeletionDrive() : base
+            let finding = await MusicFileInspector.inspect(track, drive: inspectionDrive)
+            guard canInspectFiles, catalogue.driveID == source, catalogue.rootPath == root,
+                  profiles?.sessionID == profile, deletionHelper == helper else { throw RemoteWriteError.changed }
+            return finding
+        } catch {
+            return MusicFileInspection(track: track, sourceID: source, condition: .unavailable,
+                                       explanation: MetadataWriter.message(for: error), size: nil, modified: nil)
+        }
+    }
 
     /// Every song shown under the genre `name`: those whose own tag reads it, plus tagless songs of
     /// albums filed there. Songs not yet read are left alone, since their real tag is unknown.
@@ -584,8 +609,9 @@ public final class LibraryStore {
             throw AlbumDeletionError.notAuthorized
         }
         guard !isDeletingFiles, !metadataWriter.isWriting else { throw AlbumDeletionError.busy }
-        guard canDeleteAlbums, let token = fileDeletionConnectionTokenProvider?(),
-              let drive = drive as? any RemoteDeletionDrive else { throw AlbumDeletionError.unavailable }
+        guard canDeleteAlbums, let token = fileDeletionConnectionTokenProvider?() else { throw AlbumDeletionError.unavailable }
+        let helper = deletionHelper
+        let drive = try albumDeletionDrive()
         guard let current = catalogue.albums.first(where: { $0.id == album.id }),
               !current.tracks.isEmpty,
               Set(current.tracks.map(\.id)) == Set(album.tracks.map(\.id)),
@@ -614,12 +640,12 @@ public final class LibraryStore {
         for track in tracks {
             try Task.checkCancellation()
             guard deletionContextMatches(source: sourceID, root: root, profile: profileSession, connection: token),
-                  catalogueRevision == revision else { throw AlbumDeletionError.changed }
+                  catalogueRevision == revision, deletionHelper == helper else { throw AlbumDeletionError.changed }
             let path = track.path!
             let entry = try await drive.reviewDeletion(path)
             try Task.checkCancellation()
             guard deletionContextMatches(source: sourceID, root: root, profile: profileSession, connection: token),
-                  catalogueRevision == revision else { throw AlbumDeletionError.changed }
+                  catalogueRevision == revision, deletionHelper == helper else { throw AlbumDeletionError.changed }
             guard entry.path == path, entry.name == (path as NSString).lastPathComponent,
                   !entry.isDirectory, let size = entry.size, size >= 0, let modified = entry.modified else {
                 throw AlbumDeletionError.unverifiedFile
@@ -633,7 +659,7 @@ public final class LibraryStore {
         let request = AlbumDeletionRequest(id: UUID(), albumTitle: current.title, tracks: tracks,
                                            albumID: current.id, sourceID: sourceID, rootPath: root,
                                            profileSession: profileSession, connectionToken: token,
-                                           catalogueRevision: revision, entries: entries)
+                                           catalogueRevision: revision, entries: entries, helper: helper)
         // A new review supersedes an abandoned confirmation. A request can be consumed only once.
         preparedAlbumDeletionIDs = [request.id]
         return request
@@ -641,6 +667,7 @@ public final class LibraryStore {
 
     public func canDeleteAlbum(using request: AlbumDeletionRequest) -> Bool {
         canDeleteAlbums && preparedAlbumDeletionIDs.contains(request.id)
+            && request.helper == deletionHelper
             && catalogueRevision == request.catalogueRevision
             && deletionContextMatches(source: request.sourceID, root: request.rootPath,
                                       profile: request.profileSession, connection: request.connectionToken)
@@ -654,7 +681,7 @@ public final class LibraryStore {
     public func deleteAlbum(_ request: AlbumDeletionRequest) async -> AlbumDeletionReport {
         var report = AlbumDeletionReport()
         report.remainingCount = request.fileCount
-        guard canDeleteAlbum(using: request), let drive = drive as? any RemoteDeletionDrive else {
+        guard canDeleteAlbum(using: request), let drive = try? albumDeletionDrive() else {
             report.failures = request.tracks.map {
                 MetadataWriteFailure(trackID: $0.id, title: $0.title, message: AlbumDeletionError.changed.localizedDescription)
             }
@@ -683,7 +710,7 @@ public final class LibraryStore {
             }
             guard deletionContextMatches(source: request.sourceID, root: request.rootPath,
                                          profile: request.profileSession, connection: request.connectionToken),
-                  catalogueRevision == expectedRevision else {
+                  catalogueRevision == expectedRevision, request.helper == deletionHelper else {
                 report.wasCancelled = true
                 report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title,
                                                             message: AlbumDeletionError.changed.localizedDescription))
@@ -705,7 +732,7 @@ public final class LibraryStore {
                         albumDeletionOperation == operation && cancelledAlbumDeletionOperation != operation
                             && deletionContextMatches(source: request.sourceID, root: request.rootPath,
                                                       profile: request.profileSession, connection: request.connectionToken)
-                            && catalogueRevision == authorizedRevision
+                            && catalogueRevision == authorizedRevision && request.helper == deletionHelper
                     }
                 }
                 try await deletion.value
@@ -721,7 +748,7 @@ public final class LibraryStore {
                     report.persistenceError = saved ? nil : "The files were deleted from the NAS, but the updated library could not be saved on this device. Refresh your library."
                 }
             } catch {
-                if (error as? RemoteWriteError) == .deletionUnconfirmed {
+                if (error as? RemoteWriteError)?.isDeletionUnconfirmed == true {
                     report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title,
                                                                message: MetadataWriter.message(for: error)))
                     report.wasCancelled = Task.isCancelled || cancelledAlbumDeletionOperation == operation
@@ -789,21 +816,25 @@ public final class LibraryStore {
         var report = MusicFileDeletionReport()
         guard canDeleteInspectedFiles, !isDeletingFiles, !metadataWriter.isWriting,
               let connectionToken = fileDeletionConnectionTokenProvider?(),
-              let drive = drive as? any WritableRemoteDrive else {
+              let drive = try? albumDeletionDrive() else {
             report.failures = findings.map { MetadataWriteFailure(trackID: $0.id, title: $0.track.title,
                 message: "Connect as the library owner and wait for other file changes to finish.") }
             return report
         }
         let sourceID = catalogue.driveID
         let root = catalogue.rootPath
-        let session = profiles?.sessionID
+        let session = profiles?.sessionID, helper = deletionHelper
+        var expectedRevision = catalogueRevision
         isDeletingFiles = true
         defer { isDeletingFiles = false }
         metadataMutationRevision += 1
         onMetadataWriteWillBegin?()
+        var attempted: Set<String> = []
         for finding in findings {
             do {
                 try Task.checkCancellation()
+                guard attempted.insert(finding.id).inserted else { continue }
+                guard catalogueRevision == expectedRevision, deletionHelper == helper else { throw RemoteWriteError.changed }
                 guard let current = track(id: finding.id), current.path == finding.track.path,
                       let path = current.path, AlbumDeletionPaths.isSong(path, inside: root) else {
                     throw RemoteWriteError.changed
@@ -814,19 +845,28 @@ public final class LibraryStore {
                         && self.fileDeletionConnectionTokenProvider?() == connectionToken
                         && self.catalogue.driveID == sourceID && self.catalogue.rootPath == root
                         && self.drive?.id == sourceID
+                        && self.catalogueRevision == expectedRevision && self.deletionHelper == helper
                 }
                 report.deleted.append(current)
                 onServerTracksDeleted?(sourceID, [current.id])
+                if catalogue.driveID == sourceID, catalogue.rootPath == root {
+                    let snapshot = removeConfirmedFiles([current.id], sourceID: sourceID, profileSession: session)
+                    expectedRevision = catalogueRevision
+                    let saved = await persistDeletedAlbumCatalogue(snapshot)
+                    report.persistenceError = saved ? nil : "The files were deleted from the NAS, but this device could not save the updated library. Refresh your library."
+                }
             } catch {
+                if (error as? RemoteWriteError)?.isDeletionUnconfirmed == true {
+                    report.failures.append(MetadataWriteFailure(trackID: finding.id, title: finding.track.title,
+                        message: MetadataWriter.message(for: error)))
+                    report.wasCancelled = Task.isCancelled
+                    break
+                }
                 if Task.isCancelled || error is CancellationError { report.wasCancelled = true; break }
                 report.failures.append(MetadataWriteFailure(trackID: finding.id, title: finding.track.title,
                                                            message: MetadataWriter.message(for: error)))
             }
         }
-        guard catalogue.driveID == sourceID, catalogue.rootPath == root, !report.deleted.isEmpty else { return report }
-        let removed = Set(report.deleted.map(\.id))
-        _ = removeConfirmedFiles(removed, sourceID: sourceID, profileSession: session)
-        saveCatalogue()
         return report
     }
 

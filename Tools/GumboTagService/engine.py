@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Constrained, local-only file replacement. This module never invokes a shell."""
+import base64
 import contextlib
 import ctypes
 import fcntl
@@ -25,6 +26,7 @@ MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_FILES = 128
 FIELDS = {"album", "albumArtist", "genre"}
 SUFFIXES = {".mp3", ".flac", ".m4a"}
+DELETE_SUFFIXES = {"." + value for value in ("flac mp3 m4a aac alac wav aif aiff ogg oga opus wma ape wv dsf dff mp4 caf").split()}
 
 
 class ServiceError(Exception):
@@ -43,7 +45,7 @@ def check_cancel(cancelled):
         raise Cancelled()
 
 
-def relative_parts(path):
+def relative_parts(path, deletion=False):
     if not isinstance(path, str) or not path or len(path.encode("utf-8")) > 4096:
         raise ServiceError("invalid_path", "Use a relative music file path.")
     parts = path.split("/")
@@ -51,14 +53,17 @@ def relative_parts(path):
         raise ServiceError("invalid_path", "Empty, parent and reserved path components are not allowed.")
     if "\\" in path or any(ord(char) < 32 or ord(char) == 127 for char in path):
         raise ServiceError("invalid_path", "The path contains unsupported characters.")
-    if PurePosixPath(path).suffix.lower() not in SUFFIXES:
-        raise ServiceError("unsupported_format", "Only MP3, FLAC and M4A files can be edited.")
+    if PurePosixPath(path).suffix.lower() not in (DELETE_SUFFIXES if deletion else SUFFIXES):
+        raise ServiceError("unsupported_format", "Only recognized music files can be deleted." if deletion else "Only MP3, FLAC and M4A files can be edited.")
     return parts
 
 
 def validate_request(value):
-    if not isinstance(value, dict) or set(value) - {"version", "files", "dryRun"}:
+    if not isinstance(value, dict) or set(value) - {"version", "files", "dryRun", "operation"}:
         raise ServiceError("invalid_request", "Unknown request fields.")
+    if value.get("operation", "tags") not in ("tags", "delete"):
+        raise ServiceError("invalid_request", "Unknown operation.")
+    deletion = value.get("operation") == "delete"
     if type(value.get("version")) is not int or value["version"] != 1:
         raise ServiceError("unsupported_version", "Use request version 1.")
     if "dryRun" in value and type(value["dryRun"]) is not bool:
@@ -68,23 +73,27 @@ def validate_request(value):
         raise ServiceError("invalid_request", "A job must contain between 1 and 128 files.")
     paths = set()
     for entry in files:
-        if not isinstance(entry, dict) or set(entry) - {"path", "expected", "changes", "onlyIfGenreMissing"} or not {"path", "expected", "changes"} <= set(entry):
-            raise ServiceError("invalid_request", "Each file needs path, expected and changes.")
+        allowed = {"path", "expected"} if deletion else {"path", "expected", "changes", "onlyIfGenreMissing"}
+        required = {"path", "expected"} if deletion else {"path", "expected", "changes"}
+        if not isinstance(entry, dict) or set(entry) - allowed or not required <= set(entry):
+            raise ServiceError("invalid_request", "Each deletion needs only path and expected." if deletion else "Each file needs path, expected and changes.")
         if "onlyIfGenreMissing" in entry and type(entry["onlyIfGenreMissing"]) is not bool:
             raise ServiceError("invalid_request", "onlyIfGenreMissing must be a boolean.")
-        relative_parts(entry["path"])
+        relative_parts(entry["path"], deletion=deletion)
         if entry["path"] in paths:
             raise ServiceError("invalid_request", "A file may appear only once in a job.")
         paths.add(entry["path"])
         expected = entry["expected"]
         if not isinstance(expected, dict) or set(expected) != {"size", "mtimeNs", "sha256"}:
             raise ServiceError("invalid_request", "Expected size, mtimeNs and sha256 are required.")
-        if type(expected["size"]) is not int or not 0 < expected["size"] <= MAX_FILE_BYTES:
+        if type(expected["size"]) is not int or not (0 if deletion else 1) <= expected["size"] <= MAX_FILE_BYTES:
             raise ServiceError("invalid_request", "The file exceeds the supported size limit.")
         if type(expected["mtimeNs"]) is not int or expected["mtimeNs"] < 0:
             raise ServiceError("invalid_request", "mtimeNs must be a nonnegative integer.")
         if not isinstance(expected["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", expected["sha256"]):
             raise ServiceError("invalid_request", "sha256 must be a lowercase SHA-256 digest.")
+        if deletion:
+            continue
         changes = entry["changes"]
         if not isinstance(changes, dict) or not changes or set(changes) - FIELDS:
             raise ServiceError("invalid_request", "Only album, albumArtist and genre may be changed.")
@@ -385,16 +394,17 @@ def copy_extended_attributes(source, destination):
 
 
 class FileEngine:
-    def __init__(self, music_root):
+    def __init__(self, music_root, allow_deletion=False):
         self.root = os.path.abspath(music_root)
         self.root_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.allow_deletion = allow_deletion
 
     def close(self):
         os.close(self.root_fd)
 
     @contextlib.contextmanager
-    def parent(self, path):
-        parts = relative_parts(path)
+    def parent(self, path, deletion=False):
+        parts = relative_parts(path, deletion=deletion)
         descriptor = os.dup(self.root_fd)
         try:
             for part in parts[:-1]:
@@ -408,11 +418,11 @@ class FileEngine:
             os.close(descriptor)
 
     @contextlib.contextmanager
-    def source(self, parent, name):
+    def source(self, parent, name, allow_empty=False):
         descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(descriptor, "rb") as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= MAX_FILE_BYTES:
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not (0 if allow_empty else 1) <= info.st_size <= MAX_FILE_BYTES:
                 raise ServiceError("unsafe_file", "Use a regular, non-hard-linked music file no larger than 2 GiB.", 409)
             yield stream, info
 
@@ -423,6 +433,125 @@ class FileEngine:
             if identity(os.fstat(stream.fileno())) != identity(info):
                 raise ServiceError("conflict", "The file changed while it was being inspected.", 409)
             return {"path": path, "expected": stamp(info, sha), "fields": current_fields}
+
+    def review_deletion(self, path):
+        if not self.allow_deletion:
+            raise ServiceError("deletion_disabled", "Reviewed deletion is not enabled by this server's owner.", 403)
+        with self.parent(path, deletion=True) as (parent, name), self.source(parent, name, allow_empty=True) as (source, info):
+            fcntl.flock(source.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+            sha = digest(source)
+            if identity(os.fstat(source.fileno())) != identity(info) or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(info):
+                raise ServiceError("conflict", "The file changed during review.", 409)
+            return {"path": path, "expected": stamp(info, sha)}
+
+    def inspection_read(self, value):
+        if not self.allow_deletion:
+            raise ServiceError("deletion_disabled", "Reviewed deletion is not enabled by this server's owner.", 403)
+        if not isinstance(value, dict) or set(value) != {"path", "expected", "offset", "count"}:
+            raise ServiceError("invalid_request", "Inspection needs path, expected, offset and count.")
+        validate_request({"version": 1, "operation": "delete", "files": [{"path": value["path"], "expected": value["expected"]}]})
+        offset, count, expected = value["offset"], value["count"], value["expected"]
+        if type(offset) is not int or type(count) is not int or offset < 0 or not 0 <= count <= CHUNK or offset + count > expected["size"]:
+            raise ServiceError("invalid_request", "Inspection ranges must fit the reviewed file and be at most 1 MiB.")
+        with self.parent(value["path"], deletion=True) as (parent, name), self.source(parent, name, allow_empty=True) as (source, original):
+            fcntl.flock(source.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+            hashed = hashlib.sha256()
+            position = 0
+            selected = bytearray()
+            # Select returned bytes from the exact same full-file pass that proves the
+            # fingerprint. Hashing first and seeking back later would permit a write race.
+            while True:
+                block = source.read(CHUNK)
+                if not block:
+                    break
+                hashed.update(block)
+                start = max(offset, position)
+                end = min(offset + count, position + len(block))
+                if end > start:
+                    selected.extend(block[start - position:end - position])
+                position += len(block)
+                if position > MAX_FILE_BYTES:
+                    raise ServiceError("conflict", "The file grew during inspection.", 409)
+            if (position != expected["size"] or len(selected) != count or stamp(original, hashed.hexdigest()) != expected
+                    or identity(os.fstat(source.fileno())) != identity(original)
+                    or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(original)):
+                raise ServiceError("conflict", "The inspected file no longer matches the reviewed file.", 409)
+            return {"path": value["path"], "expected": expected, "offset": offset, "data": base64.b64encode(selected).decode("ascii")}
+
+    def delete(self, entry, operation_id, index, cancelled, persist_success, dry_run=False, before_capture=None, after_capture=None):
+        if not self.allow_deletion:
+            raise ServiceError("deletion_disabled", "Reviewed deletion is not enabled by this server's owner.", 403)
+        path, expected = entry["path"], entry["expected"]
+        recovery = ".gumbo-tag-" + operation_id + "-" + str(index) + ".deleting"
+        with self.parent(path, deletion=True) as (parent, name), self.source(parent, name, allow_empty=True) as (source, original):
+            check_cancel(cancelled)
+            if original.st_uid != os.geteuid():
+                raise ServiceError("ownership_mismatch", "Run the helper as this music file's owner.", 403)
+            try:
+                fcntl.flock(source.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                raise ServiceError("file_busy", "Another cooperating writer is using this file.", 409) from error
+            if stamp(original, digest(source, cancelled=cancelled)) != expected or identity(os.fstat(source.fileno())) != identity(original):
+                raise ServiceError("conflict", "The file changed; review it again before deleting.", 409)
+            if dry_run:
+                result = {"path": path, "status": "validated", "before": expected}
+                persist_success(result)
+                return result
+            os.mkdir(recovery, 0o700, dir_fd=parent)
+            try:
+                recovery_fd = os.open(recovery, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            except OSError:
+                with contextlib.suppress(OSError):
+                    os.rmdir(recovery, dir_fd=parent)
+                raise
+            captured, removed = False, False
+            try:
+                if before_capture:
+                    before_capture()
+                check_cancel(cancelled)
+                with self.parent(path, deletion=True) as (current_parent, _):
+                    if (os.fstat(parent).st_dev, os.fstat(parent).st_ino) != (os.fstat(current_parent).st_dev, os.fstat(current_parent).st_ino):
+                        raise ServiceError("conflict", "The music folder moved during deletion review.", 409)
+                # Move into a newly reserved private directory before unlinking anything. If an
+                # external writer wins the source-path race, the captured replacement is restored.
+                os.rename(name, "original", src_dir_fd=parent, dst_dir_fd=recovery_fd)
+                captured = True
+                os.fsync(parent)
+                os.fsync(recovery_fd)
+                if after_capture:
+                    after_capture()
+                captured_info = os.stat("original", dir_fd=recovery_fd, follow_symlinks=False)
+                if (captured_info.st_dev, captured_info.st_ino) != (original.st_dev, original.st_ino):
+                    raise ServiceError("conflict", "Another file replaced the reviewed song; nothing was deleted.", 409)
+                if stamp(os.fstat(source.fileno()), digest(source, cancelled=cancelled)) != expected:
+                    raise ServiceError("conflict", "The reviewed song changed; nothing was deleted.", 409)
+                check_cancel(cancelled)
+                os.unlink("original", dir_fd=recovery_fd)
+                removed = True
+                os.fsync(recovery_fd)
+                result = {"path": path, "status": "deleted", "before": expected}
+                persist_success(result)
+                return result
+            except Exception as error:
+                if removed:
+                    raise ServiceError("recovery_required", "The file may be deleted but its result was not confirmed. Check the original job; do not repeat it.", 500) from error
+                if captured:
+                    try:
+                        # link publishes only if the original path is still absent. Never overwrite
+                        # a concurrently created file to restore the captured one.
+                        os.link("original", name, src_dir_fd=recovery_fd, dst_dir_fd=parent, follow_symlinks=False)
+                        os.unlink("original", dir_fd=recovery_fd)
+                        captured = False
+                        os.fsync(parent)
+                    except OSError as restore_error:
+                        raise ServiceError("recovery_required", "No permanent deletion was confirmed. A file remains in " + recovery + "; restore it after checking the original path.", 500) from restore_error
+                raise
+            finally:
+                os.close(recovery_fd)
+                if not captured or removed:
+                    with contextlib.suppress(OSError):
+                        os.rmdir(recovery, dir_fd=parent)
+                        os.fsync(parent)
 
     def execute(self, entry, operation_id, index, cancelled, persist_success, dry_run=False, before_commit=None, after_replace=None):
         path, expected = entry["path"], entry["expected"]

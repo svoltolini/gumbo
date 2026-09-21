@@ -7,9 +7,12 @@ public nonisolated struct TagServiceConfiguration: Codable, Hashable, Sendable {
     public let endpoint: URL
     public let sourceID: String
     public let libraryRoot: String
+    /// Missing on existing installations: deletion is always an explicit opt-in.
+    public let allowsReviewedDeletion: Bool?
 
-    public init(endpoint: URL, sourceID: String, libraryRoot: String) {
+    public init(endpoint: URL, sourceID: String, libraryRoot: String, allowsReviewedDeletion: Bool = false) {
         self.endpoint = endpoint; self.sourceID = sourceID; self.libraryRoot = libraryRoot
+        self.allowsReviewedDeletion = allowsReviewedDeletion
     }
 
     public var keychainAccount: String {

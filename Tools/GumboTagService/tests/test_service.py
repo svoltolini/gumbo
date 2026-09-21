@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
+import base64
 import copy
 import http.client
 import json
@@ -217,6 +218,16 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(request("POST", "/v1/files/stat", {"path": "tone.mp3"}, "wrong")[0], 401)
             code, result = request("GET", "/v1/capabilities", token="t" * 43)
             self.assertEqual((code, result["version"]), (200, 1))
+            self.assertFalse(result["supportsReviewedDeletion"])
+            self.assertEqual(request("POST", "/v1/files/review-delete", {"path": "tone.mp3"}, "t" * 43)[0], 403)
+            self.engine.allow_deletion = True
+            self.assertTrue(request("GET", "/v1/capabilities", token="t" * 43)[1]["supportsReviewedDeletion"])
+            code, reviewed = request("POST", "/v1/files/review-delete", {"path": "tone.mp3"}, "t" * 43)
+            self.assertEqual(code, 200)
+            code, inspected = request("POST", "/v1/files/inspect-range", {"path": "tone.mp3", "expected": reviewed["expected"], "offset": 0, "count": 12}, "t" * 43)
+            self.assertEqual(code, 200)
+            self.assertEqual(base64.b64decode(inspected["data"]), (self.music / "tone.mp3").read_bytes()[:12])
+            self.assertEqual(request("POST", "/v1/files/review-delete", {"path": "../tone.mp3"}, "t" * 43)[0], 400)
             self.assertEqual(request("POST", "/v1/files/stat", {"path": "../private.mp3"}, "t" * 43)[0], 400)
             self.assertEqual(request("POST", "/v1/files/stat", {"path": "tone.mp3"}, "t" * 43)[0], 200)
             identifier = str(uuid.uuid4())
@@ -238,6 +249,185 @@ class ServiceTests(unittest.TestCase):
         request["files"][0]["changes"] = {"path": "elsewhere"}
         with self.assertRaises(ServiceError):
             validate_request(request)
+
+    def delete_entry(self, name="tone.mp3"):
+        self.engine.allow_deletion = True
+        return self.engine.review_deletion(name)
+
+    def delete(self, entry, **options):
+        return self.engine.delete(entry, str(uuid.uuid4()), 0, lambda: False, lambda outcome: None, **options)
+
+    def test_deletion_is_disabled_by_default_and_accepts_only_explicit_operation(self):
+        with self.assertRaisesRegex(ServiceError, "not enabled"):
+            self.engine.review_deletion("tone.mp3")
+        entry = self.delete_entry()
+        request = {"version": 1, "operation": "delete", "files": [entry]}
+        validate_request(request)
+        for altered in ({**request, "operation": "remove"},
+                        {**request, "files": [{**entry, "changes": {"genre": "Jazz"}}]},
+                        {**request, "files": [entry, entry]}):
+            with self.assertRaises(ServiceError):
+                validate_request(altered)
+        self.engine.allow_deletion = False
+        with self.assertRaisesRegex(ServiceError, "not enabled"):
+            self.delete(entry)
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        try:
+            with self.assertRaisesRegex(ServiceError, "not enabled"):
+                store.submit(str(uuid.uuid4()), request)
+        finally:
+            store.close()
+
+    def test_review_and_dry_run_do_not_mutate_then_delete_only_exact_song(self):
+        cover = self.music / "cover.jpg"
+        cover.write_bytes(b"keep artwork")
+        path = self.music / "tone.mp3"
+        before = path.read_bytes()
+        entry = self.delete_entry()
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.delete(entry, dry_run=True)["status"], "validated")
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.delete(entry)["status"], "deleted")
+        self.assertFalse(path.exists())
+        self.assertEqual(cover.read_bytes(), b"keep artwork")
+        self.assertTrue((self.music / "tone.flac").exists())
+        self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_delete_empty_audio_but_never_links_or_non_music(self):
+        self.engine.allow_deletion = True
+        empty = self.music / "empty.wav"
+        empty.touch()
+        entry = self.engine.review_deletion(empty.name)
+        validate_request({"version": 1, "operation": "delete", "files": [entry]})
+        self.assertEqual(self.delete(entry)["status"], "deleted")
+        (self.music / "link.mp3").symlink_to(self.music / "tone.mp3")
+        os.link(self.music / "tone.flac", self.music / "hard.flac")
+        for name in ("../tone.mp3", "link.mp3", "hard.flac", "cover.jpg"):
+            with self.subTest(name=name), self.assertRaises(ServiceError):
+                self.engine.review_deletion(name)
+
+    def test_inspection_returns_only_bytes_from_the_matching_full_file_hash(self):
+        path = self.music / "large.wav"
+        data = bytes(range(256)) * 8193
+        path.write_bytes(data)
+        entry = self.delete_entry(path.name)
+        for offset, count in ((0, 16), (1024 * 1024 - 7, 23), (len(data), 0), (123, 1024 * 1024)):
+            value = self.engine.inspection_read({**entry, "offset": offset, "count": count})
+            self.assertEqual(base64.b64decode(value["data"]), data[offset:offset + count])
+            self.assertEqual(value["expected"], entry["expected"])
+        stat = path.stat()
+        changed = bytearray(data); changed[-1] ^= 1
+        path.write_bytes(changed)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with self.assertRaisesRegex(ServiceError, "no longer matches"):
+            self.engine.inspection_read({**entry, "offset": 0, "count": 16})
+        self.assertEqual(path.read_bytes(), changed)
+
+    def test_inspection_bounds_and_permission_are_enforced(self):
+        entry = self.delete_entry()
+        for offset, count in ((-1, 1), (0, -1), (0, 1024 * 1024 + 1), (entry["expected"]["size"], 1), (False, 1), (0, True)):
+            with self.subTest(offset=offset, count=count), self.assertRaises(ServiceError):
+                self.engine.inspection_read({**entry, "offset": offset, "count": count})
+        self.engine.allow_deletion = False
+        with self.assertRaisesRegex(ServiceError, "not enabled"):
+            self.engine.inspection_read({**entry, "offset": 0, "count": 1})
+
+    def test_delete_rejects_changed_bytes_even_when_size_and_mtime_are_preserved(self):
+        path = self.music / "tone.mp3"
+        entry = self.delete_entry()
+        stat = path.stat()
+        data = bytearray(path.read_bytes()); data[-1] ^= 1
+        path.write_bytes(data)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with self.assertRaisesRegex(ServiceError, "changed"):
+            self.delete(entry)
+        self.assertEqual(path.read_bytes(), data)
+
+    def test_path_replacement_during_capture_is_restored_without_deleting_either_file(self):
+        path = self.music / "tone.mp3"
+        original = path.read_bytes()
+        entry = self.delete_entry()
+        def replace():
+            path.rename(self.music / "moved.mp3")
+            path.write_bytes(b"a different song")
+        with self.assertRaisesRegex(ServiceError, "replaced"):
+            self.delete(entry, before_capture=replace)
+        self.assertEqual(path.read_bytes(), b"a different song")
+        self.assertEqual((self.music / "moved.mp3").read_bytes(), original)
+        self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_in_place_change_after_capture_is_preserved_instead_of_deleted(self):
+        path = self.music / "tone.mp3"
+        entry = self.delete_entry()
+        descriptor = os.open(path, os.O_WRONLY)
+        def modify():
+            os.write(descriptor, b"modified by another writer")
+            os.fsync(descriptor)
+        try:
+            with self.assertRaisesRegex(ServiceError, "changed"):
+                self.delete(entry, after_capture=modify)
+        finally:
+            os.close(descriptor)
+        self.assertTrue(path.read_bytes().startswith(b"modified by another writer"))
+        self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_cancel_after_capture_restores_original(self):
+        path = self.music / "tone.mp3"
+        original = path.read_bytes()
+        entry = self.delete_entry()
+        stopped = False
+        def stop():
+            nonlocal stopped
+            stopped = True
+        with self.assertRaises(Cancelled):
+            self.engine.delete(entry, str(uuid.uuid4()), 0, lambda: stopped, lambda outcome: None, after_capture=stop)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_recovery_never_overwrites_a_new_file_at_original_path(self):
+        path = self.music / "tone.mp3"
+        original = path.read_bytes()
+        entry = self.delete_entry()
+        def replace_and_fail():
+            path.write_bytes(b"new song")
+            raise ServiceError("test", "Stopped")
+        with self.assertRaises(ServiceError) as raised:
+            self.delete(entry, after_capture=replace_and_fail)
+        self.assertEqual(raised.exception.code, "recovery_required")
+        self.assertEqual(path.read_bytes(), b"new song")
+        recovery = list(self.music.glob(".gumbo-tag-*.deleting/original"))
+        self.assertEqual(len(recovery), 1)
+        self.assertEqual(recovery[0].read_bytes(), original)
+
+    def test_delete_job_lost_ack_replay_restart_and_uncertainty_stops_batch(self):
+        request = {"version": 1, "operation": "delete", "files": [self.delete_entry()]}
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        identifier = str(uuid.uuid4())
+        store.submit(identifier, request)
+        store.run_job(identifier)
+        self.assertEqual(store.status(identifier)["files"][0]["status"], "deleted")
+        store.close()
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        replay, created = store.submit(identifier, request)
+        self.assertFalse(created)
+        self.assertEqual(replay["files"][0]["status"], "deleted")
+        request = {"version": 1, "operation": "delete", "files": [self.delete_entry("tone.flac"), self.delete_entry("tone.m4a")]}
+        identifier = str(uuid.uuid4())
+        store.submit(identifier, request)
+        save = store._save
+        failed = False
+        def lose_first_ack(identifier, result):
+            nonlocal failed
+            if not failed and result["files"][0]["status"] == "deleted":
+                failed = True
+                raise OSError("lost state write")
+            save(identifier, result)
+        with patch.object(store, "_save", side_effect=lose_first_ack):
+            store.run_job(identifier)
+        self.assertEqual([x["status"] for x in store.status(identifier)["files"]], ["unconfirmed", "cancelled"])
+        self.assertFalse((self.music / "tone.flac").exists())
+        self.assertTrue((self.music / "tone.m4a").exists())
+        store.close()
 
     def test_only_missing_genre_reads_file_tags_and_returns_unchanged_fields(self):
         for name in ("tone.mp3", "tone.flac", "tone.m4a"):

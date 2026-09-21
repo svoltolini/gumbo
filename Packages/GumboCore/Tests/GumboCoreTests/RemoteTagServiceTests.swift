@@ -92,6 +92,51 @@ private nonisolated final class TagFixtureProtocol: URLProtocol, @unchecked Send
         #expect(job.files.first?.after?.fields.genre == "Jazz")
     }
 
+    @Test func deletionReviewAcceptsEmptyAudioAndRequiresAnExactPath() async throws {
+        let client = try client { request in
+            #expect(request.url?.path == "/v1/files/review-delete")
+            #expect(request.httpMethod == "POST")
+            return (200, Data("""
+            {"version":1,"path":"empty.wav","expected":{"size":0,"mtimeNs":1,"sha256":"\(String(repeating: "a", count: 64))"}}
+            """.utf8))
+        }
+        #expect(try await client.reviewDeletion(path: "empty.wav").expected.size == 0)
+        await #expect(throws: RemoteTagService.Error.invalidResponse) { _ = try await client.reviewDeletion(path: "other.wav") }
+        await #expect(throws: RemoteTagService.Error.invalidPath) { _ = try await client.reviewDeletion(path: "cover.jpg") }
+    }
+
+    @Test func deletionResponseRequiresItsOperationAndConfirmedFingerprint() async throws {
+        let identifier = UUID()
+        let expected = RemoteTagService.Expected(size: 0, mtimeNs: 1, sha256: digest)
+        let client = try client { request in
+            #expect(request.httpMethod == "PUT")
+            return (200, Data("""
+            {"version":1,"jobID":"\(identifier)","operation":"delete","status":"completed","dryRun":false,"files":[{"path":"empty.wav","status":"deleted","before":{"size":0,"mtimeNs":1,"sha256":"\(String(repeating: "a", count: 64))"}}]}
+            """.utf8))
+        }
+        #expect(try await client.submitDeletion(jobID: identifier, files: [.init(path: "empty.wav", expected: expected)]).files[0].status == .deleted)
+        let malformed = try self.client { _ in
+            (200, Data("""
+            {"version":1,"jobID":"\(identifier)","operation":"delete","status":"completed","dryRun":false,"files":[{"path":"empty.wav","status":"deleted"}]}
+            """.utf8))
+        }
+        await #expect(throws: RemoteTagService.Error.invalidResponse) { _ = try await malformed.status(jobID: identifier) }
+    }
+
+    @Test func helperInspectionValidatesPathFingerprintOffsetAndLength() async throws {
+        let client = try client { request in
+            #expect(request.url?.path == "/v1/files/inspect-range")
+            return (200, Data("""
+            {"version":1,"path":"song.wav","expected":{"size":4,"mtimeNs":1,"sha256":"\(String(repeating: "a", count: 64))"},"offset":0,"data":"dGVzdA=="}
+            """.utf8))
+        }
+        let expected = RemoteTagService.Expected(size: 4, mtimeNs: 1, sha256: digest)
+        #expect(try await client.inspectionRead(path: "song.wav", expected: expected, range: 0..<4) == Data("test".utf8))
+        await #expect(throws: RemoteTagService.Error.invalidResponse) { _ = try await client.inspectionRead(path: "other.wav", expected: expected, range: 0..<4) }
+        await #expect(throws: RemoteTagService.Error.invalidResponse) { _ = try await client.inspectionRead(path: "song.wav", expected: expected, range: 1..<4) }
+        await #expect(throws: RemoteTagService.Error.invalidRequest) { _ = try await client.inspectionRead(path: "song.wav", expected: expected, range: 0..<5) }
+    }
+
     @Test func redirectsAreNeverFollowedEvenWhenSameOrigin() {
         let session = URLSession(configuration: .ephemeral)
         let original = URL(string: "https://helper.example:8443/v1/capabilities")!

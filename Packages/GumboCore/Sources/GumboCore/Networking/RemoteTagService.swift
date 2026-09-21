@@ -12,6 +12,8 @@ public actor RemoteTagService {
         public let maxFileBytes: Int64
         public let requiresSHA256: Bool
         public let supportsDryRun: Bool
+        public let supportsReviewedDeletion: Bool?
+        public let supportsVerifiedInspection: Bool?
     }
 
     public nonisolated struct Expected: Codable, Equatable, Sendable {
@@ -28,6 +30,32 @@ public actor RemoteTagService {
         public let path: String
         public let expected: Expected
         public let fields: Fields
+    }
+
+    public nonisolated struct DeletionReview: Decodable, Sendable {
+        public let version: Int
+        public let path: String
+        public let expected: Expected
+    }
+
+    public nonisolated struct InspectionRead: Decodable, Sendable {
+        public let version: Int
+        public let path: String
+        public let expected: Expected
+        public let offset: Int64
+        public let data: Data
+    }
+    private nonisolated struct InspectionRequest: Encodable {
+        let path: String
+        let expected: Expected
+        let offset: Int64
+        let count: Int64
+    }
+
+    public nonisolated struct Deletion: Codable, Sendable {
+        public let path: String
+        public let expected: Expected
+        public init(path: String, expected: Expected) { self.path = path; self.expected = expected }
     }
 
     public nonisolated struct Fields: Decodable, Sendable {
@@ -69,7 +97,7 @@ public actor RemoteTagService {
     }
 
     public nonisolated enum FileStatus: String, Decodable, Sendable {
-        case pending, running, succeeded, unchanged, validated, failed, cancelled, unconfirmed
+        case pending, running, succeeded, unchanged, validated, deleted, failed, cancelled, unconfirmed
     }
 
     public nonisolated struct Failure: Decodable, Sendable {
@@ -88,6 +116,7 @@ public actor RemoteTagService {
     public nonisolated struct Job: Decodable, Sendable {
         public let version: Int
         public let jobID: UUID
+        public let operation: String?
         public let status: JobStatus
         public let dryRun: Bool
         public let files: [FileOutcome]
@@ -114,6 +143,13 @@ public actor RemoteTagService {
     private nonisolated struct ErrorEnvelope: Decodable { let version: Int; let error: Failure }
     private nonisolated struct StatRequest: Encodable { let path: String }
     private nonisolated struct SubmitRequest: Encodable { let version = 1; let files: [Edit]; let dryRun: Bool }
+
+    private nonisolated struct DeleteRequest: Encodable {
+        let version = 1
+        let operation = "delete"
+        let files: [Deletion]
+        let dryRun = false
+    }
 
     private let endpoint: URL
     private let token: String
@@ -180,7 +216,39 @@ public actor RemoteTagService {
         let value: Job = try await request("PUT", path: "v1/jobs/" + jobID.uuidString.lowercased(),
                                            body: JSONEncoder().encode(SubmitRequest(files: files, dryRun: dryRun)))
         try validate(value, jobID: jobID)
+        guard value.operation == nil || value.operation == "tags" else { throw Error.invalidResponse }
         guard value.dryRun == dryRun, value.files.map(\.path) == files.map(\.path) else { throw Error.invalidResponse }
+        return value
+    }
+
+    public func reviewDeletion(path: String) async throws -> DeletionReview {
+        try Self.validate(path: path, deletion: true)
+        let value: DeletionReview = try await request("POST", path: "v1/files/review-delete", body: JSONEncoder().encode(StatRequest(path: path)))
+        guard value.path == path, Self.valid(value.expected, allowEmpty: true) else { throw Error.invalidResponse }
+        return value
+    }
+
+    public func inspectionRead(path: String, expected: Expected, range: Range<Int64>) async throws -> Data {
+        try Self.validate(path: path, deletion: true)
+        guard Self.valid(expected, allowEmpty: true), range.lowerBound >= 0,
+              range.upperBound <= expected.size, range.count <= 1024 * 1024 else { throw Error.invalidRequest }
+        let body = InspectionRequest(path: path, expected: expected, offset: range.lowerBound, count: Int64(range.count))
+        let value: InspectionRead = try await request("POST", path: "v1/files/inspect-range", body: JSONEncoder().encode(body))
+        guard value.path == path, value.expected == expected, value.offset == range.lowerBound,
+              value.data.count == range.count else { throw Error.invalidResponse }
+        return value.data
+    }
+
+    public func submitDeletion(jobID: UUID, files: [Deletion]) async throws -> Job {
+        guard (1...128).contains(files.count), Set(files.map(\.path)).count == files.count else { throw Error.invalidRequest }
+        for file in files {
+            try Self.validate(path: file.path, deletion: true)
+            guard Self.valid(file.expected, allowEmpty: true) else { throw Error.invalidRequest }
+        }
+        let value: Job = try await request("PUT", path: "v1/jobs/" + jobID.uuidString.lowercased(),
+                                           body: JSONEncoder().encode(DeleteRequest(files: files)))
+        try validate(value, jobID: jobID)
+        guard value.operation == "delete", !value.dryRun, value.files.map(\.path) == files.map(\.path) else { throw Error.invalidResponse }
         return value
     }
 
@@ -200,8 +268,18 @@ public actor RemoteTagService {
     private func validate(_ job: Job, jobID: UUID) throws {
         guard job.jobID == jobID, (1...128).contains(job.files.count),
               Set(job.files.map(\.path)).count == job.files.count else { throw Error.invalidResponse }
+        guard job.operation == nil || job.operation == "tags" || job.operation == "delete" else { throw Error.invalidResponse }
+        let deletion = job.operation == "delete"
         for file in job.files {
-            try Self.validate(path: file.path)
+            try Self.validate(path: file.path, deletion: deletion)
+            if let before = file.before, !Self.valid(before, allowEmpty: deletion) { throw Error.invalidResponse }
+            if deletion {
+                guard file.after == nil, file.status != .succeeded, file.status != .unchanged,
+                      file.status != .deleted || (!job.dryRun && file.before != nil),
+                      file.status != .validated || (job.dryRun && file.before != nil) else { throw Error.invalidResponse }
+                continue
+            }
+            guard file.status != .deleted else { throw Error.invalidResponse }
             if let after = file.after, !Self.valid(after.expected) { throw Error.invalidResponse }
             if file.status == .succeeded || file.status == .unchanged || file.status == .validated {
                 guard file.after != nil, file.before != nil else { throw Error.invalidResponse }
@@ -209,17 +287,17 @@ public actor RemoteTagService {
         }
     }
 
-    private nonisolated static func valid(_ value: Expected) -> Bool {
-        value.size > 0 && value.size <= 2 * 1024 * 1024 * 1024 && value.mtimeNs >= 0
+    private nonisolated static func valid(_ value: Expected, allowEmpty: Bool = false) -> Bool {
+        value.size >= (allowEmpty ? 0 : 1) && value.size <= 2 * 1024 * 1024 * 1024 && value.mtimeNs >= 0
             && value.sha256.utf8.count == 64 && value.sha256.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
-    private nonisolated static func validate(path: String) throws {
+    private nonisolated static func validate(path: String, deletion: Bool = false) throws {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, path.utf8.count <= 4096, !path.contains("\\"),
               !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
               !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasPrefix(".gumbo-tag-") }),
-              ["mp3", "flac", "m4a"].contains((path as NSString).pathExtension.lowercased()) else { throw Error.invalidPath }
+              (deletion ? RemoteDriveSupport.audioExtensions : ["mp3", "flac", "m4a"]).contains((path as NSString).pathExtension.lowercased()) else { throw Error.invalidPath }
     }
 
     private func request<Response: Decodable & Sendable>(_ method: String, path: String, body: Data? = nil) async throws -> Response {

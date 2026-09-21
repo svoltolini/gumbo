@@ -48,6 +48,8 @@ private actor InspectionDrive: WritableRemoteDrive {
     var onRead: (@Sendable () async -> Void)?
     var deleteWaiter: CheckedContinuation<Void, Never>?
     var holdsDeletion = false
+    var deletionFailure: RemoteWriteError?
+    var deletionAttempts = 0
     init(_ bytes: Data) { self.bytes = bytes }
     func setModified(_ value: Date?) { modified = value }
     func setVersion(_ value: String) { version = value }
@@ -58,6 +60,7 @@ private actor InspectionDrive: WritableRemoteDrive {
     func setBytes(_ value: Data) { bytes = value }
     func setOnRead(_ hook: @escaping @Sendable () async -> Void) { onRead = hook }
     func holdDeletion() { holdsDeletion = true }
+    func failDeletion(_ failure: RemoteWriteError) { deletionFailure = failure }
     func releaseDeletion() { holdsDeletion = false; deleteWaiter?.resume(); deleteWaiter = nil }
     var isDeleting: Bool { deleteWaiter != nil }
     func roots() async throws -> [RemoteEntry] { [] }
@@ -78,8 +81,10 @@ private actor InspectionDrive: WritableRemoteDrive {
     func upload(_ file: URL, toFolder folder: String, name: String, modified: Date?) async throws { throw RemoteWriteError.readOnly }
     func rename(_ path: String, to name: String) async throws { throw RemoteWriteError.readOnly }
     func delete(_ path: String) async throws {
+        deletionAttempts += 1
         if let error { throw error }
         if holdsDeletion { await withCheckedContinuation { deleteWaiter = $0 } }
+        if let deletionFailure { throw deletionFailure }
         try Task.checkCancellation()
         deleted.append(path)
     }
@@ -107,6 +112,54 @@ private nonisolated func inspectionTrack(_ path: String = "/music/0123456789abcd
 }
 
 @Suite struct MusicFileInspectionTests {
+    @Test func fabricatedDamageWithoutAProviderReviewCannotAuthorizeDeletion() async throws {
+        let drive = InspectionDrive(Data())
+        let finding = MusicFileInspection(track: inspectionTrack(), sourceID: drive.id, condition: .damaged,
+            explanation: "Unverified input", size: 0, modified: Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(!finding.canDelete)
+        await #expect(throws: RemoteWriteError.changed) {
+            try await MusicFileInspector.deleteReviewed(finding, drive: drive, authorized: { true })
+        }
+        #expect(await drive.deletionAttempts == 0)
+    }
+
+    @MainActor @Test func lostReplyStopsDamagedFileBatchAndSurvivesCancellation() async throws {
+        for cancel in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appending(path: "GumboDamageBatch-" + UUID().uuidString)
+            let suite = "GumboDamageBatch." + UUID().uuidString
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+            let profiles = ProfileStore(directory: directory, defaults: defaults)
+            #expect(profiles.activate(try #require(profiles.owner)))
+            let drive = InspectionDrive(Data())
+            let entries = ["one.m4a", "two.m4a"].map {
+                RemoteEntry(path: "/music/" + $0, name: $0, isDirectory: false, size: 0,
+                            modified: Date(timeIntervalSince1970: 1_700_000_000))
+            }
+            let library = LibraryStore()
+            library.profiles = profiles
+            library.replace(with: Catalogue.build(folders: [ScannedFolder(path: "/music", audio: entries, cover: nil)],
+                rootPath: "/music", serverName: "Fixture", driveID: drive.id, existing: nil), drive: drive)
+            let token = UUID()
+            library.fileDeletionConnectionTokenProvider = { token }
+            var findings: [MusicFileInspection] = []
+            for track in library.tracks { findings.append(await MusicFileInspector.inspect(track, drive: drive)) }
+            await drive.failDeletion(.deletionUnconfirmed)
+            await drive.holdDeletion()
+            let task = Task { await library.deleteReviewedFiles(findings) }
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !(await drive.isDeleting), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(await drive.isDeleting)
+            if cancel { task.cancel() }
+            await drive.releaseDeletion()
+            let report = await task.value
+            #expect(report.deleted.isEmpty && report.failures.count == 1)
+            #expect(report.failures.first?.message.contains("reply was lost") == true)
+            #expect(report.wasCancelled == cancel)
+            #expect(await drive.deletionAttempts == 1)
+            #expect(library.catalogue.trackCount == 2)
+        }
+    }
     @Test func missingIndexIsDamagedButHashedNameWithReadableAudioIsKept() async {
         let broken = await MusicFileInspector.inspect(inspectionTrack(), drive: InspectionDrive(brokenAudio))
         #expect(broken.condition == .damaged && broken.canDelete)
@@ -256,6 +309,7 @@ private nonisolated func inspectionTrack(_ path: String = "/music/0123456789abcd
         let catalogue = Catalogue.build(folders: [ScannedFolder(path: "/music", audio: entries, cover: nil)], rootPath: "/music", serverName: "Fixture", driveID: drive.id, existing: nil)
         let library = LibraryStore()
         library.replace(with: catalogue, drive: drive)
+        library.persistDeletedAlbumCatalogue = { _ in true }
         library.profiles = profiles
         let connectionToken = UUID()
         library.fileDeletionConnectionTokenProvider = { connectionToken }

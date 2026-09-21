@@ -74,6 +74,8 @@ class JobStore:
     def submit(self, identifier, request):
         job_identifier(identifier)
         validate_request(request)
+        if request.get("operation") == "delete" and not self.engine.allow_deletion:
+            raise ServiceError("deletion_disabled", "Reviewed deletion is not enabled by this server's owner.", 403)
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
         request_digest = hashlib.sha256(encoded.encode()).hexdigest()
         with self.lock:
@@ -85,6 +87,7 @@ class JobStore:
             if self.stopping.is_set() or self.queue.full():
                 raise ServiceError("busy", "The helper's edit queue is full. Try later.", 503)
             result = {"version": 1, "jobID": identifier, "status": "queued", "dryRun": request.get("dryRun", False),
+                      "operation": request.get("operation", "tags"),
                       "files": [{"path": entry["path"], "status": "pending"} for entry in request["files"]]}
             self.database.execute("INSERT INTO jobs(id,digest,request,result) VALUES(?,?,?,?)", (identifier, request_digest, encoded, json.dumps(result)))
             self.database.commit()
@@ -145,7 +148,8 @@ class JobStore:
                 self._save(identifier, result)
 
             try:
-                self.engine.execute(entry, identifier, index, lambda: self._cancelled(identifier), persist_success,
+                execute = self.engine.delete if request.get("operation") == "delete" else self.engine.execute
+                execute(entry, identifier, index, lambda: self._cancelled(identifier), persist_success,
                                     dry_run=request.get("dryRun", False))
             except ServiceError as error:
                 result["files"][index] = {"path": entry["path"], "status": "cancelled" if isinstance(error, Cancelled) else "unconfirmed" if error.code == "recovery_required" else "failed",
@@ -155,8 +159,13 @@ class JobStore:
                 result["files"][index] = {"path": entry["path"], "status": "failed",
                                           "error": {"code": "operation_failed", "message": "The edit could not be completed. Inspect the file before retrying."}}
             self._save(identifier, result)
+            if result["files"][index]["status"] == "unconfirmed":
+                for remaining in result["files"][index + 1:]:
+                    remaining["status"] = "cancelled"
+                break
         statuses = {entry["status"] for entry in result["files"]}
-        result["status"] = "completed" if statuses <= {"succeeded", "unchanged", "validated"} else "cancelled" if statuses <= {"succeeded", "unchanged", "validated", "cancelled"} else "partial"
+        complete = {"succeeded", "unchanged", "validated", "deleted"}
+        result["status"] = "completed" if statuses <= complete else "cancelled" if statuses <= complete | {"cancelled"} else "partial"
         self._save(identifier, result)
 
     def close(self):
@@ -250,13 +259,24 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "GET" and self.path == "/v1/capabilities":
                 self.respond(200, {"version": 1, "service": "GumboTagService", "fields": ["album", "albumArtist", "genre"],
                                    "formats": ["mp3", "flac", "m4a"], "maxFiles": MAX_FILES, "maxFileBytes": MAX_FILE_BYTES,
-                                   "requiresSHA256": True, "supportsDryRun": True})
+                                   "requiresSHA256": True, "supportsDryRun": True,
+                                   "supportsReviewedDeletion": self.server.engine.allow_deletion,
+                                   "supportsVerifiedInspection": self.server.engine.allow_deletion})
                 return
             if self.command == "POST" and self.path == "/v1/files/stat":
                 value = self.body()
                 if not isinstance(value, dict) or set(value) != {"path"}:
                     raise ServiceError("invalid_request", "Only path is accepted.")
                 self.respond(200, {"version": 1, **self.server.engine.inspect(value["path"])})
+                return
+            if self.command == "POST" and self.path == "/v1/files/review-delete":
+                value = self.body()
+                if not isinstance(value, dict) or set(value) != {"path"}:
+                    raise ServiceError("invalid_request", "Only path is accepted.")
+                self.respond(200, {"version": 1, **self.server.engine.review_deletion(value["path"])})
+                return
+            if self.command == "POST" and self.path == "/v1/files/inspect-range":
+                self.respond(200, {"version": 1, **self.server.engine.inspection_read(self.body())})
                 return
             parts = self.path.split("/")
             if len(parts) in (4, 5) and parts[1:3] == ["v1", "jobs"]:
@@ -294,11 +314,13 @@ def main():
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8443)
     parser.add_argument("--http-loopback", action="store_true", help="Development only: forces 127.0.0.1 and disables TLS")
+    parser.add_argument("--allow-reviewed-deletion", action="store_true", default=os.environ.get("GUMBO_ALLOW_DELETION") == "1",
+                        help="Allow authenticated, reviewed exact-file deletion; disabled by default")
     options = parser.parse_args()
     token = Path(options.token_file).read_text().strip()
     if len(token) < 43 or len(token) > 256 or any(not (char.isascii() and (char.isalnum() or char in "_-")) for char in token):
         raise ValueError("Use a token generated from at least 32 random bytes in URL-safe base64.")
-    engine = FileEngine(options.music_root)
+    engine = FileEngine(options.music_root, allow_deletion=options.allow_reviewed_deletion)
     jobs = JobStore(options.state_directory, engine)
     server = HTTPServer(("127.0.0.1" if options.http_loopback else options.bind, options.port), engine, jobs, token)
     if not options.http_loopback:
