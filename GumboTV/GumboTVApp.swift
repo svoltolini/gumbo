@@ -1,14 +1,29 @@
 import CloudKit
+#if DEBUG && targetEnvironment(simulator)
+@testable import GumboCore
+#else
 import GumboCore
+#endif
 import SwiftUI
 import UIKit
+
+private enum TVLayoutFixture {
+    static var isEnabled: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        ProcessInfo.processInfo.arguments.contains("--sample-library")
+            && ProcessInfo.processInfo.arguments.contains("--ui-preview")
+        #else
+        false
+        #endif
+    }
+}
 
 /// Silent iCloud pushes keep the television's profiles and playlists current.
 final class TVAppDelegate: NSObject, UIApplicationDelegate {
     static var cloud: CloudSync?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        application.registerForRemoteNotifications()
+        if !TVLayoutFixture.isEnabled { application.registerForRemoteNotifications() }
         return true
     }
 
@@ -31,14 +46,33 @@ struct GumboTVApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        let profiles = ProfileStore()
-        let cloud = CloudSync()
-        cloud.profiles = profiles
-        profiles.sync = cloud
-        TVAppDelegate.cloud = cloud
+        let profiles: ProfileStore
+        let cloud: CloudSync
         let library = LibraryStore()
+        let model: AppModel
+        #if DEBUG && targetEnvironment(simulator)
+        if TVLayoutFixture.isEnabled {
+            let directory = FileManager.default.temporaryDirectory.appending(path: "GumboTVPreview-" + UUID().uuidString)
+            let defaults = UserDefaults(suiteName: "Gumbo.TVPreview." + UUID().uuidString)!
+            profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults)
+            cloud = CloudSync(services: CloudServices(identity: { nil }, sharedZones: { [] }, createZone: { _ in },
+                subscribe: {}, changes: { _, _ in CloudChangePage(records: []) }, modify: { _, _, _ in CloudModifyResult() }),
+                persistence: CloudPersistence(directory: directory.appending(path: "cloud")))
+            model = AppModel(library: library, defaults: defaults, services: ConnectionServices(), restoresSession: false)
+        } else {
+            profiles = ProfileStore()
+            cloud = CloudSync()
+            model = AppModel(library: library)
+        }
+        #else
+        profiles = ProfileStore()
+        cloud = CloudSync()
+        model = AppModel(library: library)
+        #endif
+        cloud.profiles = profiles
+        profiles.sync = TVLayoutFixture.isEnabled ? nil : cloud
+        TVAppDelegate.cloud = cloud
         library.profiles = profiles
-        let model = AppModel(library: library)
         model.profiles = profiles
         let player = PlayerModel()
         // Nothing is kept on a television; the manager only exists so the shared screens have one.
@@ -109,12 +143,16 @@ struct GumboTVApp: App {
             }
         }
         profiles.openAutomaticallyIfPossible()
-        cloud.start()
+        if !TVLayoutFixture.isEnabled { cloud.start() }
         // Development shortcuts: the sample catalogue, a locked picker, and something playing.
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--sample-library") {
             model.useSampleLibrary()
             model.openLibrary()
+            if TVLayoutFixture.isEnabled {
+                profiles.openAutomaticallyIfPossible()
+                model.appearance = .light
+            }
         }
         if arguments.contains("--locked") { profiles.lock() }
     }
@@ -135,7 +173,7 @@ struct GumboTVApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     model.scenePhaseChanged(phase)
                     downloads.setForegroundDownloadsActive(phase != .background)
-                    if phase == .active { Task { await cloud.refresh(reason: "foreground") } }
+                    if phase == .active && !TVLayoutFixture.isEnabled { Task { await cloud.refresh(reason: "foreground") } }
                     if phase == .background { profiles.flushSave() }
                 }
         }

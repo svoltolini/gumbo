@@ -96,3 +96,5 @@ python3 -m venv .venv
 ```
 
 The tests exercise generated MP3/FLAC/M4A audio, unrelated tags, permissions, dry run, conflict/low-disk rejection, traversal/symlink/hard-link refusal, rollback, missing-genre protection, durable replay/restart, lost acknowledgements, cancellation and authentication. They do not install a service, access real credentials or contact a NAS. Container/Linux filesystem and real-device integration acceptance remain separate.
+
+The opt-in [transfer benchmark](../../docs/METADATA-HELPER-BENCHMARK-2026-09-21.md) compares actual helper JSON traffic against whole-file download/edit/upload using generated files. On the recorded loopback run the helper saved more than 99.97% of body bytes but took longer; no real-NAS speed claim is made.

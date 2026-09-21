@@ -40,16 +40,18 @@ struct DownloadsView: View {
         ScrollView {
             if albums.isEmpty && playlists.isEmpty {
                 VStack(spacing: 0) {
+                    if downloads.retainedPartialBytes > 0 { interruptedStorageCard }
                     if !unused.isEmpty { DownloadsStorageCard(unused: unused, missing: []) }
                     EmptyStateView(
                         title: "No Downloads",
                         systemImage: "arrow.down.circle",
                         message: "Use the download button on an album or playlist to keep it on this \(Device.noun) and play it without the server.",
-                        centered: unused.isEmpty
+                        centered: unused.isEmpty && downloads.retainedPartialBytes == 0
                     )
                 }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
+                    if downloads.retainedPartialBytes > 0 { interruptedStorageCard }
                     if !unused.isEmpty || !missing.isEmpty {
                         DownloadsStorageCard(unused: unused, missing: missing)
                     }
@@ -88,6 +90,41 @@ struct DownloadsView: View {
         // Manifest-only arithmetic, kept out of the body and redone when download state moves.
         .task(id: MissingRequest(revision: downloads.stateRevision, ownerIDs: owners.map(\.id))) {
             missing = owners.filter { downloads.missingCount(for: $0) > 0 }
+        }
+    }
+
+    private var interruptedStorageCard: some View {
+        InterruptedDownloadsRow()
+            .padding(16)
+            .background(Color.groupedCard, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .padding(.bottom, 18)
+    }
+}
+
+/// Partial files are local retry data, not playable saved songs or originals on the server.
+struct InterruptedDownloadsRow: View {
+    @Environment(DownloadManager.self) private var downloads
+    @State private var isConfirmingRemoval = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Unfinished downloads").font(.headline)
+                Spacer(minLength: 8)
+                Button("Clear", role: .destructive) { isConfirmingRemoval = true }
+                    .accessibilityLabel("Clear unfinished downloads")
+            }
+            Text("\(ByteText.format(downloads.retainedPartialBytes)) kept for retry. These songs are not ready to play offline.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .confirmationDialog("Clear unfinished downloads?", isPresented: $isConfirmingRemoval, titleVisibility: .visible) {
+            Button("Clear Unfinished Downloads", role: .destructive) { downloads.discardInterruptedDownloads() }
+        } message: {
+            Text("Removes partial files kept for retry on this \(Device.noun). Saved songs, downloads in progress and files on your server are kept. Retrying these songs will start again.")
         }
     }
 }

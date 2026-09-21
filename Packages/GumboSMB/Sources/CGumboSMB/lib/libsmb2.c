@@ -1644,7 +1644,7 @@ _smb2_open_async_with_oplock_or_lease(struct smb2_context *smb2, const char *pat
          * caller's back, since the retry would silently drop the lease
          * request, so those are left to report the symlink as an error.
          */
-        if (!lease_state) {
+        if (!lease_state && !smb2->gumbo_read_snapshot) {
                 fh->path = strdup(path);
                 if (fh->path == NULL) {
                         smb2_set_error(smb2, "Failed to allocate path");
@@ -1654,6 +1654,12 @@ _smb2_open_async_with_oplock_or_lease(struct smb2_context *smb2, const char *pat
         }
 
         open_flags_to_create_request(&req, path, flags, oplock_level);
+        if (smb2->gumbo_read_snapshot) {
+                /* Resume verification and tail reads use this same open. Do not follow
+                 * symlinks or silently grant write/delete sharing on a retry. */
+                req.share_access = SMB2_FILE_SHARE_READ;
+                req.create_options |= SMB2_FILE_OPEN_REPARSE_POINT;
+        }
 
         if (lease_state && lease_key) {
                 req.create_context_length = SMB2_CREATE_REQUEST_LEASE_SIZE + 24;

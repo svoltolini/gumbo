@@ -1,3 +1,5 @@
+/* Modified for Gumbo on 2026-09-21: protected read handle for verified download resume.
+ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source/license details. */
 /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
 /*
    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
@@ -234,6 +236,16 @@ static void sync_open_cb(struct smb2_context *smb2, int status,
 
         cb_data->is_finished = 1;
         cb_data->ptr = command_data;
+}
+
+struct smb2fh *gumbo_smb2_open_read_snapshot(struct smb2_context *smb2, const char *path)
+{
+        struct smb2fh *result;
+        /* The caller serializes this context. Keep the flag set throughout any callbacks. */
+        smb2->gumbo_read_snapshot = 1;
+        result = smb2_open(smb2, path, 0);
+        smb2->gumbo_read_snapshot = 0;
+        return result;
 }
 
 struct smb2fh *smb2_open(struct smb2_context *smb2, const char *path, int flags)

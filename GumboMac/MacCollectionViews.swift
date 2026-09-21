@@ -313,8 +313,9 @@ struct MacDownloadsView: View {
         let unused = downloads.unusedStorage
 
         List {
-            if !unused.isEmpty || !missing.isEmpty {
+            if !unused.isEmpty || !missing.isEmpty || downloads.retainedPartialBytes > 0 {
                 Section("Storage") {
+                    if downloads.retainedPartialBytes > 0 { InterruptedDownloadsRow().padding(.vertical, 6) }
                     if !unused.isEmpty { MacUnusedStorageRow(unused: unused) }
                     if !missing.isEmpty { MacMissingSongsRow(missing: missing) }
                 }
@@ -332,7 +333,7 @@ struct MacDownloadsView: View {
         }
         .listStyle(.inset)
         .overlay {
-            if albums.isEmpty && playlists.isEmpty && unused.isEmpty {
+            if albums.isEmpty && playlists.isEmpty && unused.isEmpty && downloads.retainedPartialBytes == 0 {
                 ContentUnavailableView("No Downloads", systemImage: "arrow.down.circle", description: Text("Download an album or playlist to keep it on this Mac and listen without the server."))
             }
         }

@@ -23,3 +23,11 @@ clang -Wall -Wextra -Werror -Wno-unused-parameter \
   -L "$bin_dir" -Wl,-rpath,"$bin_dir" -lGumboSMB \
   -o "$build_dir/directory-security"
 "$build_dir/directory-security"
+clang -Wall -Wextra -Werror -Wno-unused-parameter \
+  -I "$package_dir/Sources/CGumboSMB/include" \
+  -I "$package_dir/Sources/CGumboSMB/include/apple" \
+  -I "$package_dir/Sources/CGumboSMB/include/smb2" \
+  "$package_dir/Tests/context-lifecycle.c" \
+  -L "$bin_dir" -Wl,-rpath,"$bin_dir" -lGumboSMB \
+  -o "$build_dir/context-lifecycle"
+"$build_dir/context-lifecycle"

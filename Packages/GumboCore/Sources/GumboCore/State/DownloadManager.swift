@@ -232,12 +232,28 @@ public final class DownloadManager {
     public var driveIDProvider: () -> String = { "" }
     public var remoteSourceProvider: ((Track) -> RemoteDownloadSource?)?
     public var requiresOpenAppForDownloads = false
+    /// Reclaimable bytes from interrupted foreground downloads, excluding active/queued work.
+    /// Updated at lifecycle/storage checkpoints, never by progress-driven UI reads.
+    public private(set) var retainedPartialBytes: Int64 = 0
     private var foregroundSources: [String: (drive: any RemoteFileDrive, path: String)] = [:]
     private var foregroundTask: Task<Void, Never>?
     private var foregroundAttempt: String?
     private var foregroundTaskID: UUID?
     private var foregroundPauseID: UUID?
     private var foregroundPaused = false
+    private var foregroundCheckpointEpoch = UUID().uuidString
+    private var checkpoints: ForegroundDownloadCheckpoint { ForegroundDownloadCheckpoint(cacheDirectory: cacheDirectory) }
+
+    public func discardInterruptedDownloads() {
+        guard !isRestoringTasks else { return }
+        _ = checkpoints.prune(keeping: Set(jobs.keys).union(initialJobs.keys))
+        refreshRetainedPartialBytes()
+    }
+
+    private func refreshRetainedPartialBytes() {
+        guard !isRestoringTasks else { return }
+        retainedPartialBytes = checkpoints.retainedBytes(excluding: Set(jobs.keys).union(initialJobs.keys))
+    }
 
     public func setForegroundDownloadsActive(_ active: Bool) {
         foregroundPaused = !active
@@ -252,8 +268,13 @@ public final class DownloadManager {
     /// before changing servers or leaving a profile; completed files and retry intent stay local.
     /// HTTP background tasks have their own persisted authentication and are not changed here.
     public func revokeForegroundDownloads() {
+        // Persist invalidation even when all jobs are already interrupted. Old partial bytes must
+        // not be reused after leaving a profile/server, including a crash during physical cleanup.
+        foregroundCheckpointEpoch = UUID().uuidString
+        checkpoints.removeAll()
+        refreshRetainedPartialBytes()
         let revoked = jobs.values.filter { $0.requiresForeground }
-        guard !revoked.isEmpty else { return }
+        guard !revoked.isEmpty else { savePendingOwners(); return }
         // Remove every queued source first: settling one job can otherwise start the next song
         // with credentials whose access is being revoked. The current read is cancelled below.
         foregroundSources.removeAll()
@@ -353,6 +374,7 @@ public final class DownloadManager {
         var allowsLegacyRestoration: Bool
         var serverDeletedKeys: Set<String>?
         var serverDeletionEpochs: [String: String]?
+        var foregroundCheckpointEpoch: String?
     }
 
     private enum SessionEvent {
@@ -426,6 +448,7 @@ public final class DownloadManager {
             requests = saved.requests
             serverDeletedKeys = saved.serverDeletedKeys ?? []
             serverDeletionEpochs = saved.serverDeletionEpochs ?? [:]
+            foregroundCheckpointEpoch = saved.foregroundCheckpointEpoch ?? foregroundCheckpointEpoch
             hasSavedPendingOwners = true
             hasVersionedIntent = !saved.allowsLegacyRestoration
         } else if FileManager.default.fileExists(atPath: intentURL.path) {
@@ -680,6 +703,10 @@ public final class DownloadManager {
         for job in jobs.values { protected.insert(job.incomingFileName) }
         for job in initialJobs.values { protected.insert(job.incomingFileName) }
         var removedPartialFiles = 0
+        if !isRestoringTasks {
+            let retained = Set(requests.values.flatMap(\.keys)).union(jobs.keys).union(initialJobs.keys)
+            removedPartialFiles += checkpoints.prune(keeping: retained)
+        }
         for file in inventory.files where !claimed.contains(file.fileName) {
             if file.isIncoming {
                 if isRestoringTasks { sweepDeferredByRestoration = true }
@@ -695,6 +722,7 @@ public final class DownloadManager {
         unused.fileNames = unusedNames.sorted()
         unused.recordKeys.sort()
         if unusedStorage != unused { unusedStorage = unused }
+        refreshRetainedPartialBytes()
         return (removedPartialFiles, unused)
     }
 
@@ -973,7 +1001,7 @@ public final class DownloadManager {
             }
             // Enumeration can finish before an old completion callback arrives. Keep its saved
             // ownership until then, but an explicit retry with no live task starts a fresh transfer.
-            if let existing { retire(existing) }
+            if let existing { retire(existing, preservingCheckpoint: true) }
             let attemptID = UUID().uuidString
             let name = Self.fileName(for: track, driveID: driveID)
             var job = DownloadJob(
@@ -1049,6 +1077,7 @@ public final class DownloadManager {
     }
 
     private func startForeground(_ source: (drive: any RemoteFileDrive, path: String), job: DownloadJob) {
+        refreshRetainedPartialBytes()
         let taskID = UUID()
         foregroundAttempt = job.attemptID
         foregroundTaskID = taskID
@@ -1058,10 +1087,14 @@ public final class DownloadManager {
         let incoming = cacheDirectory.appending(path: job.incomingFileName)
         foregroundTask = Task { [weak self] in
             do {
-                let bytes = try await ForegroundFileTransfer.copy(drive: source.drive, path: source.path, destination: incoming, expectedBytes: job.expectedBytes) { [weak self] fraction in
+                try Task.checkCancellation()
+                guard let self else { return }
+                let checkpoint = source.drive is any ResumableRemoteFileDrive ? try checkpoints.prepare(key: job.cacheKey, scope: .init(
+                    sourceID: job.driveID, path: source.path, profileID: activeProfileID,
+                    accessEpoch: foregroundCheckpointEpoch, deletionEpoch: serverDeletionEpochs[job.cacheKey])) : nil
+                let bytes = try await ForegroundFileTransfer.copy(drive: source.drive, path: source.path, destination: incoming, expectedBytes: job.expectedBytes, checkpoint: checkpoint) { [weak self] fraction in
                     await self?.update(job: job, fraction: fraction)
                 }
-                guard let self else { try? FileManager.default.removeItem(at: incoming); return }
                 guard clearForeground(taskID: taskID) else { try? FileManager.default.removeItem(at: incoming); return }
                 guard jobs[job.cacheKey]?.attemptID == job.attemptID else { try? FileManager.default.removeItem(at: incoming); startNextIfIdle(); return }
                 finish(job: job, bytes: bytes, status: 200, failure: nil)
@@ -1073,7 +1106,7 @@ public final class DownloadManager {
                 if cancelled, pausedForBackground, jobs[job.cacheKey]?.attemptID == job.attemptID {
                     progressByKey[job.cacheKey] = nil
                     refreshActivity(force: true)
-                } else { fail(job: job, message: cancelled ? nil : error.localizedDescription) }
+                } else { fail(job: job, message: cancelled ? nil : error.localizedDescription, preservingCheckpoint: !cancelled) }
                 startNextIfIdle()
             }
         }
@@ -1134,6 +1167,13 @@ public final class DownloadManager {
             task?.cancel()
             simulation?.cancel()
         }
+        // Failed transfers retain retry intent but no active job. Explicit cancellation still
+        // discards their checkpoint unless another owner has a live request for that file.
+        for key in ownerKeys where !pendingByOwner.values.contains(where: { $0.contains(key) })
+            && !initialPendingOwners.values.contains(where: { $0.contains(key) }) {
+            checkpoints.remove(key: key)
+        }
+        refreshRetainedPartialBytes()
         savePendingOwners()
         startNextIfIdle()
         refreshActivity(force: true)
@@ -1195,6 +1235,7 @@ public final class DownloadManager {
             if initialPendingOwners[owner]?.isEmpty == true { initialPendingOwners[owner] = nil }
         }
         for key in keys {
+            checkpoints.remove(key: key)
             let task = tasks[key]
             let simulation = simulations[key]
             if let job = jobs[key] ?? initialJobs[key] {
@@ -1235,6 +1276,7 @@ public final class DownloadManager {
             .union(jobs.values.map(\.fileName)).union(initialJobs.values.map(\.fileName))
         savePendingOwners()
         let failures = removeDeletedCacheFiles(fileNames, protecting: protectedFiles)
+        refreshRetainedPartialBytes()
         saveManifest()
         if failures > 0 {
             lastError = "Some local downloads couldn’t be removed. Open Downloads to review and remove the remaining unused files."
@@ -1332,7 +1374,7 @@ public final class DownloadManager {
                 if initialPendingOwners[owner]?.isEmpty == true { initialPendingOwners[owner] = nil }
             }
             try? FileManager.default.removeItem(at: cacheDirectory.appending(path: job.incomingFileName))
-            retire(job)
+            retire(job, preservingCheckpoint: true)
         }
         // A retry requested during enumeration may have temporarily adopted a saved job. Without
         // its OS task it is still only saved intent, not an active download.
@@ -1347,6 +1389,7 @@ public final class DownloadManager {
         }
         savePendingOwners()
         isRestoringTasks = false
+        refreshRetainedPartialBytes()
         let events = deferredSessionEvents
         deferredSessionEvents.removeAll()
         for event in events { receive(event) }
@@ -1492,7 +1535,7 @@ public final class DownloadManager {
         refreshActivity(force: true)
     }
 
-    private func fail(job: DownloadJob, message: String?) {
+    private func fail(job: DownloadJob, message: String?, preservingCheckpoint: Bool = false) {
         guard jobs[job.cacheKey]?.attemptID == job.attemptID else { return }
         let owners = pendingByOwner.filter { $0.value.contains(job.cacheKey) }.keys
         for owner in owners {
@@ -1504,13 +1547,13 @@ public final class DownloadManager {
             lastError = "Couldn’t finish “\(job.ownerTitle)”. \(message) Your saved songs are still available; retry to download only the missing songs."
             log("Download failed: \(message)")
         }
-        settle(job)
+        settle(job, preservingCheckpoint: preservingCheckpoint)
         refreshActivity(force: true)
     }
 
-    private func settle(_ job: DownloadJob) {
+    private func settle(_ job: DownloadJob, preservingCheckpoint: Bool = false) {
         guard jobs[job.cacheKey]?.attemptID == job.attemptID else { return }
-        retire(job)
+        retire(job, preservingCheckpoint: preservingCheckpoint)
         for ownerID in Array(pendingByOwner.keys) {
             pendingByOwner[ownerID]?.remove(job.cacheKey)
             if pendingByOwner[ownerID]?.isEmpty == true { pendingByOwner[ownerID] = nil }
@@ -1520,10 +1563,12 @@ public final class DownloadManager {
             if initialPendingOwners[ownerID]?.isEmpty == true { initialPendingOwners[ownerID] = nil }
         }
         savePendingOwners()
+        refreshRetainedPartialBytes()
         startNextIfIdle()
     }
 
-    private func retire(_ job: DownloadJob) {
+    private func retire(_ job: DownloadJob, preservingCheckpoint: Bool = false) {
+        if !preservingCheckpoint { checkpoints.remove(key: job.cacheKey) }
         if foregroundAttempt == job.attemptID { foregroundTask?.cancel() }
         foregroundSources[job.cacheKey] = nil
         retiredAttempts.insert(job.attemptID)
@@ -1654,7 +1699,8 @@ public final class DownloadManager {
         savedJobs = savedJobs.filter { expectedAttempts[$0.key] == $0.value.attemptID }
         let saved = SavedIntent(pending: pending, jobs: savedJobs, requests: requests,
                                 allowsLegacyRestoration: !hasVersionedIntent && (migratesLegacySessionOwners || !initialPendingOwners.isEmpty),
-                                serverDeletedKeys: serverDeletedKeys, serverDeletionEpochs: serverDeletionEpochs)
+                                serverDeletedKeys: serverDeletedKeys, serverDeletionEpochs: serverDeletionEpochs,
+                                foregroundCheckpointEpoch: foregroundCheckpointEpoch)
         if let data = try? JSONEncoder().encode(saved) {
             do {
                 try data.write(to: intentURL, options: .atomic)
