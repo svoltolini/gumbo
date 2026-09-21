@@ -2,11 +2,10 @@ import AppKit
 import GumboCore
 import SwiftUI
 
-/// The first run on the Mac, laid out the way a macOS assistant reads: a window of fixed size,
-/// the steps down the left, the current step on the right, Back and the default action in the
-/// lower corner. Every step drives the same model as the phone's flow; only the layout is the Mac's.
+/// A resizable Mac assistant: steps on the left, content on the right, and actions kept clear
+/// of scrolling content. Every step drives the same model as the phone's flow.
 struct MacSetupView: View {
-    static let size = CGSize(width: 840, height: 580)
+    static let minimumSize = CGSize(width: 900, height: 600)
 
     @Environment(AppModel.self) private var model
 
@@ -38,7 +37,7 @@ struct MacSetupView: View {
     var body: some View {
         HStack(spacing: 0) {
             SetupRail(current: step)
-                .frame(width: 236)
+                .frame(width: 220)
             Divider()
             Group {
                 switch step {
@@ -53,8 +52,9 @@ struct MacSetupView: View {
             .id(step)
             .transition(.opacity)
         }
-        .frame(width: Self.size.width, height: Self.size.height)
-        .background(Palette.paper)
+        .frame(minWidth: Self.minimumSize.width, maxWidth: .infinity,
+               minHeight: Self.minimumSize.height, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
         .animation(.easeInOut(duration: 0.22), value: step)
         .bareWindow()
     }
@@ -65,32 +65,37 @@ struct MacSetupView: View {
 /// Brand mark, the five steps with their state, and a line about privacy at the foot.
 private struct SetupRail: View {
     let current: MacSetupView.Step
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                BrandTile(size: 34)
-                Text("Gumbo")
-                    .font(.title2.weight(.semibold))
+            HStack(spacing: 12) {
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Gumbo").font(.title2.weight(.semibold))
+                    Text("Music").font(.callout).foregroundStyle(.secondary)
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 30)
+            .padding(.horizontal, 20)
+            .padding(.top, 32)
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(MacSetupView.Step.allCases) { step in
                     row(step)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 34)
+            .padding(.top, 30)
             Spacer()
-            Text("Your music streams straight from your NAS.")
+            Text("Your library.\nYour own space.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Palette.paper.mix(with: Palette.neutralTint, by: colorScheme == .dark ? 0.26 : 0.16))
+        .background(.quaternary.opacity(0.35))
     }
 
     private func row(_ step: MacSetupView.Step) -> some View {
@@ -124,58 +129,61 @@ private struct SetupRail: View {
     }
 }
 
-/// The app icon's note on a white tile.
-private struct BrandTile: View {
-    var size: CGFloat = 34
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-            .fill(.white)
-            .frame(width: size, height: size)
-            .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-            .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: size * 0.5, weight: .semibold))
-                    .foregroundStyle(Palette.brand)
-            }
-            .accessibilityHidden(true)
-    }
-}
-
 // MARK: - Page scaffold
 
 /// A step's page: title, a line under it, the content, and the button row along the bottom.
 private struct StepPage<Content: View, Buttons: View>: View {
     let title: String
     var subtitle: String? = nil
+    /// The folder browser provides its own scrolling and uses the available height.
+    var scrollsContent = true
     @ViewBuilder let content: () -> Content
     @ViewBuilder let buttons: () -> Buttons
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if scrollsContent {
+                ScrollView {
+                    pageContent
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                pageContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            Divider()
+            HStack(spacing: 10) {
+                buttons()
+            }
+            .controlSize(.large)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var pageContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.system(size: 26, weight: .semibold))
-                .kerning(-0.5)
+                .font(.system(size: 30, weight: .semibold))
+                .kerning(-0.6)
+                .fixedSize(horizontal: false, vertical: true)
             if let subtitle {
                 Text(subtitle)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
+                    .padding(.top, 10)
             }
             content()
-                .padding(.top, 24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            HStack(spacing: 10) {
-                buttons()
-            }
-            .controlSize(.large)
-            .padding(.top, 16)
+                .padding(.top, 28)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.horizontal, 34)
-        .padding(.top, 34)
-        .padding(.bottom, 22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 720, alignment: .leading)
+        .padding(32)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -187,41 +195,24 @@ private struct MacWelcomeStep: View {
     @State private var isJoiningWithLink = false
 
     var body: some View {
-        StepPage(title: "Your library, from your NAS.", subtitle: "Gumbo plays the music on the Synology you already own, straight from the server, on every screen in the house.") {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(OnboardingPage.privacy) { page in
-                        HStack(alignment: .top, spacing: 14) {
-                            Image(systemName: symbol(for: page.id))
-                                .font(.title3.weight(.medium))
-                                .foregroundStyle(Palette.accent)
-                                .frame(width: 26)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(page.title.replacingOccurrences(of: "\n", with: " "))
-                                    .font(.headline)
-                                Text(page.text)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                if page.id == 3 {
-                                    PrivacyDetailsButton()
-                                        .padding(.top, 8)
-                                }
-                            }
-                        }
-                    }
-                    if let family = cloud.family, family.isReachable {
-                        familyNote(family)
-                            .padding(.top, 6)
-                    }
+        StepPage(title: "Your music.\nAt home on your Mac.", subtitle: "Connect your Synology and bring your own library to Gumbo Music.") {
+            VStack(alignment: .leading, spacing: 24) {
+                welcomeRow("Your collection, ready to play", symbol: "externaldrive", detail: "Choose your music folder. Gumbo reads your songs, tags and covers directly from your NAS.")
+                welcomeRow("Listen your way", symbol: "headphones", detail: "Stream from your NAS or keep downloads on your devices for offline listening.")
+                welcomeRow("A personal library stays personal", symbol: "lock", detail: "No Gumbo account. Your NAS sign-in is saved in Keychain; profiles and playlists can sync through iCloud.")
+                PrivacyDetailsButton()
+                if let family = cloud.family, family.isReachable {
+                    familyNote(family)
                 }
-                .frame(maxWidth: 500, alignment: .leading)
+                Button("Explore Sample Library") {
+                    model.useSampleLibrary()
+                    model.openLibrary()
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.primary)
+                .font(.callout)
             }
         } buttons: {
-            Button("Explore Sample Library") {
-                model.useSampleLibrary()
-                model.openLibrary()
-            }
             if cloud.family?.isReachable != true {
                 Button("Join with a Link…") { isJoiningWithLink = true }
             }
@@ -233,21 +224,19 @@ private struct MacWelcomeStep: View {
                         Button("Try Again") { Task { await model.connectWithFamilyAccess(family) } }
                             .buttonStyle(.borderedProminent)
                             .tint(Palette.accent)
-                            .foregroundStyle(Palette.onAccent)
                             .keyboardShortcut(.defaultAction)
                     }
                 } else {
-                    Button("Join \(family.serverName)") { Task { await model.joinFamilyServer(family) } }
+                    Button("Join Family Library") { Task { await model.joinFamilyServer(family) } }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
-                        .foregroundStyle(Palette.onAccent)
                         .keyboardShortcut(.defaultAction)
+                        .help("Join \(family.serverName)")
                 }
             } else {
                 Button("Continue") { model.findServers() }
                     .buttonStyle(.borderedProminent)
                     .tint(Palette.accent)
-                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -256,12 +245,20 @@ private struct MacWelcomeStep: View {
         }
     }
 
-    private func symbol(for page: Int) -> String {
-        switch page {
-        case 0: "externaldrive.fill"
-        case 1: "key.fill"
-        case 3: "photo"
-        default: "person.2.fill"
+    private func welcomeRow(_ title: String, symbol: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 26)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.headline)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -276,8 +273,10 @@ private struct MacWelcomeStep: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.isJoiningFamily ? "Joining \(family.serverName)…" : "Your family's server, \(family.serverName), is shared with you.")
                     .font(.callout.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
                 if let error = model.signInError, !model.isJoiningFamily {
                     Text(error).font(.caption).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -357,7 +356,6 @@ private struct MacServerStep: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(Palette.accent)
-            .foregroundStyle(Palette.onAccent)
             .keyboardShortcut(.defaultAction)
             .disabled(selection == nil)
         }
@@ -467,7 +465,6 @@ private struct MacSignInStep: View {
             Button("Sign In", action: submit)
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.accent)
-                .foregroundStyle(Palette.onAccent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(account.isEmpty || password.isEmpty || model.isSigningIn || !transportAllowed)
         }
@@ -526,7 +523,7 @@ private struct MacFolderStep: View {
     @State private var error: String?
 
     var body: some View {
-        StepPage(title: "Choose your music folder", subtitle: "Open the shared folder that holds your music and choose it, or a folder inside it if the share also holds other media. Everything inside is indexed.") {
+        StepPage(title: "Choose your music folder", subtitle: "Open the shared folder that holds your music and choose it, or a folder inside it if the share also holds other media. Everything inside is indexed.", scrollsContent: false) {
             VStack(alignment: .leading, spacing: 10) {
                 pathBar
                 List(entries, selection: $selection) { entry in
@@ -579,7 +576,6 @@ private struct MacFolderStep: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(Palette.accent)
-            .foregroundStyle(Palette.onAccent)
             .keyboardShortcut(.defaultAction)
             .disabled(trail.isEmpty)
         }
@@ -666,14 +662,12 @@ private struct MacLibraryStep: View {
                 Button("Try Again") { model.retryIndexing() }
                     .buttonStyle(.borderedProminent)
                     .tint(Palette.accent)
-                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
             } else {
                 Spacer()
                 Button("Open Library") { model.openLibrary() }
                     .buttonStyle(.borderedProminent)
                     .tint(Palette.accent)
-                    .foregroundStyle(Palette.onAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.isIndexed)
             }

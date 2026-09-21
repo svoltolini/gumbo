@@ -157,8 +157,8 @@ struct GumboMacApp: App {
                     if phase == .background { profiles.flushSave() }
                 }
         }
-        .defaultSize(width: 1240, height: 800)
-        // The window follows its content: fixed while the setup assistant is up, free afterwards.
+        .defaultSize(width: model.stage == .ready ? 1240 : 1040, height: model.stage == .ready ? 800 : 720)
+        // Setup and the library both fill restored or resized windows, with their own minimum sizes.
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {
