@@ -4,13 +4,15 @@ import Foundation
 public nonisolated struct TagEdits: Hashable, Sendable {
     public var album: String?
     public var genre: String?
+    public var albumArtist: String?
 
-    public init(album: String? = nil, genre: String? = nil) {
+    public init(album: String? = nil, genre: String? = nil, albumArtist: String? = nil) {
         self.album = album.nonEmpty
         self.genre = genre.nonEmpty
+        self.albumArtist = albumArtist.nonEmpty
     }
 
-    public var isEmpty: Bool { album == nil && genre == nil }
+    public var isEmpty: Bool { album == nil && genre == nil && albumArtist == nil }
 
     /// The album title to store, given what the file holds now. A "(Disc 2)" marker that the file
     /// keeps in its album tag is carried over, so renaming a boxed set never loses its disc numbers.
@@ -115,6 +117,7 @@ public nonisolated struct WrittenTags: Sendable, Equatable {
     public var album: String?
     public var genre: String?
     public var trackNumber: Int?
+    public var albumArtist: String? = nil
 }
 
 /// Plans the rewrite of a song's tags: the format-specific writers change only the requested
@@ -185,13 +188,13 @@ public nonisolated enum TagWriter {
         switch (fileName as NSString).pathExtension.lowercased() {
         case "mp3":
             guard let media = try await ID3Tags.read(fileSize: size, read: read) else { return nil }
-            return WrittenTags(title: media.title, artist: media.artist, album: media.album, genre: media.genre, trackNumber: media.trackNumber)
+            return WrittenTags(title: media.title, artist: media.artist, album: media.album, genre: media.genre, trackNumber: media.trackNumber, albumArtist: media.albumArtist)
         case "m4a", "mp4", "aac", "alac":
             guard let media = try await MP4Tags.read(read: read) else { return nil }
-            return WrittenTags(title: media.title, artist: media.artist, album: media.album, genre: media.genre, trackNumber: media.trackNumber)
+            return WrittenTags(title: media.title, artist: media.artist, album: media.album, genre: media.genre, trackNumber: media.trackNumber, albumArtist: media.albumArtist)
         case "flac":
             guard let info = try await FLACHeader.read(read: read) else { return nil }
-            return WrittenTags(title: info.tag("TITLE"), artist: info.tag("ARTIST"), album: info.tag("ALBUM"), genre: info.tag("GENRE"), trackNumber: info.number("TRACKNUMBER"))
+            return WrittenTags(title: info.tag("TITLE"), artist: info.tag("ARTIST"), album: info.tag("ALBUM"), genre: info.tag("GENRE"), trackNumber: info.number("TRACKNUMBER"), albumArtist: info.tag("ALBUMARTIST") ?? info.tag("ALBUM ARTIST"))
         default:
             return nil
         }

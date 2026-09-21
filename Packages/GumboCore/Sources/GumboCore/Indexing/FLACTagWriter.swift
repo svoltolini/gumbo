@@ -118,6 +118,13 @@ nonisolated enum FLACTagWriter {
         if let album = edits.albumValue(replacing: firstValue(forKey: "ALBUM", in: comments)) {
             changed = replace(key: "ALBUM", with: album, in: &comments) || changed
         }
+        if let artist = edits.albumArtist {
+            changed = replace(key: "ALBUMARTIST", with: artist, in: &comments) || changed
+            // Both spellings are read in the wild. Keep an existing alias consistent too.
+            if comments.contains(where: { key(of: $0) == "ALBUM ARTIST" }) {
+                changed = replace(key: "ALBUM ARTIST", with: artist, in: &comments) || changed
+            }
+        }
         guard changed else { return (block, false) }
         return (serialise(vendor: vendor, comments: comments), true)
     }
@@ -160,6 +167,7 @@ nonisolated enum FLACTagWriter {
         var comments: [[UInt8]] = []
         if let album = edits.album { comments.append(Array("ALBUM=\(album)".utf8)) }
         if let genre = edits.genre { comments.append(Array("GENRE=\(genre)".utf8)) }
+        if let artist = edits.albumArtist { comments.append(Array("ALBUMARTIST=\(artist)".utf8)) }
         return serialise(vendor: Array("Gumbo".utf8), comments: comments)
     }
 }

@@ -445,17 +445,19 @@ public final class LibraryStore {
         public let albumID: String
     }
 
-    /// Writes `title` into the album tag of every song of the album. Everything else in the files
-    /// stays as it was, including a disc marker the album tag may carry.
+    /// Writes the title and this release's album artist into every song, so a title that no
+    /// longer matches its folder still groups consistently on other devices. Song credits and
+    /// disc markers remain intact; an unknown album artist is never written as real metadata.
     public func renameAlbum(_ album: Album, to title: String) async -> AlbumRenameOutcome {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let current = catalogue.albums.first(where: { $0.id == album.id }) else {
             return AlbumRenameOutcome(report: MetadataWriteReport(), albumID: album.id)
         }
         let sourceID = catalogue.driveID
-        let report = await writeTags(TagEdits(album: trimmed), to: current.tracks)
+        let albumArtist = current.artist == "Unknown Artist" ? nil : current.artist
+        let report = await writeTags(TagEdits(album: trimmed, albumArtist: albumArtist), to: current.tracks)
         guard catalogue.driveID == sourceID else { return AlbumRenameOutcome(report: report, albumID: album.id) }
-        let newID = report.written.first.flatMap { catalogue.album(containing: $0.id)?.id } ?? album.id
+        let newID = (report.written.first ?? report.unchanged.first).flatMap { catalogue.album(containing: $0.id)?.id } ?? album.id
         if newID != album.id {
             onAlbumRenamed?(album.id, newID)
             if let index = recentlyPlayedIDs.firstIndex(of: album.id) {
@@ -495,7 +497,7 @@ public final class LibraryStore {
                 && (!onlyIfGenreMissing || self.canMaintainFiles)
                 && self.catalogue.driveID == sourceID && self.catalogue.rootPath == rootPath && self.drive?.id == sourceID
         }
-        let updated = report.written + (onlyIfGenreMissing ? report.unchanged : [])
+        let updated = report.written + report.unchanged
         guard catalogue.driveID == sourceID, catalogue.rootPath == rootPath, !updated.isEmpty else { return report }
         let before = catalogue
         let revision = catalogueRevision

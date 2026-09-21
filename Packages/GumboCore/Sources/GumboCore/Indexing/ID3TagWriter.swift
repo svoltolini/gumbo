@@ -5,6 +5,7 @@ import Foundation
 /// (v2.3 or v2.4) and, whenever the new frames fit, its exact size, so the audio never moves.
 nonisolated enum ID3TagWriter {
     private static let albumFrame = "TALB"
+    private static let albumArtistFrame = "TPE2"
     private static let genreFrame = "TCON"
     /// Room left after the frames when the tag has to grow, so the next edit fits without moving the audio again.
     static let growthPadding = 1024
@@ -45,6 +46,11 @@ nonisolated enum ID3TagWriter {
         let currentAlbum = tag.frames.first { $0.id == albumFrame }.flatMap { text(of: $0, major: tag.major) }
         if let album = edits.albumValue(replacing: currentAlbum), album != currentAlbum {
             replace(albumFrame, with: album, in: &tag)
+            changed = true
+        }
+        let currentArtist = tag.frames.first { $0.id == albumArtistFrame }.flatMap { text(of: $0, major: tag.major) }
+        if let artist = edits.albumArtist, artist != currentArtist {
+            replace(albumArtistFrame, with: artist, in: &tag)
             changed = true
         }
         guard changed else { return nil }

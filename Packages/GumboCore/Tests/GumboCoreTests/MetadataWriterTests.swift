@@ -305,7 +305,9 @@ private nonisolated func readTags(_ drive: WriterFixtureDrive, _ path: String) a
             #expect(remaining.tracks.map(\.id) == [wavPath])
             let flac = try #require(try await readTags(drive, flacPath))
             #expect(flac.album == "Second Light Sessions")
+            #expect(flac.albumArtist == album.artist)
             #expect(flac.title == "Second Light")
+            #expect(renamed.tracks.allSatisfy { $0.albumArtistTag == album.artist })
         }
     }
 
@@ -314,6 +316,9 @@ private nonisolated func readTags(_ drive: WriterFixtureDrive, _ path: String) a
         var after = before
         after.genre = "Ambient"
         #expect(throws: Never.self) { try MetadataWriter.verify(before: before, after: after, edits: TagEdits(genre: "Ambient")) }
+        after.albumArtist = "Unexpected artist"
+        #expect(throws: MetadataWriteError.verificationFailed) { try MetadataWriter.verify(before: before, after: after, edits: TagEdits(genre: "Ambient")) }
+        after.albumArtist = before.albumArtist
         after.title = "Evening"
         #expect(throws: MetadataWriteError.verificationFailed) { try MetadataWriter.verify(before: before, after: after, edits: TagEdits(genre: "Ambient")) }
         after = before
@@ -434,4 +439,81 @@ extension MetadataWriterTests {
         #expect(await drive.files == original)
         #expect(await drive.calls.isEmpty)
     }
+}
+
+extension MetadataWriterTests {
+    @Test(arguments: [false, true]) func renamingGuestCreditsWritesOneReleaseIdentityAndAFreshScanKeepsIt(compilation: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-rename-source-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try await CoverStore.$directoryOverride.withValue(directory) {
+            let oldTitle = "Muddy Days, Drunken Nights"
+            let folder = "/music/Jawga Sparxx/" + oldTitle
+            let albumArtist = compilation ? "Various Artists" : "Jawga Sparxx"
+            let credits = compilation ? ["Singer One", "Singer Two", "Singer Three"]
+                : ["Jawga Sparxx, Bubba Sparxxx", "Jawga Sparxx, Jawga Boyz", "Jawga Sparxx"]
+            let id = Album.makeID(title: oldTitle, artist: albumArtist)
+            let tracks = credits.enumerated().map { index, credit in
+                let path = folder + "/\(index + 1).mp3"
+                return Track(id: path, albumID: id, title: "Song \(index + 1)", index: index,
+                             number: index + 1, disc: 1, duration: 100, codec: "mp3", path: path, format: "MP3",
+                             artist: credit, albumTitleTag: oldTitle, albumArtistTag: credit, isEnriched: true)
+            }
+            let files = Dictionary(uniqueKeysWithValues: tracks.map { track in
+                (track.id, Data(renameMP3(title: track.title, artist: track.artist!, album: oldTitle, number: track.number)))
+            })
+            let drive = WriterFixtureDrive(files: files)
+            let album = Album(id: id, title: oldTitle, artist: albumArtist, year: 2023, genre: "Country",
+                              tracks: tracks, colorA: "#000000", colorB: "#000000", addedRank: 0,
+                              folderPath: folder, folderTitle: oldTitle, folderArtist: compilation ? "Unknown Artist" : albumArtist)
+            let library = LibraryStore()
+            library.replace(with: Catalogue(serverName: "Fixture", albums: [album], indexedAt: .now,
+                                             rootPath: "/music", driveID: drive.id), drive: drive)
+            let result = await library.renameAlbum(album, to: "Roadside Stories")
+            #expect(result.report.isComplete && result.report.written.count == 3)
+            #expect(library.catalogue.albums.count == 1)
+            #expect(library.catalogue.albums.first?.artist == albumArtist)
+            #expect(library.catalogue.albums.first?.tracks.compactMap(\.artist) == credits)
+            let rewrittenFiles = await drive.files
+            var entries: [RemoteEntry] = []
+            for track in tracks { entries.append(try await drive.info(track.id)) }
+            // A different device starts without the cached grouping and reads the NAS files.
+            var fresh = Catalogue.build(folders: [ScannedFolder(path: folder, audio: entries, cover: nil)], rootPath: "/music",
+                                        serverName: "Fixture", driveID: drive.id, existing: nil)
+            for track in tracks {
+                let tags = try #require(try await readTags(drive, track.id))
+                #expect(tags.album == "Roadside Stories" && tags.albumArtist == albumArtist)
+                #expect(tags.artist == track.artist)
+                #expect(rewrittenFiles[track.id]?.suffix(417) == files[track.id]?.suffix(417))
+                var probed = track
+                probed.albumTitleTag = tags.album
+                probed.albumArtistTag = tags.albumArtist
+                fresh.apply(probed)
+            }
+            fresh.regroupByTags()
+            #expect(fresh.albums.count == 1)
+            #expect(fresh.albums.first?.id == result.albumID)
+            #expect(fresh.albums.first?.tracks.compactMap(\.artist) == credits)
+
+            // A stale cache can meet files that another device has already renamed. No second
+            // upload is needed, but those verified tags must still reach the local catalogue.
+            library.replace(with: Catalogue(serverName: "Fixture", albums: [album], indexedAt: .now,
+                                             rootPath: "/music", driveID: drive.id), drive: drive)
+            let again = await library.renameAlbum(album, to: "Roadside Stories")
+            #expect(again.report.written.isEmpty && again.report.unchanged.count == 3)
+            #expect(again.albumID == result.albumID)
+            #expect(library.catalogue.albums.first?.title == "Roadside Stories")
+            #expect(await drive.calls.count == 3)
+        }
+    }
+}
+
+private nonisolated func renameMP3(title: String, artist: String, album: String, number: Int) -> [UInt8] {
+    func text(_ id: String, _ value: String) -> [UInt8] {
+        let payload: [UInt8] = [0] + Array(value.utf8)
+        return Array(id.utf8) + be32(payload.count) + [0, 0] + payload
+    }
+    let frames = text("TIT2", title) + text("TPE1", artist) + text("TPE2", artist) + text("TALB", album) + text("TRCK", String(number))
+    let size = frames.count + 32
+    let header = Array("ID3".utf8) + [UInt8(3), 0, 0] + TagWriter.syncsafeBytes(size)
+    return header + frames + [UInt8](repeating: 0, count: 32) + Array(mp3Bytes.suffix(417))
 }

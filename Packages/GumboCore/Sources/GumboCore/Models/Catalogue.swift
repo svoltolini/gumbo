@@ -176,6 +176,7 @@ public nonisolated struct Catalogue: Codable, Sendable {
             // A folder named for this release is stronger evidence than per-song album-artist
             // credits copied by some rippers. Mixed folders still respect distinct album artists.
             let isAlbumFolder = Self.isAlbumFolder(album.folderPath, title: album.title)
+                || Self.hasConsistentReleaseCredits(album, rootPath: rootPath)
             var groups: [String: [Track]] = [:]
             var groupOrder: [String] = []
             for track in album.tracks {
@@ -259,6 +260,44 @@ public nonisolated struct Catalogue: Codable, Sendable {
         let normalizedTitle = PathParser.clean(title)
         return clean.caseInsensitiveCompare(normalizedTitle) == .orderedSame
             || guessed.caseInsensitiveCompare(normalizedTitle) == .orderedSame
+    }
+
+    /// Recover a shortened release title only when its physical folder still identifies it,
+    /// and guest credits include the lead artist alone. A generic mixed folder or two different
+    /// collaborations do not establish a release. Positions are an additional conflict check,
+    /// not proof of source tags: the indexer can infer them from file names.
+    private nonisolated static func hasConsistentReleaseCredits(_ album: Album, rootPath: String) -> Bool {
+        guard let folder = album.folderPath, folder != rootPath, album.tracks.count > 1,
+              Self.hasShortenedFolderTitle(folder, title: album.title),
+              album.tracks.allSatisfy({ $0.isEnriched && $0.albumTitleTag.nonEmpty != nil && $0.number > 0 }) else { return false }
+        var positions: Set<String> = []
+        var lead: String?
+        var standaloneLeads: Set<String> = []
+        for track in album.tracks {
+            guard positions.insert("\(track.disc):\(track.number)").inserted,
+                  let credit = track.albumArtistTag.nonEmpty ?? track.artist.nonEmpty,
+                  let first = ArtistClustering.splitParticipants(credit).first?.lowercased(),
+                  first != "unknown artist", first != "various artists" else { return false }
+            if let lead, lead != first { return false }
+            if credit.caseInsensitiveCompare(first) == .orderedSame { standaloneLeads.insert(first) }
+            lead = first
+        }
+        return lead.map { standaloneLeads.contains($0) } ?? false
+    }
+
+    private nonisolated static func hasShortenedFolderTitle(_ folder: String, title: String) -> Bool {
+        func words(_ value: String) -> [String] {
+            value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        }
+        let titleWords = words(title)
+        guard titleWords.count >= 2 else { return false }
+        let name = (folder as NSString).lastPathComponent
+        let clean = PathParser.splitDisc(PathParser.splitYear(PathParser.clean(name)).0).title
+        let guessed = PathParser.album(components: [name], rootName: name).title
+        return [clean, guessed].contains { name in
+            let folderWords = words(name)
+            return folderWords.count > titleWords.count && folderWords.starts(with: titleWords)
+        }
     }
 
     /// Coalesce tracks by physical folder and tagged title so cached splits can heal on a normal scan.

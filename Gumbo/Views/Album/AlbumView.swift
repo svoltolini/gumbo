@@ -243,7 +243,7 @@ struct AlbumView: View {
 }
 
 /// Renames an album for good by writing the new title into the album tag of each of its songs on
-/// the NAS. Everything else in the files, and the album's other details, stay exactly as they were.
+/// the NAS, keeping the release together with its album artist while preserving song credits.
 struct AlbumRenameSheet: View {
     let album: Album
     /// Receives the album's id once the write is done: a new one when the title changed.
@@ -356,7 +356,7 @@ struct AlbumRenameSheet: View {
         guard library.canWriteTags else {
             return "Connect to your server to rename this album. The new title is written into its \(songs) on the NAS, so it holds everywhere and survives a rescan."
         }
-        return "The album tag of \(songs) is rewritten on your NAS as the new title. Artist, year, genre, song titles and artwork stay as they are."
+        return "The title and album artist are saved to \(songs) on your NAS to keep this album together. Song artist credits, year, genre and artwork stay as they are."
     }
 
     private func save() {
