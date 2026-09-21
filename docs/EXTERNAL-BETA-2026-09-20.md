@@ -2,6 +2,14 @@
 
 Live App Store Connect configuration verified on 20 September 2026. Track external acceptance in [#162](https://github.com/svoltolini/gumbo/issues/162).
 
+## Approval verified — 21 September 2026
+
+At **07:14 UTC**, all three builds below reported external state **IN_BETA_TESTING**. The public invitation displayed **View Gumbo Music Beta** and **View in TestFlight**, replacing the earlier not-accepting-testers message. The group had **0 enrolled testers**, with the public link and its **50-person limit both enabled**. These are a point-in-time count and availability check; TestFlight controls current availability.
+
+The website now states that the beta is open and keeps the 50-person limit visible. This confirms public invitation/build availability, not a completed physical installation or NAS playback test. Device/provider acceptance remains in #123.
+
+## Initial submission — 20 September 2026
+
 - App: **Gumbo Music**, Apple ID `6814252548`, bundle `com.samuelvoltolini.gumbo`.
 - External group: **Gumbo Founding Testers**, ID `d47be32a-2b1d-477d-a23a-c0e8e1f983f5`.
 - Public invitation: https://testflight.apple.com/join/GensWMTh.

@@ -12,7 +12,7 @@ const TESTFLIGHT_PUBLIC_LINK = "https://testflight.apple.com/join/GensWMTh";
 
 This one constant controls every beta button through `site.js`. For a replacement group, use its actual `https://testflight.apple.com/join/ALPHANUMERIC` invitation URL. Empty/invalid links lead to the beta section with a coming-soon message. Without JavaScript, visitors can still read the page and beta information.
 
-Apple must approve an external beta build before the invitation accepts testers. The page keeps a visible availability note; a configured link alone does not mean installation is open. The 50-person cap is enforced in App Store Connect. Group/build review status and external acceptance are tracked in [issue #162](https://github.com/svoltolini/gumbo/issues/162).
+Apple approved all three platform builds for external testing. On 21 September 2026, App Store Connect reported `IN_BETA_TESTING` for iOS, macOS and tvOS build `202609202112`, and the public page offered **View Gumbo Music Beta** and **View in TestFlight**. The enabled 50-person public-link cap was read back from App Store Connect. TestFlight remains the authority for current places and build availability. See [issue #162](https://github.com/svoltolini/gumbo/issues/162) for the acceptance evidence; this does not replace physical-device/NAS testing.
 
 ## Preview and customise
 
