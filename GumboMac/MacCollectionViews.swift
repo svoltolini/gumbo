@@ -4,11 +4,13 @@ import SwiftUI
 /// A menu or button may outlive the collection that was visible when it was created.
 struct MacLibraryActionScope: Equatable {
     private let sourceID: String
+    private let rootPath: String
     private let profileID: String?
     private let sessionID: UUID?
 
     init(library: LibraryStore, profiles: ProfileStore) {
         sourceID = library.catalogue.driveID
+        rootPath = library.catalogue.rootPath
         profileID = profiles.activeID
         sessionID = profiles.sessionID
     }
@@ -27,6 +29,9 @@ struct MacAlbumDetailView: View {
     @Environment(ProfileStore.self) private var profiles
     @State private var entries: [TrackListEntry] = []
     @State private var songSummary = ""
+    @Environment(\.dismiss) private var dismiss
+    @State private var deletionPresentation: AlbumDeletionPresentation?
+    @State private var shouldCloseAfterDeletion = false
     @State private var isRenaming = false
     /// The album's id once a rename gave it a new one, and a new id whose album is still being derived.
     @State private var renamedID: String?
@@ -45,6 +50,17 @@ struct MacAlbumDetailView: View {
                 ContentUnavailableView("Album Unavailable", systemImage: "square.stack", description: Text("This album is no longer in the current library."))
                     .navigationTitle("Album Unavailable")
             }
+        }
+        .sheet(item: $deletionPresentation, onDismiss: {
+            if shouldCloseAfterDeletion {
+                shouldCloseAfterDeletion = false
+                dismiss()
+            }
+        }) { presentation in
+            AlbumDeletionSheet(presentation: presentation) { removedAlbum in
+                shouldCloseAfterDeletion = removedAlbum
+            }
+            .id(presentation.id)
         }
         .onChange(of: library.contentRevision) { _, _ in
             guard let pending = pendingID, library.album(id: pending) != nil else { return }
@@ -104,6 +120,19 @@ struct MacAlbumDetailView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("Rename Album…", systemImage: "pencil") { isRenaming = true }
+                            .disabled(!library.canWriteTags)
+                        if profiles.canManageProfiles {
+                            Divider()
+                            Button("Delete Album…", systemImage: "trash", role: .destructive) {
+                                guard scope.isCurrent(library: library, profiles: profiles),
+                                      library.canDeleteAlbums, library.album(id: album.id) == album else { return }
+                                shouldCloseAfterDeletion = false
+                                deletionPresentation = AlbumDeletionPresentation(album: album,
+                                    scope: AlbumActionScope(library: library, profiles: profiles))
+                            }
+                            .disabled(!library.canDeleteAlbums)
+                            .accessibilityIdentifier("album.deleteFromNAS")
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
