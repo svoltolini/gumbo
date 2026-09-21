@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("derived_data", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--album-deletion", action="store_true", help="Open the production album and deletion review instead of the genre editor")
     args = parser.parse_args()
     derived = args.derived_data.resolve()
     output = args.output.resolve()
@@ -59,7 +60,8 @@ def main():
     with (contents / "Info.plist").open("wb") as handle:
         plistlib.dump({"CFBundleIdentifier": "com.samuelvoltolini.gumbo.genre-write-fixture", "CFBundleName": "Gumbo Genre Write Fixture",
                        "CFBundleExecutable": binary.name, "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
-                       "LSMinimumSystemVersion": "26.0", "NSHighResolutionCapable": True}, handle)
+                       "LSMinimumSystemVersion": "26.0", "NSHighResolutionCapable": True,
+                       "GumboFixtureAlbumMode": args.album_deletion}, handle)
     entitlements = output / "fixture.entitlements"
     with entitlements.open("wb") as handle:
         plistlib.dump({"com.apple.security.app-sandbox": True}, handle)

@@ -21,8 +21,14 @@ Choose a new output directory on subsequent builds; the script refuses to remove
 
 Its separate bundle ID is `com.samuelvoltolini.gumbo.genre-write-fixture`. The container's `Data/Library/Application Support/latest-run.txt` records the generated run directory. That directory contains the resulting `music` files, isolated profiles and `saved-catalogue.json`. The ordinary catalogue cache stays inside the same fixture container. Originals remain in the fixture bundle's `Contents/Resources/FixtureMusic` for comparison; nothing from the user's library is copied.
 
+### Album maintenance review
+
+Pass `--album-deletion` to the build script to open the production `MacAlbumDetailView` instead of the genre editor. Its More menu exposes the shared album-deletion sheet for the fixture's host profile. Open Delete Album, expand Review 3 Files and cancel: all three generated files must remain. Opening the review does not perform deletion. The fixture records `album-deleted.txt` if all generated tracks are later removed; this is a separate, deliberate destructive test action inside the fixture container. The fixture has no CloudKit container and does not restore the real app's session.
+
 ## Observed on 2026-09-21
 
 On macOS 27.0 with Xcode 27.0, the native Debug app build and sandboxed harness build passed. The actual focused-field → Jazz → Done interaction dismissed the sheet and displayed Jazz for all three songs while the UI remained responsive. Each resulting MP3, FLAC and M4A had a Jazz genre tag. Independent parsing with the helper's audio/tag signature functions confirmed identical encoded audio and unrelated tags before/after. The saved catalogue contained one album, three tracks and Jazz; no hidden staging or backup files remained.
 
 This extends the earlier [genre UI regression evidence](../../docs/PLAYBACK-GENRE-SIRI-2026-09-21.md) beyond a fake read-only failure to successful generated-file saves. It does not reproduce or establish the cause of the user's original process exit, and does not close physical-device or live-NAS acceptance in #199/#201.
+
+The album mode was also exercised on the native Mac: More → Delete Album opened the shared review; expanding the file list showed only the generated MP3, FLAC and M4A; Cancel returned to the intact three-song album. No delete confirmation was clicked during this UI check. Actual deletion, conflict, authorization-loss and uncertain-reply behavior is covered separately by the core album-deletion tests and disposable Samba integration tests.

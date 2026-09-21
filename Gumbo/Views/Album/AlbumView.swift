@@ -2,7 +2,7 @@ import GumboCore
 import SwiftUI
 
 /// A retained row or confirmation can outlive the library or authenticated profile that opened it.
-private struct AlbumActionScope: Equatable {
+struct AlbumActionScope: Equatable {
     let sourceID: String
     let rootPath: String
     let profileID: String?
@@ -27,7 +27,7 @@ private struct AlbumRemovalRequest {
     let scope: AlbumActionScope
 }
 
-private struct AlbumDeletionPresentation: Identifiable {
+struct AlbumDeletionPresentation: Identifiable {
     let id = UUID()
     let album: Album
     let scope: AlbumActionScope
@@ -191,6 +191,7 @@ struct AlbumView: View {
                 ToolbarItem(placement: .trailingBar) {
                     Menu {
                         Button("Rename Album…", systemImage: "pencil") { isRenaming = true }
+                            .disabled(!library.canWriteTags)
                         if permissions.isHost {
                             Divider()
                             Button("Delete Album…", systemImage: "trash", role: .destructive) {
@@ -288,12 +289,11 @@ struct AlbumView: View {
 #if !os(tvOS)
 /// A read-only review precedes the destructive action. Keeping the request in this sheet binds
 /// confirmation to the exact files checked for this album, server and unlocked host profile.
-private struct AlbumDeletionSheet: View {
+struct AlbumDeletionSheet: View {
     let presentation: AlbumDeletionPresentation
     let onFinished: (Bool) -> Void
     @Environment(LibraryStore.self) private var library
     @Environment(ProfileStore.self) private var profiles
-    @Environment(CloudSync.self) private var cloud
     @Environment(\.dismiss) private var dismiss
     @State private var request: AlbumDeletionRequest?
     @State private var report: AlbumDeletionReport?
@@ -305,7 +305,7 @@ private struct AlbumDeletionSheet: View {
     @State private var isPresentationActive = true
 
     private var scope: AlbumActionScope { AlbumActionScope(library: library, profiles: profiles) }
-    private var isHost: Bool { Permissions(profiles: profiles, cloud: cloud).isHost }
+    private var isHost: Bool { profiles.canManageProfiles }
     private var isCurrent: Bool { isPresentationActive && isHost && presentation.scope.isCurrent(library: library, profiles: profiles) }
 
     var body: some View {
@@ -606,7 +606,9 @@ struct AlbumRenameSheet: View {
                             library.metadataWriter.cancel()
                         }
                     } footer: {
-                        Text("Each song is downloaded, its album tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
+                        Text(library.activeTagService != nil
+                            ? "Your server updates the tags in each music file. Songs already updated stay changed if you stop."
+                            : "Each song is downloaded, its album tag rewritten and the file put back on your NAS. Songs already written stay written if you stop.")
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {

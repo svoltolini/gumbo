@@ -56,10 +56,29 @@ nonisolated struct FixtureDrive: WritableRemoteDrive {
 struct FixtureView: View {
     let library: LibraryStore
     let profiles: ProfileStore
-    @State private var showEditor = true
+    let albumMode: Bool
+    let initialAlbum: Album?
+    @State private var showEditor: Bool
     @State private var heartbeat = 0
 
+    init(library: LibraryStore, profiles: ProfileStore, albumMode: Bool) {
+        self.library = library; self.profiles = profiles; self.albumMode = albumMode
+        initialAlbum = library.catalogue.albums.first
+        _showEditor = State(initialValue: !albumMode)
+    }
+
     var body: some View {
+        Group {
+            if albumMode, let album = initialAlbum {
+                NavigationStack { MacAlbumDetailView(album: album) }
+                    .frame(minWidth: 720, minHeight: 520)
+            } else {
+                genreHost
+            }
+        }
+    }
+
+    private var genreHost: some View {
         VStack(spacing: 18) {
             Text("Generated music only").font(.title)
             Text("Library genres: " + library.genres.map(\.name).joined(separator: ", "))
@@ -121,17 +140,29 @@ struct FixtureView: View {
                     folderPath: "/fixture", coverPath: nil, folderTitle: "Generated fixture album", folderArtist: "Gumbo fixture", folderYear: 2026)
                 library.replace(with: Catalogue(serverName: "Generated Files", albums: [album], indexedAt: .now,
                     rootPath: "/fixture", driveID: drive.id), drive: drive)
+                // No session restore, keychain lookup, server request or CloudKit container.
+                let model = AppModel(library: library, defaults: .standard, services: ConnectionServices(), restoresSession: false)
+                let token = UUID()
+                library.fileDeletionConnectionTokenProvider = { token }
+                let player = PlayerModel()
+                let downloads = DownloadManager()
+                let albumMode = ProcessInfo.processInfo.arguments.contains("--album-deletion")
+                    || Bundle.main.object(forInfoDictionaryKey: "GumboFixtureAlbumMode") as? Bool == true
                 let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 620, height: 660),
                     styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-                window.title = "Gumbo Writable Genre Fixture"
+                window.title = albumMode ? "Gumbo Generated Album Fixture" : "Gumbo Writable Genre Fixture"
                 window.isReleasedWhenClosed = false
-                window.contentView = NSHostingView(rootView: FixtureView(library: library, profiles: profiles).tint(.black))
+                window.contentView = NSHostingView(rootView: FixtureView(library: library, profiles: profiles, albumMode: albumMode)
+                    .environment(library).environment(profiles).environment(model).environment(player).environment(downloads).tint(.black))
                 window.center()
                 window.makeKeyAndOrderFront(nil)
                 app.activate(ignoringOtherApps: true)
                 try Data(run.path.utf8).write(to: support.appending(path: "latest-run.txt"))
                 for _ in 0..<1800 {
                     try await Task.sleep(for: .milliseconds(200))
+                    if library.catalogue.trackCount == 0 {
+                        try Data("Deletion confirmed; generated album removed".utf8).write(to: run.appending(path: "album-deleted.txt"))
+                    }
                     if library.catalogue.albums.flatMap(\.tracks).allSatisfy({ $0.genreTag == "Jazz" }) {
                         let data = try JSONEncoder().encode(library.catalogue)
                         try data.write(to: run.appending(path: "saved-catalogue.json"))
