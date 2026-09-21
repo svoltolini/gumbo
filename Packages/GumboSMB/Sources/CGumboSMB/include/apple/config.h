@@ -1,6 +1,9 @@
 /* config.h.  Generated from config.h.in by configure.  */
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
+/* Gumbo's supported Apple platforms provide the system CSPRNG in stdlib.h. */
+#define HAVE_ARC4RANDOM_BUF 1
+
 /* Whether or not TCP sockets should be allowed to linger after closure */
 #define CONFIGURE_OPTION_TCP_LINGER 1
 
