@@ -4,7 +4,7 @@ Static HTML/CSS with a small script. No dependencies or build step.
 
 ## TestFlight invitation
 
-The external **Gumbo Founding Testers** group has a **50-person public-link limit**. The invitation is configured once in `index.html`, near the top of `<head>`:
+The external **Gumbo Founding Testers** group’s enrollment settings are managed in App Store Connect. Keep numeric capacity out of public website copy. The invitation is configured once in `index.html`, near the top of `<head>`:
 
 ```js
 const TESTFLIGHT_PUBLIC_LINK = "https://testflight.apple.com/join/GensWMTh";
@@ -12,7 +12,7 @@ const TESTFLIGHT_PUBLIC_LINK = "https://testflight.apple.com/join/GensWMTh";
 
 This one constant controls every beta button through `site.js`. For a replacement group, use its actual `https://testflight.apple.com/join/ALPHANUMERIC` invitation URL. Empty/invalid links lead to the beta section with a coming-soon message. Without JavaScript, a note directly below the header explains that the buttons lead to beta details and JavaScript is needed to open the configured invitation. The section menu still works using native HTML; the header stops being sticky so an open menu cannot cover an anchor destination.
 
-Apple approved all three platform builds for external testing. On 21 September 2026, App Store Connect reported `IN_BETA_TESTING` for iOS, macOS and tvOS build `202609202112`, and the public page offered **View Gumbo Music Beta** and **View in TestFlight**. The enabled 50-person public-link cap was read back from App Store Connect. TestFlight remains the authority for current places and build availability. See [issue #162](https://github.com/svoltolini/gumbo/issues/162) for the acceptance evidence; this does not replace physical-device/NAS testing.
+Apple approved all three platform builds for external testing. On 21 September 2026, App Store Connect reported `IN_BETA_TESTING` for iOS, macOS and tvOS build `202609202112`, and the public page offered **View Gumbo Music Beta** and **View in TestFlight**. TestFlight remains the authority for current beta and build availability. See [issue #162](https://github.com/svoltolini/gumbo/issues/162) for the acceptance evidence; this does not replace physical-device/NAS testing.
 
 ## Preview and customise
 
@@ -28,7 +28,7 @@ Use **Gumbo** and **Gumbo Music** with this exact casing in visible branding. Do
 
 The hero and **Devices** section highlight iPhone, iPad, Mac, Apple TV, the Apple Watch companion, CarPlay and AirPlay. Keep native apps distinct from companion/integration features: Watch needs a paired iPhone for setup and playlist sync, CarPlay uses the connected iPhone, and Apple TV streams rather than retaining offline downloads. Do not promise playback handoff or a shared live queue. Minimum versions in the beta section match `project.yml`: iOS/iPadOS 26.1, macOS/tvOS/watchOS 26.0. Recheck these when platform support changes.
 
-The beta's limited-first-batch/free-year-at-launch offer is supplied by the owner. Keep privacy wording precise: no separate Gumbo account or music upload to a Gumbo cloud library; audio streams/downloads to devices, while iCloud syncs profiles and listening data. Remote streaming needs configured NAS access. The landing summary links to the dedicated app and website policy at `privacy/index.html`, published at `https://gumbo.one/privacy/`. Keep both aligned with the app’s actual data flows. The policy has its own static metadata and is included in the sitemap. During the beta it provides the verified developer-contact route in TestFlight; no unpublished contact email is exposed. App Store privacy fields and declarations are managed separately.
+The beta's free-year-at-launch offer is supplied by the owner. Keep privacy wording precise: no separate Gumbo account or music upload to a Gumbo cloud library; audio streams/downloads to devices, while iCloud syncs profiles and listening data. Remote streaming needs configured NAS access. The landing summary links to the dedicated app and website policy at `privacy/index.html`, published at `https://gumbo.one/privacy/`. Keep both aligned with the app’s actual data flows. The policy has its own static metadata and is included in the sitemap. During the beta it provides the verified developer-contact route in TestFlight; no unpublished contact email is exposed. App Store privacy fields and declarations are managed separately.
 
 ## Navigation and privacy page
 
