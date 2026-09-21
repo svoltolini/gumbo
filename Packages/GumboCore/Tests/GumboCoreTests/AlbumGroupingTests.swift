@@ -124,3 +124,74 @@ import Testing
         }
     }
 }
+
+extension AlbumGroupingTests {
+    @Test func renamedMuddyDaysRepairsCachedSplitsAndPreservesSongCredits() throws {
+        let folder = "/music/Muddy Days, Drunken Nights"
+        let guest = album("Jawga Sparxx, Bubba Sparxxx", title: "Muddy Days", folder: folder, numbers: [1])
+        let other = album("Jawga Sparxx, Jawga Boyz", title: "Muddy Days", folder: folder, numbers: [2])
+        let main = album("Jawga Sparxx", title: "Muddy Days", folder: folder, numbers: [3, 4])
+        try regroup([guest, other, main]) { catalogue in
+            let combined = try #require(catalogue.albums.first)
+            #expect(catalogue.albums.count == 1)
+            #expect(combined.title == "Muddy Days" && combined.artist == "Jawga Sparxx")
+            #expect(combined.tracks.map(\.number) == [1, 2, 3, 4])
+            #expect(combined.tracks.map(\.artist) == (guest.tracks + other.tracks + main.tracks).map(\.artist))
+            #expect(combined.tracks.map(\.albumArtistTag) == (guest.tracks + other.tracks + main.tracks).map(\.albumArtistTag))
+            #expect(Set(combined.tracks.map(\.albumID)) == [combined.id])
+        }
+    }
+
+    @Test func sharedGuestInMixedFolderDoesNotEstablishAnAlbum() throws {
+        try regroup([album("Artist A, Guest", title: "Greatest Hits", folder: "/music/Mixed", numbers: [1]),
+                     album("Artist B, Guest", title: "Greatest Hits", folder: "/music/Mixed", numbers: [2])]) { catalogue in
+            #expect(catalogue.albums.count == 2)
+        }
+    }
+
+    @Test func overlappingTrackNumbersDoNotEstablishARenamedRelease() throws {
+        let first = album("Artist A", title: "Greatest Hits", folder: "/music/Greatest Hits Collection", numbers: [1])
+        var second = album("Artist A, Other", title: "Greatest Hits", folder: "/music/Greatest Hits Collection", numbers: [2])
+        second.tracks[0].number = 1
+        try regroup([first, second]) { catalogue in #expect(catalogue.albums.count == 2) }
+    }
+
+    @Test func rootFolderIsNotEvidenceForARenamedRelease() throws {
+        try regroup([album("Artist A, Guest", title: "Greatest Hits", folder: "/music", numbers: [1]),
+                     album("Artist A, Other", title: "Greatest Hits", folder: "/music", numbers: [2])]) { catalogue in
+            #expect(catalogue.albums.count == 2)
+        }
+    }
+
+    @Test func repairedGroupingSurvivesCatalogueReload() throws {
+        let folder = "/music/Second Light Sessions"
+        var cached = Catalogue(serverName: "Fixture", albums: [
+            album("Main, Guest", title: "Second Light", folder: folder, numbers: [1]),
+            album("Main", title: "Second Light", folder: folder, numbers: [2])
+        ], indexedAt: .now, rootPath: "/music", driveID: "fixture")
+        cached = try JSONDecoder().decode(Catalogue.self, from: JSONEncoder().encode(cached))
+        try regroup(cached.albums) { catalogue in
+            #expect(catalogue.albums.count == 1)
+            #expect(catalogue.albums.first?.artist == "Main")
+        }
+    }
+}
+
+
+extension AlbumGroupingTests {
+    @Test func separateCollaborationsInMixedFolderDoNotMergeWithInferredPositions() throws {
+        try regroup([album("Artist A & Artist B", title: "Same Title", folder: "/music/Mixed", numbers: [1]),
+                     album("Artist A & Artist C", title: "Same Title", folder: "/music/Mixed", numbers: [2]),
+                     album("Artist A", title: "Same Title", folder: "/music/Mixed", numbers: [3])]) { catalogue in
+            #expect(catalogue.albums.count == 3)
+        }
+    }
+
+    @Test func shortenedTitleWithOnlyDifferentCollaborationCreditsStaysSeparate() throws {
+        let folder = "/music/Shared Title Collection"
+        try regroup([album("Artist A & Artist B", title: "Shared Title", folder: folder, numbers: [1]),
+                     album("Artist A & Artist C", title: "Shared Title", folder: folder, numbers: [2])]) { catalogue in
+            #expect(catalogue.albums.count == 2)
+        }
+    }
+}

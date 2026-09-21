@@ -192,7 +192,14 @@ public final class MetadataWriter {
             return RewriteResult(track: current, changed: false)
         }
         guard try TagWriter.rewrite(edits: edits, fileName: name, source: original, destination: patched) else {
-            return RewriteResult(track: track, changed: false)
+            var current = track
+            current.albumTitleTag = before.album
+            current.albumArtistTag = before.albumArtist
+            current.genreTag = before.genre
+            current.normalizeDiscFromAlbumTag()
+            current.fileSize = remote.size
+            current.sourceModifiedAt = remote.modified?.timeIntervalSince1970
+            return RewriteResult(track: current, changed: false)
         }
         let newSize = try localSize(patched)
         guard let after = try await TagWriter.readBack(fileName: name, at: patched) else {
@@ -209,6 +216,7 @@ public final class MetadataWriter {
                                     expectedOriginal: remote, authorized: authorized)
         var updated = track
         if let genre = edits.genre { updated.genreTag = genre }
+        if edits.albumArtist != nil { updated.albumArtistTag = after.albumArtist }
         if edits.album != nil {
             updated.albumTitleTag = after.album
             updated.normalizeDiscFromAlbumTag()
@@ -222,6 +230,11 @@ public final class MetadataWriter {
     nonisolated static func verify(before: WrittenTags, after: WrittenTags, edits: TagEdits) throws {
         guard after.title == before.title, after.artist == before.artist, after.trackNumber == before.trackNumber else {
             throw MetadataWriteError.verificationFailed
+        }
+        if let artist = edits.albumArtist {
+            guard after.albumArtist == artist else { throw MetadataWriteError.verificationFailed }
+        } else {
+            guard after.albumArtist == before.albumArtist else { throw MetadataWriteError.verificationFailed }
         }
         if let genre = edits.genre {
             guard after.genre == genre else { throw MetadataWriteError.verificationFailed }

@@ -6,6 +6,7 @@ import Foundation
 /// shifted along with the data they point at, the way iTunes and other taggers do.
 nonisolated enum MP4TagWriter {
     private static let albumItem = "\u{A9}alb"
+    private static let albumArtistItem = "aART"
     private static let genreItem = "\u{A9}gen"
     private static let predefinedGenreItem = "gnre"
     /// Spare room left after a `moov` that had to grow, so the next edit does not move the audio again.
@@ -162,6 +163,11 @@ nonisolated enum MP4TagWriter {
             replacements[albumItem] = album
             removed.insert(albumItem)
         }
+        let currentArtist = items.first { $0.0 == albumArtistItem }.flatMap { text(of: $0, in: b) }
+        if let artist = edits.albumArtist, artist != currentArtist {
+            replacements[albumArtistItem] = artist
+            removed.insert(albumArtistItem)
+        }
         guard !replacements.isEmpty else { return (Array(b[start..<end]), false) }
         var payload: [UInt8] = []
         var position = start
@@ -213,6 +219,7 @@ nonisolated enum MP4TagWriter {
         case "ilst":
             var items: [UInt8] = []
             if let album = edits.album { items += try textItem(albumItem, album) }
+            if let artist = edits.albumArtist { items += try textItem(albumArtistItem, artist) }
             if let genre = edits.genre { items += try textItem(genreItem, genre) }
             return try atom("ilst", items)
         case "meta":

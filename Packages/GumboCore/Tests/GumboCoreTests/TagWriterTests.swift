@@ -682,3 +682,60 @@ private nonisolated func vorbisEntries(_ bytes: [UInt8]) -> [String] {
         }
     }
 }
+
+extension ID3TagWriterTests {
+    @Test(arguments: [3, 4]) func albumRenameWritesReleaseArtistWithoutChangingSongCredits(version: Int) async throws {
+        let frames = standardFrames(version: version) + id3Text("TPE2", "Halden Vey & Guest", version: version)
+        let original = id3Tag(version: version, frames: frames, padding: 128) + mpegAudio
+        let edits = TagEdits(album: "New Title", albumArtist: "Halden Vey")
+        let result = try rewritten(edits, "song.mp3", original)
+        let media = try #require(try await readID3(result))
+        #expect(media.album == "New Title" && media.albumArtist == "Halden Vey")
+        #expect(media.artist == "Halden Vey" && media.title == "Morning")
+        #expect(media.artwork == Data(pictureBytes))
+        #expect(Array(result.suffix(mpegAudio.count)) == mpegAudio)
+        #expect(try plan(edits, "song.mp3", result) == nil)
+    }
+}
+
+extension MP4TagWriterTests {
+    @Test(arguments: ["m4a", "mp4", "aac", "alac"]) func albumRenameWritesReleaseArtistWithoutChangingSongCredits(ext: String) async throws {
+        let original = mp4File(items: mp4Items() + mp4Text("aART", "Halden Vey & Guest"))
+        let edits = TagEdits(album: "New Title", albumArtist: "Halden Vey")
+        let result = try rewritten(edits, "song." + ext, original.bytes)
+        let media = try #require(try await readMP4(result))
+        #expect(media.album == "New Title" && media.albumArtist == "Halden Vey")
+        #expect(media.artist == "Halden Vey" && media.title == "Morning")
+        #expect(media.artwork == Data(pictureBytes))
+        for offset in chunkOffsets(in: result) { #expect(chunkBytes(in: result, at: offset) == mp4Chunk) }
+        #expect(try plan(edits, "song." + ext, result) == nil)
+    }
+
+    @Test func newTagContainerIncludesAlbumArtist() async throws {
+        let original = mp4File(items: nil)
+        let result = try rewritten(TagEdits(album: "New Title", albumArtist: "Main Artist"), "song.m4a", original.bytes)
+        let media = try #require(try await readMP4(result))
+        #expect(media.album == "New Title" && media.albumArtist == "Main Artist")
+    }
+}
+
+extension FLACTagWriterTests {
+    @Test func albumRenameWritesReleaseArtistAndKeepsTheLegacyAliasConsistent() throws {
+        let original = flacFile(comments: ["TITLE=Morning", "ARTIST=Halden Vey & Guest", "ALBUM=Nocturne Drift", "GENRE=Rock",
+                                           "ALBUMARTIST=Halden Vey & Guest", "ALBUM ARTIST=Halden Vey & Other"])
+        let edits = TagEdits(album: "New Title", albumArtist: "Halden Vey")
+        let result = try rewritten(edits, "song.flac", original)
+        let info = try flacInfo(result)
+        #expect(info.tag("ALBUM") == "New Title")
+        #expect(info.tag("ALBUMARTIST") == "Halden Vey" && info.tag("ALBUM ARTIST") == "Halden Vey")
+        #expect(info.tag("ARTIST") == "Halden Vey & Guest" && info.tag("TITLE") == "Morning")
+        #expect(info.tag("GENRE") == "Rock")
+        #expect(Array(result.suffix(flacAudio.count)) == flacAudio)
+        #expect(try plan(edits, "song.flac", result) == nil)
+    }
+
+    @Test func newCommentBlockIncludesAlbumArtist() throws {
+        let result = try rewritten(TagEdits(albumArtist: "Main Artist"), "song.flac", flacFile(comments: nil))
+        #expect(try flacInfo(result).tag("ALBUMARTIST") == "Main Artist")
+    }
+}
