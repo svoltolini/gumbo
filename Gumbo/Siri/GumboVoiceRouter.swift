@@ -1,3 +1,4 @@
+import AppIntents
 import GumboCore
 import Foundation
 
@@ -30,6 +31,9 @@ import Foundation
             player.play(queue: tracks, title: title)
             return player.lastError == nil
         })
+        // Register after the query's controller is ready. Suggested entities remain empty;
+        // this advertises the action without donating the user's catalogue or history.
+        GumboMusicShortcuts.updateAppShortcutParameters()
     }
 
     static func requireController() throws -> VoicePlaybackController {
