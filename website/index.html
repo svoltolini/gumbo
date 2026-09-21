@@ -36,6 +36,7 @@
   <link rel="apple-touch-icon" href="https://gumbo.one/apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <script src="site.js" defer></script>
+  <noscript><style>.site-header { position: relative; }</style></noscript>
 </head>
 <body>
   <a class="skip-link" href="#product-music">Skip to content</a>
@@ -65,8 +66,15 @@
     <nav class="nav container" aria-label="Main navigation">
       <a class="wordmark" href="#top" aria-label="Gumbo home"><img src="assets/logo.svg" width="48" height="48" alt=""><span>Gumbo</span></a>
       <div class="nav-links"><a href="#devices">Devices</a><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a></div>
-      <a class="button button-small" href="#beta" data-beta-link>Join the beta <svg class="icon" aria-hidden="true"><use href="#arrow"/></svg></a>
+      <a class="button button-small header-beta" href="#beta" data-beta-link aria-describedby="header-beta-note beta-status">Join the beta <svg class="icon" aria-hidden="true"><use href="#arrow"/></svg></a>
+      <details class="mobile-menu">
+        <summary aria-label="Section menu"><svg class="icon menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><svg class="icon close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></summary>
+        <div class="mobile-menu-links"><a href="#devices">Devices</a><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a></div>
+      </details>
     </nav>
+    <noscript>
+      <p id="header-beta-note" class="no-script-note container">JavaScript is off. “Join the beta” takes you to beta details on this page. Enable JavaScript to open the TestFlight invitation.</p>
+    </noscript>
   </header>
 
   <!-- ================================================================
@@ -196,9 +204,9 @@
     </section>
 
     <section class="privacy-section container" id="privacy" aria-labelledby="privacy-title">
-      <div class="privacy-mark" aria-hidden="true"><svg class="icon"><use href="#lock"/></svg><span>YOURS TO KEEP</span></div>
-      <div class="privacy-copy"><p class="eyebrow">A personal library should stay personal</p><h2 id="privacy-title">Your library<br><span class="soft-text">stays yours.</span></h2><p class="privacy-lead">Your originals stay on your NAS. Music streams directly to your devices, or plays from your local downloads. There’s no Gumbo music-storage service in between.</p><div class="privacy-promises"><span>No separate Gumbo account.</span><span>No upload to a cloud music library.</span><span>No advertising or third-party analytics SDK.</span></div>
-        <details class="privacy-details"><summary>What about iCloud and other services?<span aria-hidden="true">+</span></summary><div><p>Gumbo uses iCloud to sync profiles, playlists, favourites and listening data—not music files. Family sharing can also include NAS connection details.</p><p>If you choose genre suggestions, album and artist names are sent to Apple’s music catalogue. That optional lookup does not send your audio. Your existing NAS account is used to access your library.</p><p>TestFlight feedback and crash reports you share may be available to the developer. Full data-flow details are available in the app’s Privacy screen.</p></div></details>
+      <div class="privacy-mark" aria-hidden="true"><svg class="icon"><use href="#lock"/></svg></div>
+      <div class="privacy-copy"><p class="eyebrow">Yours to keep</p><h2 id="privacy-title">Your library<br><span class="soft-text">stays yours.</span></h2><p class="privacy-lead">Your originals stay on your NAS. Music streams directly to your devices, or plays from your local downloads. There’s no Gumbo music-storage service in between.</p><div class="privacy-promises"><span>No separate Gumbo account.</span><span>No upload to a cloud music library.</span><span>No advertising or third-party analytics SDK.</span></div>
+        <details class="privacy-details"><summary>What about iCloud and other services?<span aria-hidden="true">+</span></summary><div><p>Gumbo uses iCloud to sync profiles, playlists, favourites and listening data—not music files. Family sharing can also include NAS connection details.</p><p>If you choose genre suggestions, album and artist names are sent to Apple’s music catalogue. That optional lookup does not send your audio. Your existing NAS account is used to access your library.</p><p>Apple shares beta usage and crash information with the developer. Feedback you submit may also include screenshots and contact details. Read the <a href="privacy/">full privacy policy</a> for details about the app and this website.</p></div></details>
       </div>
     </section>
 
@@ -211,6 +219,6 @@
   </main>
   <!-- END PRODUCT: GUMBO MUSIC -->
 
-  <footer class="site-footer container"><div><a class="wordmark footer-wordmark" href="#top"><span>Gumbo</span></a><p>Native apps for the things you love.</p></div><div class="footer-links"><a href="#privacy">Privacy</a><a href="#beta">Beta</a><span>© 2026 Gumbo</span></div></footer>
+  <footer class="site-footer container"><div><a class="wordmark footer-wordmark" href="#top"><span>Gumbo</span></a><p>Native apps for the things you love.</p></div><div class="footer-links"><a href="privacy/">Privacy</a><a href="#beta">Beta</a><span>© 2026 Gumbo</span></div></footer>
 </body>
 </html>

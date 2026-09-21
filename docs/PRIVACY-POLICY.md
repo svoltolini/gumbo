@@ -1,6 +1,6 @@
-# Gumbo Music privacy policy — publication draft
+# Gumbo Music privacy policy — source reference
 
-This draft is not yet published. A public support contact and hosting URL must be supplied before public App Store submission. The in-app Privacy Details page already explains the data flows without linking to a placeholder website.
+The public policy is maintained in [`website/privacy/index.html`](../website/privacy/index.html), with canonical URL [gumbo.one/privacy/](https://gumbo.one/privacy/). This document retains the app data-flow reference and release follow-up. Verify the live page after deployment; adding its source does not update App Store Connect privacy fields or app-level answers. The in-app Privacy Details page remains available offline.
 
 ## Your music and NAS
 
@@ -14,7 +14,7 @@ Gumbo uses cover images from your NAS folders and pictures embedded in your musi
 
 ## Optional genre lookup and file maintenance
 
-When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names to Apple's music catalogue to look for matching genres. This lookup is optional and happens only after you start it. It does not send audio, file paths or NAS credentials. You can enter a genre yourself without using online lookup. Suggestions are reviewed before saving, and existing genre tags are preserved.
+When you choose Find Suggestions in Advanced Settings, Gumbo sends album and artist names, together with the device's country or region setting, to Apple's music catalogue to look for matching genres. This lookup is optional and happens only after you start it. It does not send audio, file paths or NAS credentials. You can enter a genre yourself without using online lookup. Suggestions are reviewed before saving, and existing genre tags are preserved.
 
 Saving reviewed genres writes tags to the original files on your NAS, affecting everyone who uses those files. The owner can use Problem Files to check songs with missing playback information and permanently delete selected damaged files after reviewing the results and confirming. Removing a download only removes a device copy; deleting from Problem Files removes a shared original. Copies on other devices and server backups may remain.
 
@@ -34,14 +34,20 @@ The paired Watch can receive playlist metadata, colours for playlist mosaics, an
 
 Gumbo contains no advertising SDK, third-party analytics SDK or automatic upload of its local diagnostic log. The log can contain profile names, server details and errors; Gumbo does not automatically send it to the developer, but it may be included in device backups or shared if you copy it. You can clear it from Diagnostics.
 
-Apple provides App Store and TestFlight distribution under its own terms and your Apple settings. Feedback and crash reports you share through TestFlight may be available to the developer. If you contact support, the information you choose to send will be used to respond to that request. The public support contact and support-retention details will be added before this policy is published.
+Apple provides App Store and TestFlight distribution under its own terms and your Apple settings. TestFlight shares beta usage and crash information with the developer, including sessions, installation information and the installed build. Joining through the public link does not by itself show the developer your name or email. Submitted feedback can include comments, screenshots, contact information and diagnostics, and is received by Apple and the developer. See [TestFlight & Privacy](https://www.apple.com/legal/privacy/data/en/test-flight/).
+
+During the beta, testers can use Send Beta Feedback on iPhone, iPad or Mac, or find the developer's email in TestFlight's Information/App Details section. Information sent for support is used to investigate problems, improve the beta and respond to requests. An approved public support email and the developer's support-retention practices remain operational follow-up; do not invent a retention deadline or publish private App Store review contacts.
+
+## Website
+
+The public policy also covers gumbo.one: a static site hosted by Vercel, with no sign-up form, advertising pixels, analytics scripts, cookies or browser storage set by its own code. Hosting and security involve ordinary web-request information, separately from the music library. Following a beta link opens Apple's TestFlight service; the website does not collect NAS credentials or enrol testers itself. See the publication source for the current website disclosure and provider links.
 
 ## Your choices
 
 You can remove downloads, edit or delete eligible profiles, and clear diagnostics in Gumbo. iCloud changes and deletions need connectivity to reach other devices. Family access can be managed in Gumbo and on the NAS; removing a participant does not recall copies already downloaded on that person's devices. You can also manage Apple service and backup settings through Apple. Shared-file maintenance requires the library owner and NAS write permissions. Gumbo cannot remove independent NAS logs, NAS backups or copies on other devices through these controls.
 
-## Publication checklist
+## Remaining release checks
 
-- Add the public support contact and confirm how voluntarily submitted support material is retained.
-- Publish the final policy at a stable public HTTPS URL, then set that URL and Apple TV policy text in App Store Connect.
+- Confirm an approved public support email and how voluntarily submitted support material is retained; the beta currently uses the TestFlight contact route.
+- Verify the deployed policy at `https://gumbo.one/privacy/`, then set that URL and Apple TV policy text in App Store Connect and verify read-back. These store changes are not performed by the website update.
 - Complete the app-level privacy answers consistently with the release's behavior and Apple's definitions; document the reasoning in `PRIVACY-RELEASE-CHECK.md`.
