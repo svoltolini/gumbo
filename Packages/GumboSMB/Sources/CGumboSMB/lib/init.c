@@ -319,20 +319,23 @@ void smb2_destroy_url(struct smb2_url *url)
  * and the integrity of the sealed traffic, so use a real CSPRNG where the
  * platform has one.
  *
- * Not all of the platforms libsmb2 supports have one, so every strong
- * source is optional and we always fall back to the random() based
- * sequence rather than failing. Returns 0 when the bytes came from a
- * strong source and -1 when the fallback was used.
+ * Gumbo's Apple builds always use the system CSPRNG. arc4random_buf has
+ * no recoverable failure result and never downgrades to random(). Select
+ * it by platform as well as configure feature, so an outdated config
+ * cannot silently restore the weak fallback on Apple.
+ *
+ * Other upstream platforms retain their original optional strong sources
+ * and fallback. Returns 0 for a strong source, -1 for that non-Apple fallback.
  */
 int
 smb2_random_bytes(void *buf, size_t len)
 {
         uint8_t *p = buf;
 
-#ifdef HAVE_ARC4RANDOM_BUF
+#if defined(__APPLE__) || defined(HAVE_ARC4RANDOM_BUF)
         arc4random_buf(p, len);
         return 0;
-#else /* !HAVE_ARC4RANDOM_BUF */
+#else /* non-Apple platform without arc4random_buf */
 
 #ifdef HAVE_GETRANDOM
         {
@@ -394,7 +397,7 @@ smb2_random_bytes(void *buf, size_t len)
                 }
         }
         return -1;
-#endif /* !HAVE_ARC4RANDOM_BUF */
+#endif /* non-Apple platform without arc4random_buf */
 }
 
 struct smb2_context *smb2_init_context(void)
@@ -402,12 +405,14 @@ struct smb2_context *smb2_init_context(void)
         struct smb2_context *smb2;
         char buf[1024] _U_;
         int ret;
+#if !defined(__APPLE__) && !defined(HAVE_ARC4RANDOM_BUF)
         static int ctr;
-
-        /* Only seeds the fallback path in smb2_random_bytes(). */
+        /* Only seed platforms that compile the fallback. Never seed or use
+         * the process-global predictable generator in Gumbo's Apple builds. */
         pthread_mutex_lock(&context_registry_lock);
         srandom((unsigned)time(NULL) ^ getpid() ^ ctr++);
         pthread_mutex_unlock(&context_registry_lock);
+#endif
 
         smb2 = calloc(1, sizeof(struct smb2_context));
         if (smb2 == NULL) {
