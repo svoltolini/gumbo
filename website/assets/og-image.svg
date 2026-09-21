@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
 <title>Gumbo Music — Your music. Your NAS.</title>
-<desc>The Gumbo mark with the product name and supported Apple devices on a dark background.</desc>
+<desc>The Gumbo Music mark with the product name and supported Apple devices on a dark background.</desc>
 <rect width="1200" height="630" fill="#101011"/>
 <rect x="32" y="32" width="1136" height="566" rx="36" fill="#19191b" stroke="#303033"/>
 <g font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif">
@@ -8,7 +8,7 @@
   <text x="76" y="233" font-size="96" font-weight="600" letter-spacing="-4" fill="#f4f4f2">Gumbo Music</text>
   <text x="80" y="308" font-size="41" letter-spacing="-1.2" fill="#d4d5d6">Your music. Your NAS.</text>
   <text x="80" y="440" font-size="25" font-weight="500" fill="#f4f4f2">iPhone · iPad · Mac · Apple TV</text>
-  <text x="80" y="480" font-size="22" fill="#b1b1b5">Apple Watch companion · CarPlay · AirPlay</text>
+  <text x="80" y="480" font-size="22" fill="#b1b1b5">Apple Watch · CarPlay · AirPlay</text>
   <text x="80" y="555" font-size="22" font-weight="500" fill="#f4f4f2">gumbo.one</text>
   <text x="283" y="555" font-size="19" fill="#b1b1b5">Current beta: Synology NAS</text>
 </g>
