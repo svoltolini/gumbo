@@ -73,12 +73,21 @@ nonisolated final class ReleaseSmokeTests: XCTestCase {
         field.tap()
         field.typeText("ana")
         XCTAssertTrue(app.staticTexts["Ana Kestrel"].firstMatch.waitForExistence(timeout: 5))
+        let visibleKeyboard = NSPredicate { _, _ in
+            app.keyboards.allElementsBoundByIndex.contains { keyboard in
+                keyboard.exists && !keyboard.frame.intersection(app.frame).isEmpty
+            }
+        }
         // Drag the results, not the keyboard covering the lower half of the application.
         // The list extends behind the keyboard. Start inside the visible results and drag through it.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
         capture(app, name: "Search after dragging results")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        // iOS can retain an off-screen keyboard in accessibility after dismissal or
+        // when the simulator uses a hardware keyboard.
+        // Verify that it leaves the visible app, rather than requiring object destruction.
+        expectation(for: NSCompoundPredicate(notPredicateWithSubpredicate: visibleKeyboard), evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
         app.collectionViews.firstMatch.swipeUp()
         XCTAssertTrue(app.tabBars.buttons["Search"].isHittable)
         app.collectionViews.firstMatch.swipeDown()

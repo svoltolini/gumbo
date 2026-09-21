@@ -21,8 +21,14 @@ public nonisolated struct ProbedMedia: Sendable {
 
 public nonisolated enum MediaProbe {
     public static func probe(url: URL) async -> ProbedMedia {
+        await probe(source: .url(url))
+    }
+
+    public static func probe(source: RemoteMediaSource) async -> ProbedMedia {
         var result = ProbedMedia()
-        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
+        let media = RemoteMediaAsset(source)
+        defer { media.cancel() }
+        let asset = media.asset
 
         if let duration = try? await asset.load(.duration), duration.isNumeric, duration.seconds.isFinite, duration.seconds > 0 {
             result.duration = duration.seconds

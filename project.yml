@@ -88,7 +88,6 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        ITSAppUsesNonExemptEncryption: false
         # Without this the system never hands a family invitation link to the app: Safari opens it and calls it invalid.
         CKSharingSupported: true
         NSLocalNetworkUsageDescription: Gumbo looks for music servers on your local network.
@@ -99,6 +98,8 @@ targets:
         INSupportedMediaCategories:
           - INMediaCategoryMusic
         NSBonjourServices:
+          - _https._tcp
+          - _webdavs._tcp
           - _http._tcp
           - _smb._tcp
         NSAppTransportSecurity:
@@ -237,9 +238,10 @@ targets:
           - CFBundleURLName: com.samuelvoltolini.gumbo
             CFBundleURLSchemes:
               - gumbo
-        ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Gumbo looks for music servers on your local network.
         NSBonjourServices:
+          - _https._tcp
+          - _webdavs._tcp
           - _http._tcp
           - _smb._tcp
         NSAppTransportSecurity:
@@ -285,9 +287,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         UIUserInterfaceStyle: Automatic
-        ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Gumbo looks for music servers on your local network.
         NSBonjourServices:
+          - _https._tcp
+          - _webdavs._tcp
           - _http._tcp
           - _smb._tcp
         NSAppTransportSecurity:

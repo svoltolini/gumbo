@@ -14,6 +14,7 @@ struct FamilyView: View {
     @State private var isEnteringAccount = false
     @State private var isConfirmingRemoveAccess = false
     @State private var isConfirmingStop = false
+    @State private var isConfirmingManualRevocation = false
     @State private var isJoiningWithLink = false
     @State private var problem: String?
 
@@ -52,9 +53,14 @@ struct FamilyView: View {
 
                 if cloud.isActive || (model.familyRevocationPending && cloud.currentUserRecordName != nil) {
                     if (cloud.isOwner && (cloud.isShared || model.familyRevocationPending) && permissions.canManageFamily) || (!cloud.isOwner && permissions.canLeave) {
-                        SettingsGroup(footer: cloud.isOwner ? "Everyone you invited loses access to the family's profiles." : "Your profile stays on this device; the family's profiles go.") {
+                        SettingsGroup(footer: cloud.isOwner ? stopSharingNotice : "Your profile stays on this device; the family's profiles go.") {
                             SettingsButtonRow(symbol: cloud.isOwner ? "xmark.circle" : "rectangle.portrait.and.arrow.right", tint: .red, title: model.familyRevocationPending ? "Finish stopping sharing" : (cloud.isOwner ? "Stop sharing" : "Leave family"), role: .destructive) {
                                 isConfirmingStop = true
+                            }
+                            if model.familyRevocationPending && !model.canManageNASAccounts && !cloud.isShared {
+                                SettingsButtonRow(symbol: "checkmark.shield", tint: .primary, title: "I changed the NAS account") {
+                                    isConfirmingManualRevocation = true
+                                }
                             }
                         }
                         .disabled(isWorkingOnAccess)
@@ -90,6 +96,8 @@ struct FamilyView: View {
                     await model.stopFamilySharing(using: cloud, authorization: authorization)
                 }
             }
+        } message: {
+            Text(stopSharingNotice)
         }
         .confirmationDialog("Remove family access?", isPresented: $isConfirmingRemoveAccess, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
@@ -97,6 +105,13 @@ struct FamilyView: View {
             }
         } message: {
             Text("Gumbo will ask the NAS to remove the family account. Access remains until the NAS confirms removal. Existing sessions and files already downloaded may remain available.")
+        }
+        .confirmationDialog("Have you revoked the shared account on your NAS?", isPresented: $isConfirmingManualRevocation, titleVisibility: .visible) {
+            Button("I changed or disabled it and ended its sessions") {
+                performAccess { await model.acknowledgeManualFamilyRevocation(using: cloud) }
+            }
+        } message: {
+            Text("Gumbo cannot verify this for your NAS. Confirm only after changing or disabling the shared account and ending its active sessions. This removes its saved details from Gumbo. Files already downloaded by others may remain.")
         }
         .sheet(isPresented: $isEnteringAccount) {
             FamilyAccountSheet()
@@ -108,9 +123,7 @@ struct FamilyView: View {
 
     /// The read-only NAS account members connect with, made by the app or entered by hand.
     private var familyAccessGroup: some View {
-        SettingsGroup(title: "Family access", footer: model.familyAccess == nil
-            ? "Use a separate read-only NAS account for the family. Gumbo can create one on a NAS that allows it, or you can enter an existing account. Its credentials are shared through iCloud with people who join using your invitation link."
-            : "Everyone in the family connects with this one account, on every device, without signing in. Rotate the password if a device should stop working.") {
+        SettingsGroup(title: "Family access", footer: accessFooter) {
             if let access = model.familyAccess {
                 SettingsRow(symbol: "key.fill", tint: .green, title: "Family access") {
                     Circle()
@@ -118,14 +131,19 @@ struct FamilyView: View {
                         .frame(width: 8, height: 8)
                         .accessibilityLabel("Ready, account \(access.account)")
                 }
-                SettingsButtonRow(symbol: "arrow.triangle.2.circlepath", tint: .blue, title: isWorkingOnAccess ? "Working…" : "Rotate password") {
-                    performAccess { await model.rotateFamilyAccess() }
+                if model.canManageNASAccounts {
+                    SettingsButtonRow(symbol: "arrow.triangle.2.circlepath", tint: .blue, title: isWorkingOnAccess ? "Working…" : "Rotate password") {
+                        performAccess { await model.rotateFamilyAccess() }
+                    }
+                    .disabled(isWorkingOnAccess)
+                    SettingsButtonRow(symbol: "key.slash", tint: .red, title: "Remove family access", role: .destructive) {
+                        isConfirmingRemoveAccess = true
+                    }
+                    .disabled(isWorkingOnAccess)
+                } else {
+                    SettingsButtonRow(symbol: "person.text.rectangle", tint: .secondary, title: "Update shared account") { isEnteringAccount = true }
+                        .disabled(isWorkingOnAccess)
                 }
-                .disabled(isWorkingOnAccess)
-                SettingsButtonRow(symbol: "key.slash", tint: .red, title: "Remove family access", role: .destructive) {
-                    isConfirmingRemoveAccess = true
-                }
-                .disabled(isWorkingOnAccess)
             } else {
                 if model.familyAccessNeedsVerification {
                     Text("An earlier family account needs verification for this connection. Use its existing name and password below. Your previous setup is still kept.")
@@ -133,10 +151,12 @@ struct FamilyView: View {
                         .foregroundStyle(.secondary)
                         .padding(16)
                 }
-                SettingsButtonRow(symbol: "key.fill", tint: .green, title: isWorkingOnAccess ? "Setting up…" : "Set up family access") {
-                    performAccess { await model.setUpFamilyAccess() }
+                if model.canManageNASAccounts {
+                    SettingsButtonRow(symbol: "key.fill", tint: .green, title: isWorkingOnAccess ? "Setting up…" : "Set up family access") {
+                        performAccess { await model.setUpFamilyAccess() }
+                    }
+                    .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 }
-                .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 SettingsButtonRow(symbol: "person.text.rectangle", tint: .indigo, title: "Use an existing account") {
                     isEnteringAccount = true
                 }
@@ -163,6 +183,7 @@ struct FamilyView: View {
     @State private var isEnteringAccount = false
     @State private var isConfirmingRemoveAccess = false
     @State private var isConfirmingStop = false
+    @State private var isConfirmingManualRevocation = false
     @State private var isJoiningWithLink = false
     @State private var problem: String?
 
@@ -201,8 +222,12 @@ struct FamilyView: View {
                     Section {
                         Button(model.familyRevocationPending ? "Finish stopping sharing" : (cloud.isOwner ? "Stop sharing" : "Leave family"), role: .destructive) { isConfirmingStop = true }
                             .disabled(isWorkingOnAccess)
+                        if model.familyRevocationPending && !model.canManageNASAccounts && !cloud.isShared {
+                            Button("I changed the NAS account", systemImage: "checkmark.shield") { isConfirmingManualRevocation = true }
+                                .disabled(isWorkingOnAccess)
+                        }
                     } footer: {
-                        Text(cloud.isOwner ? "Everyone who joined loses access to the family's profiles." : "Your profile stays on this device; the family's profiles go.")
+                        Text(cloud.isOwner ? stopSharingNotice : "Your profile stays on this device; the family's profiles go.")
                     }
                 }
             }
@@ -228,6 +253,8 @@ struct FamilyView: View {
                     await model.stopFamilySharing(using: cloud, authorization: authorization)
                 }
             }
+        } message: {
+            Text(stopSharingNotice)
         }
         .confirmationDialog("Remove family access?", isPresented: $isConfirmingRemoveAccess, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
@@ -235,6 +262,13 @@ struct FamilyView: View {
             }
         } message: {
             Text("Gumbo will ask the NAS to remove the family account. Access remains until the NAS confirms removal. Existing sessions and files already downloaded may remain available.")
+        }
+        .confirmationDialog("Have you revoked the shared account on your NAS?", isPresented: $isConfirmingManualRevocation, titleVisibility: .visible) {
+            Button("I changed or disabled it and ended its sessions") {
+                performAccess { await model.acknowledgeManualFamilyRevocation(using: cloud) }
+            }
+        } message: {
+            Text("Gumbo cannot verify this for your NAS. Confirm only after changing or disabling the shared account and ending its active sessions. This removes its saved details from Gumbo. Files already downloaded by others may remain.")
         }
         .sheet(isPresented: $isEnteringAccount) { FamilyAccountSheet() }
         .sheet(isPresented: $isJoiningWithLink) { JoinWithLinkSheet() }
@@ -245,30 +279,35 @@ struct FamilyView: View {
             if let access = model.familyAccess {
                 LabeledContent("Account", value: access.account)
                 LabeledContent("Status", value: "Ready")
-                Button(isWorkingOnAccess ? "Working…" : "Rotate password", systemImage: "arrow.triangle.2.circlepath") {
-                    performAccess { await model.rotateFamilyAccess() }
-                }
-                .disabled(isWorkingOnAccess)
-                Button("Remove family access", role: .destructive) { isConfirmingRemoveAccess = true }
+                if model.canManageNASAccounts {
+                    Button(isWorkingOnAccess ? "Working…" : "Rotate password", systemImage: "arrow.triangle.2.circlepath") {
+                        performAccess { await model.rotateFamilyAccess() }
+                    }
                     .disabled(isWorkingOnAccess)
+                    Button("Remove family access", role: .destructive) { isConfirmingRemoveAccess = true }
+                        .disabled(isWorkingOnAccess)
+                } else {
+                    Button("Update shared account", systemImage: "person.text.rectangle") { isEnteringAccount = true }
+                        .disabled(isWorkingOnAccess)
+                }
             } else {
                 if model.familyAccessNeedsVerification {
                     Text("An earlier family account needs verification for this connection. Use its existing name and password below. Your previous setup is still kept.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                Button(isWorkingOnAccess ? "Setting up…" : "Set up family access", systemImage: "key") {
-                    performAccess { await model.setUpFamilyAccess() }
+                if model.canManageNASAccounts {
+                    Button(isWorkingOnAccess ? "Setting up…" : "Set up family access", systemImage: "key") {
+                        performAccess { await model.setUpFamilyAccess() }
+                    }
+                    .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 }
-                .disabled(isWorkingOnAccess || model.familyRevocationPending)
                 Button("Use an existing account", systemImage: "person.text.rectangle") { isEnteringAccount = true }
             }
         } header: {
             Text("Family access")
         } footer: {
-            Text(model.familyAccess == nil
-                 ? "Use a separate read-only NAS account for the family. Gumbo can create one on a NAS that allows it, or you can enter an existing account. Its credentials are shared through iCloud with people who join using your invitation link."
-                 : "Everyone in the family connects with this one account, on every device, without signing in. Rotate the password if a device should stop working.")
+            Text(accessFooter)
         }
     }
 
@@ -330,12 +369,10 @@ private struct FamilyAccountSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
-                    SettingsGroup(title: "In DSM", footer: "If you already have a family account, verify its read-only permissions and enter it below. To create one, open DSM on your Mac or PC and follow these steps.") {
-                        InstructionRow(number: 1, text: "Go to Control Panel, then User & Group, and select Create.")
-                        InstructionRow(number: 2, text: "Name it gumbo-family and give it a password you won't need to remember. This one account is for everyone, not one per person.")
-                        InstructionRow(number: 3, text: "On the permissions step, give it Read only on your music folder and no access to everything else.")
-                        InstructionRow(number: 4, text: "On the applications step, allow File Station and deny the rest.")
-                        InstructionRow(number: 5, text: "Finish, then type the name and password here.")
+                    SettingsGroup(title: model.canManageNASAccounts ? "In DSM" : "In your NAS settings", footer: FamilyAccountGuidance.footer) {
+                        ForEach(Array(FamilyAccountGuidance.instructions(for: model.connection?.providerKind ?? .synology).enumerated()), id: \.offset) { index, instruction in
+                            InstructionRow(number: index + 1, text: instruction)
+                        }
                     }
                     SettingsGroup(footer: "Gumbo checks the account by signing in once, then shares it with your family through iCloud, encrypted, so nobody has to type it.") {
                         HStack(spacing: 14) {
@@ -400,13 +437,9 @@ private struct FamilyAccountSheet: View {
     @State private var isChecking = false
     @State private var problem: String?
 
-    private let instructions = [
-        "Go to Control Panel, then User & Group, and select Create.",
-        "Name it gumbo-family and give it a password. This one account is for everyone, not one per person.",
-        "On the permissions step, give it Read only on your music folder and no access to everything else.",
-        "On the applications step, allow File Station and deny the rest.",
-        "Finish, then enter the name and password below."
-    ]
+    private var instructions: [String] {
+        FamilyAccountGuidance.instructions(for: model.connection?.providerKind ?? .synology)
+    }
 
     var body: some View {
         NavigationStack {
@@ -421,9 +454,9 @@ private struct FamilyAccountSheet: View {
                         }
                     }
                 } header: {
-                    Text("In DSM")
+                    Text(model.canManageNASAccounts ? "In DSM" : "In your NAS settings")
                 } footer: {
-                    Text("If you already have a family account, verify its read-only permissions and enter it below. To create one, open DSM on your Mac or PC and follow these steps.")
+                    Text(FamilyAccountGuidance.footer)
                 }
                 Section {
                     TextField("Account", text: $account)
@@ -468,6 +501,24 @@ private struct FamilyAccountSheet: View {
 #endif
 
 private extension FamilyView {
+    var accessFooter: String {
+        if !model.canManageNASAccounts {
+            return "Create a separate account in your NAS settings with read-only access to the music folder and permission to use this connection. Gumbo shares its credentials through iCloud with invited family members. Manage its password and permissions on the NAS; changing shared details here does not revoke existing NAS access."
+        }
+        return model.familyAccess == nil
+            ? "Use a separate read-only NAS account for the family. Gumbo can create one on a NAS that allows it, or you can enter an existing account. Its credentials are shared through iCloud with people who join using your invitation link."
+            : "Family members connect with this shared account. Rotate its password to revoke saved credentials; existing NAS sessions and downloaded files may remain available."
+    }
+
+    var stopSharingNotice: String {
+        if cloud.isOwner, !model.canManageNASAccounts {
+            return "iCloud sharing will stop. To revoke NAS access, also change or disable the shared account and end its existing sessions in your NAS settings. Previously downloaded files may remain available."
+        }
+        return cloud.isOwner
+            ? "Invited members lose access to the family’s profiles. Gumbo will try to rotate the shared NAS password; existing sessions and downloaded files may remain available."
+            : "Your profile stays on this device; the family’s profiles go."
+    }
+
     func performAccess(requiresOwner: Bool = true, _ operation: @escaping @MainActor () async -> String?) {
         guard let session = profiles.sessionID,
               !requiresOwner || permissions.canManageFamily else { return }
@@ -479,5 +530,27 @@ private extension FamilyView {
             problem = await operation()
             isWorkingOnAccess = false
         }
+    }
+}
+
+private enum FamilyAccountGuidance {
+    static let footer = "If you already have a family account, check its read-only permissions and enter it below. Otherwise, create a separate account in your NAS administration first. Gumbo verifies access but cannot verify every server-side permission."
+
+    static func instructions(for kind: NASProviderKind) -> [String] {
+        if kind == .synology {
+            return [
+                "Go to Control Panel, then User & Group, and select Create.",
+                "Name it gumbo-family and give it a password. This one account is shared by your family.",
+                "Give it Read only on your music folder and no access to everything else.",
+                "Allow File Station and deny other applications.",
+                "Finish, then enter the name and password below."
+            ]
+        }
+        return [
+            "Open your NAS administration and create a separate account for your family.",
+            "Allow it to read your selected music folder or share, and deny writes, deletion and access to unrelated files.",
+            "Allow this account to use \(kind == .webDAV ? "WebDAV over HTTPS" : "the selected SMB share") with the same connection settings you use in Gumbo.",
+            "Enter that account’s name and password below. Update them here whenever you change the password on the NAS."
+        ]
     }
 }

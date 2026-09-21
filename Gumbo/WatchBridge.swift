@@ -1,6 +1,7 @@
 #if os(iOS)
 import GumboCore
 import WatchConnectivity
+import UIKit
 
 /// Keeps a paired Apple Watch supplied with the playlists it may download and the sign-in it needs
 /// to fetch them from the server itself. The catalogue travels as a file, the credentials as a
@@ -15,6 +16,13 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// Asked for the current state whenever a sync is due.
     var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?, scope: String)?)?
     var artworkProvider: ((WatchCatalogue) -> [WatchArtworkSource])?
+    /// Produces a dedicated temporary copy, never a path into the phone's offline cache.
+    var audioFileProvider: ((WatchPlaylist, WatchTrack) async throws -> URL)?
+    private var relayQueue: [(request: WatchAudioRelayRequest, authorization: WatchAuthorization)] = []
+    private var relayTask: Task<Void, Never>?
+    private var activeRelay: WatchAudioRelayRequest?
+    private var relayEpoch = UUID()
+    private var backgroundObserver: NSObjectProtocol?
     private let artworkBuilder = WatchArtworkBuilder()
     private var artworkTask: Task<Void, Never>?
     private var artworkRequest: [WatchArtworkSource]?
@@ -40,6 +48,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         deletionRevision = UInt64(UserDefaults.standard.string(forKey: Self.deletionKey + ".revision") ?? "0") ?? 0
         UserDefaults.standard.set(authorization.encoded, forKey: Self.authorizationKey)
         super.init()
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.suspendRelayPreparation() }
+            }
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
@@ -114,6 +126,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// profile is locked or switched, so another profile's data never leaks. The revocation is
     /// queued via `transferUserInfo` so a disconnected Watch receives it on next sync.
     func revoke() {
+        cancelAllRelay()
         clearArtwork()
         authorization = authorization.successor(granted: false)
         authorizationScope = nil
@@ -136,6 +149,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private func authorize(scope: String) {
         guard !authorization.isGranted || authorizationScope != scope else { return }
         clearArtwork()
+        cancelAllRelay()
         authorization = authorization.successor(granted: true)
         authorizationScope = scope
         snapshotRevision = 0
@@ -167,14 +181,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             }
         }
         if let credentials = state.credentials, credentials != lastCredentials {
-            var payload: [String: Any] = [
-                "kind": "credentials",
-                "authorization": authorization.encoded!,
-                "baseURL": credentials.baseURL.absoluteString,
-                "account": credentials.account,
-                "password": credentials.password,
-            ]
-            if let driveID = credentials.driveID { payload["driveID"] = driveID }
+            var payload = credentialPayload(credentials)
+            payload["kind"] = credentials.provider == nil ? "credentials" : "providerConnectionV2"
+            payload["authorization"] = authorization.encoded!
             _ = session.transferUserInfo(payload)
             lastCredentials = credentials
         }
@@ -202,6 +211,13 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if message["kind"] as? String == "requestAudioV2" || message["kind"] as? String == "cancelAudioV2" {
+            let data = message["request"] as? Data
+            let grant = message["authorization"] as? Data
+            let cancel = message["kind"] as? String == "cancelAudioV2"
+            Task { @MainActor in self.receiveRelay(data, authorizationData: grant, cancel: cancel) }
+            return
+        }
         guard message["kind"] as? String == "requestSync" else { return }
         Task { @MainActor in
             self.lastCatalogueKey = nil
@@ -215,6 +231,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// never arrive. Larger catalogues than a message can carry fall back to the queued file.
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         nonisolated(unsafe) let reply = replyHandler
+        if message["kind"] as? String == "requestAudioV2" {
+            let data = message["request"] as? Data
+            let grant = message["authorization"] as? Data
+            Task { @MainActor in reply(["accepted": self.receiveRelay(data, authorizationData: grant, cancel: false)]) }
+            return
+        }
         guard message["kind"] as? String == "requestSync" else { reply([:]); return }
         Task { @MainActor in
             reply(self.syncReply())
@@ -240,18 +262,134 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             DiagnosticsLog.shared.record("Watch sync: catalogue too large for a message; queued as a file")
         }
         if let credentials = state.credentials {
-            reply["baseURL"] = credentials.baseURL.absoluteString
-            reply["account"] = credentials.account
-            reply["password"] = credentials.password
-            reply["driveID"] = credentials.driveID
+            reply.merge(credentialPayload(credentials), uniquingKeysWith: { _, new in new })
         }
         return reply
     }
 
     nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: (any Error)?) {
         try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        if fileTransfer.file.metadata?["kind"] as? String == "audioV2" {
+            if error != nil, let request = WatchAudioRelayRequest.decode(fileTransfer.file.metadata?["request"] as? Data) {
+                let grant = WatchAuthorization.decode(fileTransfer.file.metadata?["authorization"] as? Data)
+                Task { @MainActor in
+                    guard grant == self.authorization, self.authorization.isGranted else { return }
+                    _ = WCSession.default.transferUserInfo(["kind": "audioFailureV2", "request": request.encoded!,
+                        "authorization": self.authorization.encoded!])
+                }
+            }
+            return
+        }
         let message = error.map { "Watch sync: catalogue transfer failed: \($0.localizedDescription)" } ?? "Watch sync: catalogue delivered"
         Task { @MainActor in DiagnosticsLog.shared.record(message) }
+    }
+
+    private func credentialPayload(_ credentials: WatchCredentials) -> [String: Any] {
+        guard credentials.isUsable else { return [:] }
+        if credentials.provider != nil {
+            // Old Watch versions see no DSM keys and cannot send these credentials to File Station.
+            return (try? JSONEncoder().encode(credentials)).map { ["providerConnectionV2": $0] } ?? [:]
+        }
+        return ["baseURL": credentials.baseURL.absoluteString, "account": credentials.account,
+                "password": credentials.password, "driveID": credentials.driveID ?? ""]
+    }
+
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        let kind = userInfo["kind"] as? String
+        guard kind == "requestAudioV2" || kind == "cancelAudioV2" else { return }
+        let data = userInfo["request"] as? Data
+        let grant = userInfo["authorization"] as? Data
+        Task { @MainActor in self.receiveRelay(data, authorizationData: grant, cancel: kind == "cancelAudioV2") }
+    }
+
+    @discardableResult private func receiveRelay(_ data: Data?, authorizationData: Data?, cancel: Bool) -> Bool {
+        guard let request = WatchAudioRelayRequest.decode(data),
+              WatchAuthorization.decode(authorizationData) == authorization, authorization.isGranted else { return false }
+        if cancel {
+            relayQueue.removeAll { $0.request == request }
+            if activeRelay == request { relayTask?.cancel() }
+            for transfer in WCSession.default.outstandingFileTransfers
+            where WatchAudioRelayRequest.decode(transfer.file.metadata?["request"] as? Data) == request {
+                transfer.cancel()
+                try? FileManager.default.removeItem(at: transfer.file.fileURL)
+            }
+            return true
+        }
+        guard UIApplication.shared.applicationState == .active,
+              let state = provider?(), state.scope == authorizationScope,
+              state.credentials?.providerKind == .smb, request.resolve(in: state.catalogue) != nil,
+              let resolved = request.resolve(in: state.catalogue),
+              !Set(serverDeletions[resolved.playlist.driveID ?? ""] ?? []).contains(resolved.track.id) else { return false }
+        if activeRelay == request || relayQueue.contains(where: { $0.request == request }) ||
+            WCSession.default.outstandingFileTransfers.contains(where: { WatchAudioRelayRequest.decode($0.file.metadata?["request"] as? Data) == request }) { return true }
+        guard relayQueue.count < WatchCatalogue.songLimit * 2 else { return false }
+        relayQueue.append((request, authorization))
+        startRelayIfNeeded()
+        return true
+    }
+
+    private func startRelayIfNeeded() {
+        guard relayTask == nil, !relayQueue.isEmpty else { return }
+        let epoch = relayEpoch
+        relayTask = Task { [weak self] in
+            guard let self else { return }
+            while !relayQueue.isEmpty, epoch == relayEpoch {
+                let entry = relayQueue.removeFirst()
+                let request = entry.request
+                activeRelay = request
+                do {
+                    guard !Task.isCancelled, entry.authorization == authorization,
+                          let state = provider?(), state.scope == authorizationScope,
+                          state.credentials?.providerKind == .smb,
+                          let resolved = request.resolve(in: state.catalogue), let audioFileProvider else { throw CancellationError() }
+                    let file = try await audioFileProvider(resolved.playlist, resolved.track)
+                    var transferred = false
+                    defer { if !transferred { try? FileManager.default.removeItem(at: file) } }
+                    try Task.checkCancellation()
+                    guard epoch == relayEpoch, entry.authorization == authorization,
+                          let current = provider?(), current.scope == state.scope,
+                          let latest = request.resolve(in: current.catalogue), latest.track == resolved.track,
+                          !Set(serverDeletions[latest.playlist.driveID ?? ""] ?? []).contains(latest.track.id),
+                          WatchDownloadValidation.failure(for: file, expectedBytes: request.job.expectedBytes) == nil else { throw CancellationError() }
+                    _ = WCSession.default.transferFile(file, metadata: ["kind": "audioV2", "request": request.encoded!, "authorization": authorization.encoded!])
+                    transferred = true
+                } catch {
+                    if entry.authorization == authorization, epoch == relayEpoch {
+                        _ = WCSession.default.transferUserInfo(["kind": "audioFailureV2", "request": request.encoded!,
+                            "authorization": authorization.encoded!, "message": "Keep Gumbo open on your iPhone and try downloading again."])
+                    }
+                }
+                activeRelay = nil
+                if Task.isCancelled { break }
+            }
+            guard epoch == relayEpoch else { return }
+            relayTask = nil
+            startRelayIfNeeded()
+        }
+    }
+
+    private func cancelAllRelay() {
+        relayEpoch = UUID()
+        relayTask?.cancel()
+        relayTask = nil
+        activeRelay = nil
+        relayQueue.removeAll()
+        guard WCSession.isSupported() else { return }
+        for transfer in WCSession.default.outstandingFileTransfers where transfer.file.metadata?["kind"] as? String == "audioV2" {
+            transfer.cancel()
+            try? FileManager.default.removeItem(at: transfer.file.fileURL)
+        }
+    }
+
+    private func suspendRelayPreparation() {
+        let interrupted = relayQueue + (activeRelay.map { [($0, authorization)] } ?? [])
+        relayQueue.removeAll()
+        relayTask?.cancel()
+        for (request, grant) in interrupted where grant == authorization {
+            _ = WCSession.default.transferUserInfo(["kind": "audioFailureV2", "request": request.encoded!,
+                "authorization": authorization.encoded!, "message": "Keep Gumbo open on your iPhone and try downloading again."])
+        }
+        // Already prepared WCSession file transfers remain queued and can finish in the background.
     }
 }
 #endif

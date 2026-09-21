@@ -90,6 +90,7 @@ struct MacAlbumDetailView: View {
                         MacCollectionDownloadControl(item: .album(album))
                     }
                     .padding(.top, 4)
+                    ProviderDownloadNotice()
                 }
                 Spacer(minLength: 0)
             }
@@ -156,6 +157,9 @@ struct MacPlaylistDetailView: View {
                                 }
                             }
                             .padding(.top, 4)
+                            if playlist.kind == .local || playlist.id == Playlist.favouritesID {
+                                ProviderDownloadNotice()
+                            }
                         }
                         Spacer(minLength: 0)
                     }

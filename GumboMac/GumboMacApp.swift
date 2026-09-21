@@ -52,6 +52,8 @@ struct GumboMacApp: App {
         MacAppDelegate.player = player
         let downloads = DownloadManager()
         downloads.driveIDProvider = { [library] in library.catalogue.driveID }
+        downloads.remoteSourceProvider = { [model] in model.downloadSource(for: $0) }
+        model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
         if !UserDefaults.standard.bool(forKey: "downloads.ownersScoped"), let owner = profiles.owner {
             downloads.adoptLegacyOwners(into: owner.id)
             UserDefaults.standard.set(true, forKey: "downloads.ownersScoped")
@@ -93,8 +95,8 @@ struct GumboMacApp: App {
         }
         library.onContentChanged = reconcileDownloads
         // A song on this Mac plays from disk, whether or not the server is reachable.
-        player.streamURLProvider = { [library, model, downloads] track in
-            downloads.localURL(for: track) ?? library.streamURL(for: track, quality: model.quality)
+        player.mediaSourceProvider = { [library, downloads] track in
+            downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track)
         }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
@@ -120,6 +122,7 @@ struct GumboMacApp: App {
             player.applySettings(repeatMode: PlayerModel.RepeatMode(rawValue: settings.repeatMode) ?? .off, shuffle: settings.shuffle)
         }
         profiles.onDeactivate = { [player, library, downloads] in
+            downloads.revokeForegroundDownloads()
             player.stop()
             library.metadataWriter.cancel()
             downloads.activeProfileID = "locked"

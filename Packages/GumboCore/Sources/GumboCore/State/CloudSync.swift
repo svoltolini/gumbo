@@ -451,6 +451,11 @@ public final class CloudSync {
             remoteStamps[record.recordID.recordName] = decoded.state.updatedAt
             remoteStateDigests[record.recordID.recordName] = decoded.digest
         case "Family":
+            let provider: ProviderConfiguration?
+            if let stored = record["providerConnection"] {
+                guard let data = stored as? Data else { throw ProviderError.invalidConfiguration }
+                provider = try JSONDecoder().decode(ProviderConfiguration.self, from: data)
+            } else { provider = nil }
             let info = FamilyInfo(
                 name: record["name"] as? String ?? "Family",
                 serverName: record["serverName"] as? String ?? "",
@@ -459,7 +464,8 @@ public final class CloudSync {
                 updatedAt: record["updatedAt"] as? Date ?? .distantPast,
                 familyAccount: record["familyAccount"] as? String,
                 familyPassword: record.encryptedValues["familyPassword"] as? String,
-                address: record["address"] as? String
+                address: record["address"] as? String,
+                provider: provider
             )
             remoteStamps[record.recordID.recordName] = info.updatedAt
             family = info
@@ -1014,7 +1020,9 @@ public final class CloudSync {
     private func record(for info: FamilyInfo) -> CKRecord {
         let record = baseRecord(named: "family", type: "Family")
         record["name"] = info.name
-        record["address"] = info.address
+        record["address"] = info.provider?.kind == .synology || info.provider == nil ? info.address : nil
+        let providerData: Data? = info.provider.flatMap { try? JSONEncoder().encode($0) }
+        record["providerConnection"] = providerData as CKRecordValue?
         record["serverName"] = info.serverName
         record["serverAccount"] = info.serverAccount
         record["musicPath"] = info.musicPath

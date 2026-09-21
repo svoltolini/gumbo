@@ -53,6 +53,8 @@ public nonisolated struct Track: Identifiable, Hashable, Codable, Sendable {
     /// Modification time reported by the source listing, in Unix seconds. Keep it numeric so
     /// catalogue date encoding cannot discard fractional precision and cause repeated rereads.
     public var sourceModifiedAt: TimeInterval? = nil
+    /// Strong server validator from a complete listing; absent on older catalogues and SMB.
+    public var sourceVersion: String? = nil
     /// Which version of the tag reader produced the tags; older tracks are read again on the next scan.
     public var tagVersion: Int? = nil
     /// How many times reading this song's tags failed, and when it was last tried; after three failures
@@ -379,6 +381,34 @@ public nonisolated struct ServerConnection: Codable, Hashable, Sendable {
     public var account: String
     /// Path of the folder to index on the drive.
     public var musicPath: String?
+    public var provider: ProviderConfiguration?
+
+    public init(name: String, baseURL: URL, account: String, musicPath: String?, provider: ProviderConfiguration? = nil) {
+        self.name = name
+        self.baseURL = provider?.endpoint ?? baseURL
+        self.account = account
+        self.musicPath = musicPath
+        self.provider = provider
+    }
+
+    public var providerKind: NASProviderKind { provider?.kind ?? .synology }
+
+    private enum CodingKeys: String, CodingKey { case name, baseURL, account, musicPath, provider }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let baseURL = try values.decode(URL.self, forKey: .baseURL)
+        let provider = try values.decodeIfPresent(ProviderConfiguration.self, forKey: .provider)
+        if let provider {
+            guard baseURL == provider.endpoint else { throw ProviderError.invalidConfiguration }
+        } else {
+            // Only the original HTTP(S) DSM schema can take the legacy route.
+            guard NASOrigin(url: baseURL) != nil else { throw ProviderError.invalidConfiguration }
+        }
+        self.init(name: try values.decode(String.self, forKey: .name), baseURL: baseURL,
+                  account: try values.decode(String.self, forKey: .account),
+                  musicPath: try values.decodeIfPresent(String.self, forKey: .musicPath), provider: provider)
+    }
 
     public var host: String { baseURL.host() ?? baseURL.absoluteString }
 
@@ -399,7 +429,7 @@ public nonisolated struct ServerConnection: Codable, Hashable, Sendable {
         let port = baseURL.port.map { ":\($0)" } ?? ""
         return host + port
     }
-    public var sourceID: String { NASSource.identifier(baseURL: baseURL, account: account) }
+    public var sourceID: String { provider?.sourceID(account: account) ?? NASSource.identifier(baseURL: baseURL, account: account) }
     /// Hostname-only keys cannot distinguish two ports or accounts on the same server.
     public var keychainAccount: String { sourceID }
     /// The key older builds used; the address changes between routes, so it is only read for migration.

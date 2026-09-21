@@ -74,6 +74,7 @@ public final class PlayerModel {
 
     /// Resolves a stream URL for a track; nil means the file is not reachable right now.
     public var streamURLProvider: ((Track) -> URL?)?
+    public var mediaSourceProvider: ((Track) -> RemoteMediaSource?)?
     public var sourceIDProvider: (() -> String)?
     /// Whether a track without a URL may pretend to play (the sample library) instead of reporting an error.
     public var allowsSimulation: (() -> Bool)?
@@ -345,10 +346,14 @@ public final class PlayerModel {
         // CarPlay and lock-screen Play must also work after the first URL lookup failed.
         if usesSystemControls { setupRemoteCommands() }
 
-        if let url = streamURLProvider?(track) {
+        if let source = mediaSourceProvider?(track) ?? streamURLProvider?(track).map(RemoteMediaSource.url) {
             isSimulated = false
             if usesSystemControls { configureAudioSession() }
-            let player = makePlayer(url)
+            let player: any PlaybackTransport
+            switch source {
+            case .url(let url): player = makePlayer(url)
+            case .file: player = AVPlaybackTransport(source: source)
+            }
             player.volume = volume
             self.player = player
             pendingStartPosition = position > 0 ? position : nil

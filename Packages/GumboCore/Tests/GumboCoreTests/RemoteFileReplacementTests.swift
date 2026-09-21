@@ -4,10 +4,12 @@ import Testing
 
 /// An in-memory drive with the write half, recording every call so the swap order can be checked.
 private actor ReplacementFixtureDrive: WritableRemoteDrive {
+    nonisolated let capabilities: RemoteCapabilities = [.read, .ranges, .upload, .rename, .delete, .replace]
     let id = "replacement-fixture"
     let displayName = "Replacement fixture"
     var files: [String: Data]
     var calls: [String] = []
+    var version: String?
     /// A target name whose next rename fails, to simulate the swap going wrong half way; the
     /// rename that puts the original back afterwards succeeds.
     var failingRenameTarget: String?
@@ -21,6 +23,7 @@ private actor ReplacementFixtureDrive: WritableRemoteDrive {
         self.files = files
     }
 
+    func setVersion(_ value: String) { version = value }
     func setFailingRenameTarget(_ name: String?) { failingRenameTarget = name }
     func setLoseRenameResponse() { loseRenameResponse = true }
     func setRace() { replaceBeforeRename = true }
@@ -43,7 +46,7 @@ private actor ReplacementFixtureDrive: WritableRemoteDrive {
     func info(_ path: String) async throws -> RemoteEntry {
         calls.append("info \(path)")
         guard let data = files[path] else { throw SynologyError.api(code: 408, api: "SYNO.FileStation.List") }
-        return RemoteEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: false, size: Int64(data.count), modified: Date(timeIntervalSince1970: 1_700_000_000))
+        return RemoteEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: false, size: Int64(data.count), modified: Date(timeIntervalSince1970: 1_700_000_000), version: version)
     }
 
     func upload(_ file: URL, toFolder folder: String, name: String, modified: Date?) async throws {
@@ -208,6 +211,20 @@ private nonisolated func withLocalFile(_ data: Data, _ body: (URL) async throws 
         await #expect(throws: RemoteDriveError.tooLarge) {
             try await drive.downloadFile(songPath, to: destination, maxBytes: Int64(oldBytes.count) - 1)
         }
+    }
+
+    @Test func aChangedStrongVersionRefusesReplacementWithoutMovingTheOriginal() async throws {
+        let drive = ReplacementFixtureDrive(files: [songPath: oldBytes])
+        await drive.setVersion("reviewed")
+        let original = try await drive.info(songPath)
+        await drive.setVersion("replacement")
+        try await withLocalFile(newBytes) { url in
+            await #expect(throws: RemoteWriteError.changed) {
+                try await drive.replaceFile(at: songPath, with: url, expectedSize: Int64(newBytes.count), modified: nil, expectedOriginal: original)
+            }
+        }
+        #expect(await drive.files == [songPath: oldBytes])
+        #expect(!(await drive.calls).contains { $0.hasPrefix("rename ") })
     }
 
     @Test func writeDenialsAreRecognisedAcrossServerErrorCodes() {

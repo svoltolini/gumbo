@@ -15,11 +15,18 @@ let package = Package(
         .library(name: "GumboCore", targets: ["GumboCore"]),
         .library(name: "GumboShared", targets: ["GumboShared"]),
     ],
+    dependencies: [
+        // Explicitly dynamic: the distribution includes LGPL-2.1-or-later libsmb2.
+        .package(path: "../GumboSMB"),
+    ],
     targets: [
         // What the widget extension needs too: the snapshot, links and the Live Activity payload.
         .target(name: "GumboShared", swiftSettings: settings),
         // Models, indexing, the server, playback, downloads, profiles and iCloud sync.
-        .target(name: "GumboCore", dependencies: ["GumboShared"], swiftSettings: settings),
+        .target(name: "GumboCore", dependencies: [
+            "GumboShared",
+            .product(name: "GumboSMB", package: "GumboSMB", condition: .when(platforms: [.iOS, .macOS, .tvOS])),
+        ], resources: [.copy("Resources/ThirdPartyNotices.txt")], swiftSettings: settings),
         .testTarget(name: "GumboCoreTests", dependencies: ["GumboCore"], swiftSettings: settings),
     ]
 )

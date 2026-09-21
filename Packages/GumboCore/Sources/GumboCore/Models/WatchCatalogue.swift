@@ -351,17 +351,80 @@ public nonisolated struct WatchCredentials: Codable, Hashable, Sendable {
     public var account: String
     public var password: String
     public var driveID: String?
+    /// Absent in the original DSM-only protocol. Unknown versions must never fall back to DSM.
+    public var protocolVersion: Int?
+    public var provider: ProviderConfiguration?
 
-    public init(baseURL: URL, account: String, password: String, driveID: String? = nil) {
+    public init(baseURL: URL, account: String, password: String, driveID: String? = nil, provider: ProviderConfiguration? = nil) {
         self.baseURL = baseURL
         self.account = account
         self.password = password
         self.driveID = driveID
+        self.provider = provider
+        protocolVersion = provider == nil ? nil : 2
+    }
+
+    public var providerKind: NASProviderKind? {
+        if protocolVersion == nil, provider == nil { return .synology }
+        guard protocolVersion == 2, let provider, provider.endpoint == baseURL else { return nil }
+        return provider.kind
+    }
+
+    /// SMB is a phone relay descriptor: account names and secrets must not cross to Watch.
+    public var isUsable: Bool {
+        guard let driveID, !driveID.isEmpty, let kind = providerKind else { return false }
+        switch kind {
+        case .smb: return account.isEmpty && password.isEmpty
+        case .webDAV:
+            return !account.isEmpty && !password.isEmpty && provider?.sourceID(account: account) == driveID
+        case .synology: return !account.isEmpty && !password.isEmpty && NASOrigin(url: baseURL) != nil
+        }
     }
 
     public func matches(_ playlist: WatchPlaylist) -> Bool {
-        guard let driveID, !driveID.isEmpty else { return false }
+        guard isUsable, let driveID else { return false }
         return driveID == playlist.driveID
+    }
+
+    public func permitsWebDAVDownload(original: URL?, current: URL?) -> Bool {
+        guard isUsable, providerKind == .webDAV, let original, original == current,
+              let scope = try? WebDAVPathScope(baseURL: baseURL),
+              (try? scope.path(for: original.absoluteString, relativeTo: baseURL)) != nil else { return false }
+        return true
+    }
+}
+
+/// The phone resolves membership and paths from its own current catalogue, never from request paths.
+public nonisolated struct WatchAudioRelayRequest: Codable, Equatable, Sendable {
+    public let version: Int
+    public let playlistID: String
+    public let job: WatchDownloadJob
+
+    public init(playlist: WatchPlaylist, job: WatchDownloadJob) {
+        version = 2
+        playlistID = playlist.id
+        self.job = job
+    }
+
+    public var encoded: Data? { try? JSONEncoder().encode(self) }
+
+    public static func decode(_ data: Data?) -> Self? {
+        guard let data, data.count <= 16_384, let value = try? JSONDecoder().decode(Self.self, from: data),
+              value.version == 2, WatchDownloadJob.decode(value.job.encoded) == value.job else { return nil }
+        return value
+    }
+
+    public func resolve(in catalogue: WatchCatalogue) -> (playlist: WatchPlaylist, track: WatchTrack)? {
+        guard version == 2,
+              let playlist = catalogue.playlists.first(where: { $0.id == playlistID && $0.cacheID == job.playlistKey }),
+              let track = playlist.tracks.first(where: { $0.id == job.trackID }),
+              WatchDownloadJob(playlist: playlist, track: track, generation: job.generation) == job,
+              !catalogue.deletedCacheKeys.contains((job.fileName as NSString).deletingPathExtension) else { return nil }
+        return (playlist, track)
+    }
+
+    public func isCurrent(in catalogue: WatchCatalogue, manifest: WatchDownloadManifest?) -> Bool {
+        resolve(in: catalogue) != nil && manifest?.generation == job.generation && manifest?.desired.contains(job.trackID) == true
     }
 }
 

@@ -1,16 +1,21 @@
 import Foundation
 import Network
 
-/// A DSM server the user can sign in to: found on the network or typed in.
+/// A server or protocol hint found on the network or entered by the user.
 public nonisolated struct DiscoveredServer: Identifiable, Hashable, Sendable {
     public let name: String
     public let baseURL: URL
     public let model: String?
+    public let provider: ProviderConfiguration?
+    public let providerHint: NASProviderKind?
+    public var providerKind: NASProviderKind { provider?.kind ?? providerHint ?? .synology }
 
-    public init(name: String, baseURL: URL, model: String?) {
+    public init(name: String, baseURL: URL, model: String?, provider: ProviderConfiguration? = nil, providerHint: NASProviderKind? = nil) {
         self.name = name
         self.baseURL = baseURL
         self.model = model
+        self.provider = provider
+        self.providerHint = providerHint
     }
 
     /// Discovery suggests HTTPS. A service advertisement never grants permission to use HTTP.
@@ -22,12 +27,12 @@ public nonisolated struct DiscoveredServer: Identifiable, Hashable, Sendable {
         self.init(name: name, baseURL: components.url!, model: model)
     }
 
-    public var id: String { baseURL.absoluteString }
+    public var id: String { provider?.sourceID(account: "") ?? "\(providerKind.rawValue):\(baseURL.absoluteString)" }
     public var host: String { baseURL.host() ?? "" }
     public var address: String { NASOrigin(url: baseURL)?.identifier ?? baseURL.absoluteString }
 }
 
-/// Browses Bonjour for Synology devices and resolves them to host and port.
+/// Bonjour supplies connection hints, never authentication or permission to weaken transport.
 @Observable
 public final class ServerDiscovery {
     public private(set) var servers: [DiscoveredServer] = []
@@ -48,7 +53,7 @@ public final class ServerDiscovery {
         stop()
         isBrowsing = true
         let generation = attempts.generation
-        for type in ["_http._tcp", "_smb._tcp"] {
+        for type in ["_http._tcp", "_https._tcp", "_smb._tcp", "_webdavs._tcp"] {
             let parameters = NWParameters.tcp
             parameters.includePeerToPeer = false
             let browser = NWBrowser(for: .bonjourWithTXTRecord(type: type, domain: nil), using: parameters)
@@ -82,28 +87,16 @@ public final class ServerDiscovery {
     }
 
     private func consider(_ candidates: [Candidate]) {
-        for candidate in candidates where looksLikeSynology(candidate) {
+        for candidate in candidates where DiscoveryService.provider(type: candidate.type, name: candidate.name, txt: candidate.txt) != nil {
             let key = candidate.type + candidate.name
             guard let token = attempts.begin(key) else { continue }
             resolve(candidate, key: key, token: token)
         }
     }
 
-    private func looksLikeSynology(_ candidate: Candidate) -> Bool {
-        let vendor = (candidate.txt["vendor"] ?? candidate.txt["manufacturer"] ?? "").lowercased()
-        let name = candidate.name.lowercased()
-        return vendor.contains("synology")
-            || name.contains("synology")
-            || name.contains("diskstation")
-            || name.range(of: #"\bds\d{3,4}"#, options: .regularExpression) != nil
-    }
-
     /// Opens a short-lived connection to learn the numeric host and port behind a Bonjour name.
     private func resolve(_ candidate: Candidate, key: String, token: UUID) {
         let parameters = NWParameters.tcp
-        if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = .v4
-        }
         let connection = NWConnection(to: candidate.endpoint, using: parameters)
         resolutions[key] = connection
         connection.stateUpdateHandler = { [weak self] state in
@@ -119,16 +112,14 @@ public final class ServerDiscovery {
                     }
                     resolved = (hostText, Int(port.rawValue))
                 }
-                let model = candidate.txt["model"]
                 let name = candidate.name
                 let type = candidate.type
                 Task { @MainActor [weak self] in
                     guard let self, self.finish(key, token: token), let (host, port) = resolved else { return }
-                    // SMB tells us the host only; DSM's web API lives on 5000.
-                    let dsmPort = type.hasPrefix("_smb") ? 5000 : port
-                    let server = DiscoveredServer(name: model.map { "\(name) (\($0))" } ?? name, host: host.replacingOccurrences(of: "%en0", with: ""), port: dsmPort, model: model)
-                    if !servers.contains(where: { $0.host == server.host }) {
+                    guard let server = DiscoveryService.server(name: name, type: type, txt: candidate.txt, host: host, port: port) else { return }
+                    if !servers.contains(where: { $0.id == server.id }) {
                         servers.append(server)
+                        servers.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                     }
                 }
             case .failed, .cancelled:
@@ -167,5 +158,37 @@ nonisolated struct DiscoveryAttempts {
         guard pending[key] == token else { return false }
         pending[key] = nil
         return true
+    }
+}
+
+/// Pure discovery policy: a generic SMB advertisement must never be reinterpreted as DSM.
+nonisolated enum DiscoveryService {
+    static func provider(type: String, name: String, txt: [String: String]) -> NASProviderKind? {
+        let type = type.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+        if type == "_smb._tcp" { return .smb }
+        if type == "_webdavs._tcp" { return .webDAV }
+        guard type == "_http._tcp" || type == "_https._tcp" else { return nil }
+        let vendor = (txt["vendor"] ?? txt["manufacturer"] ?? "").lowercased()
+        let name = name.lowercased()
+        return vendor.contains("synology") || name.contains("synology") || name.contains("diskstation")
+            || name.range(of: #"\bds\d{3,4}"#, options: .regularExpression) != nil ? .synology : nil
+    }
+
+    static func server(name: String, type: String, txt: [String: String], host: String, port: Int) -> DiscoveredServer? {
+        guard let kind = provider(type: type, name: name, txt: txt), (1...65535).contains(port) else { return nil }
+        var components = URLComponents()
+        components.scheme = kind == .smb ? "smb" : "https"
+        components.host = host
+        components.port = kind == .synology ? (port == 5000 ? 5001 : (port == 80 ? 443 : port)) : port
+        if kind == .webDAV {
+            let path = txt["path"] ?? "/"
+            // Only a path hint is accepted. Never resolve an advertised URL onto another host.
+            guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains("\\"),
+                  !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+                  !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+            components.path = path
+        }
+        guard let url = components.url else { return nil }
+        return DiscoveredServer(name: name, baseURL: url, model: txt["model"], providerHint: kind)
     }
 }

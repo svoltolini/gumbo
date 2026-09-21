@@ -1,0 +1,37 @@
+services:
+  tags:
+    build: .
+    user: "${GUMBO_UID:?Set the music owner UID}:${GUMBO_GID:?Set the music group GID}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 512m
+    cpus: 1
+    init: true
+    stop_grace_period: 45s
+    ports:
+      # Bind to one explicitly chosen private interface; never publish this to the internet.
+      - "${GUMBO_LISTEN_IP:-127.0.0.1}:8443:8443"
+    volumes:
+      - type: bind
+        source: ${GUMBO_MUSIC_DIRECTORY:?Set only the intended music folder}
+        target: /music
+      - type: bind
+        source: ${GUMBO_STATE_DIRECTORY:?Create a private writable state folder}
+        target: /state
+      - type: bind
+        source: ${GUMBO_TOKEN_PATH:?Set a private token file}
+        target: /run/secrets/token
+        read_only: true
+      - type: bind
+        source: ${GUMBO_CERTIFICATE_PATH:?Set a trusted TLS certificate}
+        target: /run/secrets/cert.pem
+        read_only: true
+      - type: bind
+        source: ${GUMBO_PRIVATE_KEY_PATH:?Set the TLS private key}
+        target: /run/secrets/key.pem
+        read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    restart: unless-stopped

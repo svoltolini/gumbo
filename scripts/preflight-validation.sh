@@ -110,30 +110,19 @@ check_privacy_manifest "GumboTV" "TV"
 section "Export Compliance (ITSAppUsesNonExemptEncryption)"
 
 check_export_compliance() {
-    local file="$PROJECT_ROOT/project.yml"
     local target=$1
     local is_embedded=${2:-false}
-    
-    # Search in the target's section for the encryption declaration
-    if grep -A 100 "^  $target:" "$file" | grep -q "ITSAppUsesNonExemptEncryption: false"; then
-        pass "$target declares non-exempt encryption"
+    local plist_path="$PROJECT_ROOT/$target/Info.plist"
+    local declaration=""
+    if [[ -f "$plist_path" ]]; then
+        declaration=$(/usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$plist_path" 2>/dev/null || true)
+    fi
+    if [[ "$declaration" == "false" || "$declaration" == "true" ]]; then
+        pass "$target has an explicit encryption declaration; confirm it matches the current binary before upload"
+    elif [[ "$is_embedded" == "true" ]]; then
+        warn "$target embedded extension uses the parent app's export review"
     else
-        # Also check the Info.plist directly if it exists
-        local plist_path=""
-        case $target in
-            Gumbo) plist_path="$PROJECT_ROOT/Gumbo/Info.plist" ;;
-            GumboWatch) plist_path="$PROJECT_ROOT/GumboWatch/Info.plist" ;;
-            GumboMac) plist_path="$PROJECT_ROOT/GumboMac/Info.plist" ;;
-            GumboTV) plist_path="$PROJECT_ROOT/GumboTV/Info.plist" ;;
-        esac
-        
-        if [[ -n "$plist_path" && -f "$plist_path" ]] && grep -q "ITSAppUsesNonExemptEncryption" "$plist_path"; then
-            pass "$target declares non-exempt encryption (in Info.plist)"
-        elif [[ "$is_embedded" == "true" ]]; then
-            warn "$target embedded extension inherits from parent app"
-        else
-            fail "$target missing or incorrect ITSAppUsesNonExemptEncryption"
-        fi
+        fail "$target encryption declaration pending: complete App Store Connect review for the new SMB crypto before upload (docs/SMB-DEPENDENCY.md)"
     fi
 }
 

@@ -1,0 +1,6 @@
+/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
+ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
+module CGumboSMB [system] [extern_c] {
+    header "GumboSMB.h"
+    export *
+}

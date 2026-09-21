@@ -12,6 +12,12 @@ public nonisolated struct MusicFileInspection: Identifiable, Sendable {
     public let explanation: String
     public let size: Int64?
     public let modified: Date?
+    public let version: String?
+    public init(track: Track, sourceID: String, condition: MusicFileCondition, explanation: String,
+                size: Int64?, modified: Date?, version: String? = nil) {
+        self.track = track; self.sourceID = sourceID; self.condition = condition
+        self.explanation = explanation; self.size = size; self.modified = modified; self.version = version
+    }
     public var id: String { track.id }
     public var canDelete: Bool { condition == .damaged && size != nil && modified != nil }
 }
@@ -29,11 +35,11 @@ public nonisolated enum MusicFileInspector {
         track.path != nil && (track.duration <= 0 || (!track.isEnriched && (track.enrichAttempts ?? 0) >= 3))
     }
 
-    @concurrent public static func inspect(_ track: Track, drive: any WritableRemoteDrive, now: Date = .now) async -> MusicFileInspection {
+    @concurrent public static func inspect(_ track: Track, drive: any RemoteFileDrive, now: Date = .now) async -> MusicFileInspection {
         var observed: RemoteEntry?
         func result(_ condition: MusicFileCondition, _ explanation: String) -> MusicFileInspection {
             MusicFileInspection(track: track, sourceID: drive.id, condition: condition,
-                                explanation: explanation, size: observed?.size, modified: observed?.modified)
+                                explanation: explanation, size: observed?.size, modified: observed?.modified, version: observed?.version)
         }
         do {
             try Task.checkCancellation()
@@ -55,7 +61,7 @@ public nonisolated enum MusicFileInspector {
                 finding = (.unsupported, "This format needs a separate audio check. A playback error does not prove the file is damaged.")
             }
             let current = try await drive.info(path)
-            guard !current.isDirectory, current.size == entry.size, current.modified == entry.modified else {
+            guard current.sameVersion(as: entry) else {
                 return result(.changing, "The file changed during the check. Let the download or conversion finish.")
             }
             return result(finding.0, finding.1)
@@ -64,7 +70,7 @@ public nonisolated enum MusicFileInspector {
         }
     }
 
-    private static func inspectMP4(_ path: String, size: Int64, drive: any WritableRemoteDrive) async throws -> (MusicFileCondition, String) {
+    private static func inspectMP4(_ path: String, size: Int64, drive: any RemoteFileDrive) async throws -> (MusicFileCondition, String) {
         func read(_ range: Range<Int64>) async throws -> Data {
             let bounded = min(size, range.lowerBound)..<min(size, range.upperBound)
             guard !bounded.isEmpty else { return Data() }
@@ -117,17 +123,26 @@ public nonisolated enum MusicFileInspector {
     /// compare-and-delete API; this version check narrows, but cannot eliminate, a server-side race.
     public static func deleteReviewed(_ finding: MusicFileInspection, drive: any WritableRemoteDrive,
                                       authorized: @escaping @MainActor @Sendable () -> Bool) async throws {
+        guard drive.capabilities.contains(.delete) else { throw RemoteWriteError.unsupported }
         guard finding.canDelete, finding.sourceID == drive.id, let path = finding.track.path else {
             throw RemoteWriteError.changed
         }
         try Task.checkCancellation()
         guard await authorized() else { throw MetadataWriteError.notAuthorized }
         let current = await inspect(finding.track, drive: drive)
-        guard current.canDelete, current.size == finding.size, current.modified == finding.modified else {
+        guard current.canDelete, current.size == finding.size, current.modified == finding.modified,
+              current.version == finding.version else {
             throw RemoteWriteError.changed
         }
         try Task.checkCancellation()
         guard await authorized() else { throw MetadataWriteError.notAuthorized }
-        try await drive.delete(path)
+        guard drive.capabilities.contains(.delete) else { throw RemoteWriteError.unsupported }
+        // A Stop after submission must not discard an acknowledgement for a real NAS deletion.
+        // Recheck authorization inside the independent operation before it starts.
+        try await Task {
+            guard await authorized() else { throw MetadataWriteError.notAuthorized }
+            guard drive.capabilities.contains(.delete) else { throw RemoteWriteError.unsupported }
+            try await drive.delete(path)
+        }.value
     }
 }

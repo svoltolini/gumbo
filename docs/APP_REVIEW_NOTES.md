@@ -92,12 +92,11 @@ The owner can provide temporary demo NAS credentials upon request. Contact infor
 
 ## Export compliance
 
-`ITSAppUsesNonExemptEncryption` is set to `false` for all targets. Gumbo uses only:
-- Apple-provided HTTPS/TLS for NAS and iCloud connections
-- Apple-provided CloudKit encryption
-- Apple Keychain for credential storage
+The provider implementation adds dynamically linked libsmb2 on iOS, macOS and tvOS. It includes third-party cryptographic code for standard SMB signing/authentication/encryption; the prior statement that all encryption comes from Apple's operating system no longer describes these builds.
 
-No custom or non-exempt encryption algorithms are implemented.
+The automatic `ITSAppUsesNonExemptEncryption=false` answer is therefore omitted for these three targets pending the App Store Connect encryption questionnaire and any required documentation. This is an explicit distribution gate, including TestFlight. Do not reuse the earlier build's encryption declaration without reassessing the changed binary. Watch uses Apple HTTPS and WatchConnectivity and does not link libsmb2.
+
+References: [Apple export compliance overview](https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance), [encryption documentation requirements](https://developer.apple.com/help/app-store-connect/reference/export-compliance-documentation-for-encryption/), and [SMB dependency/distribution record](SMB-DEPENDENCY.md). This engineering record does not make an export-law determination on the owner's behalf.
 
 ## Contact
 

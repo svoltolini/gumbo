@@ -4,6 +4,7 @@ import SwiftUI
 struct ServerDiscoveryView: View {
     @Environment(AppModel.self) private var model
     @State private var isEnteringAddress = false
+    @State private var suggestedServer: DiscoveredServer?
     @State private var isReadingGuide = false
     @State private var hasWaited = false
 
@@ -21,7 +22,7 @@ struct ServerDiscoveryView: View {
             hasWaited = true
         }
         .sheet(isPresented: $isEnteringAddress) {
-            ConnectSheet()
+            ConnectSheet(server: suggestedServer)
         }
         .sheet(isPresented: $isReadingGuide) {
             RemoteAccessGuide()
@@ -33,9 +34,14 @@ struct ServerDiscoveryView: View {
             Section {
                 ForEach(servers) { server in
                     Button {
-                        model.select(server)
+                        if server.providerKind == .synology {
+                            model.select(server)
+                        } else {
+                            suggestedServer = server
+                            isEnteringAddress = true
+                        }
                     } label: {
-                        ServerRow(title: server.name, subtitle: server.address, badge: "LAN")
+                        ServerRow(title: server.name, subtitle: server.address, badge: server.providerKind.title)
                     }
                 }
                 if servers.isEmpty, hasWaited {
@@ -49,14 +55,15 @@ struct ServerDiscoveryView: View {
                     .padding(.vertical, 6)
                 }
                 Button {
+                    suggestedServer = nil
                     isEnteringAddress = true
                 } label: {
-                    ServerRow(title: "Enter an address", subtitle: "A DDNS name such as myds.synology.me, or an address at home", badge: nil, symbol: "globe")
+                    ServerRow(title: "Enter an address", subtitle: "Your NAS name, IP address or WebDAV address", badge: nil, symbol: "globe")
                 }
                 Button {
                     isReadingGuide = true
                 } label: {
-                    ServerRow(title: "Reach your NAS from anywhere", subtitle: "A four-step setup in DSM, done once", badge: nil, symbol: "book")
+                    ServerRow(title: "Connecting your NAS", subtitle: "Choose a connection at home or away", badge: nil, symbol: "book")
                 }
             } header: {
                 HStack(spacing: 8) {

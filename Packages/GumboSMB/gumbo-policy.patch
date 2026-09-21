@@ -1,0 +1,424 @@
+--- /dev/null
++++ b/include/GumboSMB.h
+@@ -0,0 +1,8 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
++#include <stdint.h>
++#include <time.h>
++#include <stddef.h>
++#include <smb2/smb2.h>
++#include <smb2/libsmb2.h>
++#include "gumbo-smb-policy.h"
+--- /dev/null
++++ b/include/gumbo-smb-policy.h
+@@ -0,0 +1,15 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
++/* Gumbo policy additions, Copyright 2026 Samuel Voltolini. LGPL-2.1-or-later.
++ * These checks supplement the pinned upstream signature/AEAD validation. */
++#ifndef GUMBO_SMB_POLICY_H
++#define GUMBO_SMB_POLICY_H
++#include <stdint.h>
++struct smb2_context;
++void gumbo_smb2_require_secure_session(struct smb2_context *context, int require_encryption);
++void gumbo_smb2_set_cancellation(struct smb2_context *context, int (*callback)(void *), void *data);
++int gumbo_smb2_directory_budget(uint64_t entries, uint64_t pages, uint64_t bytes, uint64_t elapsed_seconds);
++int gumbo_smb2_validate_session(uint16_t session_flags);
++int gumbo_smb2_validate_packet(int require_encryption, int require_signing,
++                              uint16_t command, int encrypted, uint32_t flags, uint32_t status);
++#endif
+--- a/include/libsmb2-private.h
++++ b/include/libsmb2-private.h
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -160,6 +162,12 @@
+ 
+ struct smb2_context {
+ 
++        /* Gumbo: opt-in strict authenticated, optionally encrypted client policy. */
++        int gumbo_require_authenticated;
++        int gumbo_require_encryption;
++        int (*gumbo_should_cancel)(void *);
++        void *gumbo_cancellation_data;
++
+         t_socket fd;
+ 
+         struct smb2_server *owning_server;
+@@ -389,6 +397,7 @@
+ };
+ 
+ struct smb2dir {
++        uint64_t gumbo_entries, gumbo_pages, gumbo_bytes, gumbo_started;
+         smb2_command_cb cb;
+         void (*free_cb_data)(void *);
+         void *cb_data;
+--- a/include/module.modulemap
++++ b/include/module.modulemap
+@@ -1,21 +1,6 @@
+-module SMB2 [system] [extern_c] {
+-    module LibSMB2 {
+-        header "apple/config.h"
+-        header "smb2/smb2-errors.h"
+-        header "smb2/smb2.h"
+-        header "smb2/libsmb2.h"
+-		header "dcerpc/dcerpc.h"
+-		header "dcerpc/dcerpc-lsa.h"
+-        header "dcerpc/dcerpc-srvsvc.h"
+-    }
+-    
+-    module Internal {
+-        header "libsmb2-private.h"
+-    }
+-    
+-    explicit module Raw {
+-        header "smb2/libsmb2-raw.h"
+-    }
+-    
+-    export SMB2
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
++module CGumboSMB [system] [extern_c] {
++    header "GumboSMB.h"
++    export *
+ }
+--- /dev/null
++++ b/lib/gumbo-smb-policy.c
+@@ -0,0 +1,31 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
++/* Copyright 2026 Samuel Voltolini. LGPL-2.1-or-later. */
++#include <stdint.h>
++#include <time.h>
++#include <errno.h>
++#include "smb2/smb2.h"
++#include "gumbo-smb-policy.h"
++
++int gumbo_smb2_validate_session(uint16_t flags)
++{
++    return (flags & (SMB2_SESSION_FLAG_IS_GUEST | SMB2_SESSION_FLAG_IS_NULL)) ? -EACCES : 0;
++}
++
++int gumbo_smb2_validate_packet(int encryption, int signing, uint16_t command,
++                              int encrypted, uint32_t flags, uint32_t status)
++{
++    /* The session key is not available for NEGOTIATE or the initial SETUP.
++     * Final SETUP authentication is enforced in session_setup_cb. */
++    if (command == SMB2_NEGOTIATE || command == SMB2_SESSION_SETUP) return 0;
++    if (encryption && !encrypted) return -EACCES;
++    /* Interim STATUS_PENDING is not application data and may be unsigned.
++     * Its eventual data/completion response must still authenticate. */
++    if (signing && !encrypted && status != SMB2_STATUS_PENDING && !(flags & SMB2_FLAGS_SIGNED)) return -EACCES;
++    return 0;
++}
++
++int gumbo_smb2_directory_budget(uint64_t entries, uint64_t pages, uint64_t bytes, uint64_t elapsed_seconds)
++{
++        return entries <= 100000 && pages <= 4096 && bytes <= 64ULL * 1024 * 1024 && elapsed_seconds < 60 ? 0 : -EOVERFLOW;
++}
+--- a/lib/init.c
++++ b/lib/init.c
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -950,3 +952,20 @@
+ }
+ #endif
+ 
++
++/* Gumbo policy entry point; never silently negotiate guest or weaker protection. */
++void gumbo_smb2_require_secure_session(struct smb2_context *context, int encrypted)
++{
++        context->gumbo_require_authenticated = 1;
++        context->gumbo_require_encryption = encrypted != 0;
++        smb2_set_security_mode(context, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED);
++        smb2_set_sign(context, 1);
++        if (encrypted) smb2_set_seal(context, 1);
++        smb2_set_version(context, encrypted ? SMB2_VERSION_ANY3 : SMB2_VERSION_ANY);
++}
++
++void gumbo_smb2_set_cancellation(struct smb2_context *context, int (*callback)(void *), void *data)
++{
++        context->gumbo_should_cancel = callback;
++        context->gumbo_cancellation_data = data;
++}
+--- a/lib/libsmb2.c
++++ b/lib/libsmb2.c
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -58,6 +60,7 @@
+ #endif
+ 
+ #include <errno.h>
++#include <time.h>
+ #include <stdio.h>
+ 
+ #ifdef HAVE_SYS_POLL_H
+@@ -102,6 +105,7 @@
+ #include "libsmb2.h"
+ #include "libsmb2-raw.h"
+ #include "libsmb2-private.h"
++#include "gumbo-smb-policy.h"
+ #include "smb2-signing.h"
+ #include "portable-endian.h"
+ #include "ntlmssp.h"
+@@ -355,6 +359,32 @@
+         }
+ }
+ 
++static uint64_t
++gumbo_monotonic_seconds(void)
++{
++        struct timespec value;
++        return clock_gettime(CLOCK_MONOTONIC, &value) == 0 ? (uint64_t)value.tv_sec : 0;
++}
++
++static int
++gumbo_directory_check(struct smb2_context *smb2, struct smb2dir *dir, uint64_t extra_entries)
++{
++        uint64_t now;
++        if (!smb2->gumbo_require_authenticated) return 0;
++        if (smb2->gumbo_should_cancel && smb2->gumbo_should_cancel(smb2->gumbo_cancellation_data)) {
++                smb2_set_error(smb2, "Directory request cancelled");
++                return -ECANCELED;
++        }
++        now = gumbo_monotonic_seconds();
++        if (now == 0 || now < dir->gumbo_started ||
++            gumbo_smb2_directory_budget(dir->gumbo_entries + extra_entries, dir->gumbo_pages,
++                                       dir->gumbo_bytes, now - dir->gumbo_started) != 0) {
++                smb2_set_error(smb2, "Directory exceeded its entry, byte, page or time limit");
++                return -EOVERFLOW;
++        }
++        return 0;
++}
++
+ static int
+ decode_dirents(struct smb2_context *smb2, struct smb2dir *dir,
+                struct smb2_iovec *vec)
+@@ -372,20 +402,20 @@
+                         return -1;
+                 }
+ 
++                int budget = gumbo_directory_check(smb2, dir, 1);
++                if (budget != 0) return budget;
++                tmp_vec.buf = &vec->buf[offset];
++                tmp_vec.len = vec->len - offset;
++                memset(&fs, 0, sizeof(fs));
++                if (smb2_decode_fileidfulldirectoryinformation(smb2, &fs, &tmp_vec) != 0) return -EPROTO;
+                 ent = calloc(1, sizeof(struct smb2_dirent_internal));
+                 if (ent == NULL) {
+-                        smb2_set_error(smb2, "Failed to allocate "
+-                                       "dirent_internal");
+-                        return -1;
++                        free(discard_const(fs.name));
++                        smb2_set_error(smb2, "Failed to allocate dirent_internal");
++                        return -ENOMEM;
+                 }
+                 SMB2_LIST_ADD(&dir->entries, ent);
+-
+-
+-                tmp_vec.buf = &vec->buf[offset];
+-                tmp_vec.len = vec->len - offset;
+-
+-                smb2_decode_fileidfulldirectoryinformation(smb2, &fs,
+-                                                           &tmp_vec);
++                dir->gumbo_entries++;
+                 /* steal the name */
+                 ent->dirent.name = fs.name;
+                 /*
+@@ -450,8 +480,12 @@
+                 vec.buf = rep->output_buffer;
+                 vec.len = rep->output_buffer_length;
+ 
+-                if (decode_dirents(smb2, dir, &vec) < 0) {
+-                        dir->cb(smb2, -ENOMEM, NULL, dir->cb_data);
++                dir->gumbo_pages++;
++                dir->gumbo_bytes += vec.len;
++                int result = gumbo_directory_check(smb2, dir, 0);
++                if (result == 0) result = decode_dirents(smb2, dir, &vec);
++                if (result < 0) {
++                        dir->cb(smb2, result, NULL, dir->cb_data);
+                         free_smb2dir(smb2, dir);
+                         return;
+                 }
+@@ -562,6 +596,7 @@
+         }
+         dir->cb = cb;
+         dir->cb_data = cb_data;
++        dir->gumbo_started = gumbo_monotonic_seconds();
+ 
+         memset(&req, 0, sizeof(struct smb2_create_request));
+         req.requested_oplock_level = SMB2_OPLOCK_LEVEL_NONE;
+@@ -795,6 +830,14 @@
+                 return;
+         }
+ 
++        if (smb2->gumbo_require_authenticated && gumbo_smb2_validate_session(rep->session_flags) != 0) {
++                smb2_close_context(smb2);
++                smb2_set_error(smb2, "Guest or anonymous SMB session refused");
++                c_data->cb(smb2, -EACCES, NULL, c_data->cb_data);
++                free_c_data(smb2, c_data);
++                return;
++        }
++
+         if (smb2->seal_requested != SMB2_SEAL_NONE &&
+             (rep->session_flags & SMB2_SESSION_FLAG_IS_ENCRYPT_DATA)) {
+                 smb2->seal = 1;
+@@ -841,7 +884,7 @@
+                 if (smb2->session_key == NULL || memcmp(smb2->session_key, zero_key, SMB2_KEY_SIZE) == 0) {
+                         have_valid_session_key = 0;
+                 }
+-                if (smb2->sign && have_valid_session_key == 0) {
++                if ((smb2->sign || smb2->gumbo_require_authenticated) && have_valid_session_key == 0) {
+                         smb2_close_context(smb2);
+                         smb2_set_error(smb2, "Signing required by server. Session "
+                                        "Key is not available %s",
+@@ -861,7 +904,7 @@
+                  * signature to check" would let an attacker on the path strip
+                  * it and skip verification. See MS-SMB2 3.2.5.3.1.
+                  */
+-                if (smb2->sign && !(smb2->hdr.flags & SMB2_FLAGS_SIGNED)) {
++                if ((smb2->sign || smb2->gumbo_require_authenticated) && !(smb2->hdr.flags & SMB2_FLAGS_SIGNED)) {
+                         smb2_close_context(smb2);
+                         smb2_set_error(smb2, "Session setup reply is not "
+                                        "signed but signing is required");
+--- a/lib/smb2-cmd-query-directory.c
++++ b/lib/smb2-cmd-query-directory.c
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: reject incomplete/unsafe directory records before decoding names.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -59,17 +61,20 @@
+     struct smb2_fileidfulldirectoryinformation *fs,
+     struct smb2_iovec *vec)
+ {
+-        uint32_t name_len;
++        uint32_t name_len, next;
+         uint64_t t;
++        memset(fs, 0, sizeof(*fs));
+ 
+         /* Make sure the name fits before end of vector.
+          * As the name is the final part of this blob this guarantees
+          * that all other fields also fit within the remainder of the
+          * vector.
+          */
+-        smb2_get_uint32(vec, 60, &name_len);
+-        if (name_len > 80 + name_len ||
+-            80 + name_len > vec->len) {
++        if (vec == NULL || vec->buf == NULL || vec->len < 80 ||
++            smb2_get_uint32(vec, 60, &name_len) != 0 ||
++            smb2_get_uint32(vec, 0, &next) != 0 ||
++            name_len == 0 || (name_len & 1) || name_len > vec->len - 80 ||
++            (next && ((next & 7) || next < 80 || name_len > next - 80 || next >= vec->len))) {
+                 smb2_set_error(smb2, "Malformed name in query.\n");
+                 return -1;
+         }
+@@ -82,7 +87,17 @@
+         smb2_get_uint32(vec, 64, &fs->ea_size);
+         smb2_get_uint64(vec, 72, &fs->file_id);
+ 
++        for (uint32_t i = 0; i < name_len; i += 2) {
++                if (vec->buf[80 + i] == 0 && vec->buf[81 + i] == 0) {
++                        smb2_set_error(smb2, "Embedded NUL in directory name");
++                        return -1;
++                }
++        }
+         fs->name = smb2_utf16_to_utf8((uint16_t *)(void *)&vec->buf[80], name_len / 2);
++        if (fs->name == NULL) {
++                smb2_set_error(smb2, "Invalid directory name");
++                return -1;
++        }
+ 
+         smb2_get_uint64(vec, 8, &t);
+         smb2_win_to_timeval(t, &fs->creation_time);
+--- a/lib/socket.c
++++ b/lib/socket.c
+@@ -1,3 +1,5 @@
++/* Modified for Gumbo on 2026-09-21: opt-in authenticated SMB policy and dynamic SwiftPM packaging.
++ * See Packages/GumboSMB/NOTICE.md and gumbo-policy.patch for source and license details. */
+ /* -*-  mode:c; tab-width:8; c-basic-offset:8; indent-tabs-mode:nil;  -*- */
+ /*
+    Copyright (C) 2016 by Ronnie Sahlberg <ronniesahlberg@gmail.com>
+@@ -108,6 +110,7 @@
+ #include "libsmb2.h"
+ #include "smb3-seal.h"
+ #include "libsmb2-private.h"
++#include "gumbo-smb-policy.h"
+ #include "portable-endian.h"
+ #include <errno.h>
+ 
+@@ -534,6 +537,34 @@
+                 else if (smb2_is_server(smb2) && (smb2->hdr.flags & SMB2_FLAGS_SERVER_TO_REDIR)) {
+                         smb2_set_error(smb2, "received non-request");
+                         return -1;
++                }
++                if (!smb2_is_server(smb2)) {
++                        struct smb2_pdu *expected = smb2_find_pdu(smb2,
++                                                        smb2->hdr.message_id);
++                        /* Reply bodies are decoded using the queued request.
++                         * Match its command before interpreting any payload or
++                         * granting the handshake authentication exemptions.
++                         * A wire NEGOTIATE label must never exempt a READ.
++                         * Do not attach/delist expected here: interim replies
++                         * leave it queued for the eventual completion.
++                         */
++                        if (expected && expected->header.command != smb2->hdr.command) {
++                                smb2_set_error(smb2, "Response command does not match queued request");
++                                return -1;
++                        }
++                        /* Check at the header boundary, including header-only
++                         * STATUS_PENDING replies which return before the shared
++                         * tail. Unknown replies and unsolicited notifications
++                         * cannot claim a queued handshake exemption.
++                         */
++                        if (smb2->gumbo_require_authenticated &&
++                            gumbo_smb2_validate_packet(smb2->gumbo_require_encryption, 1,
++                                      expected ? expected->header.command : SMB2_OPLOCK_BREAK,
++                                      smb2->enc != NULL,
++                                      smb2->hdr.flags, smb2->hdr.status) != 0) {
++                                smb2_set_error(smb2, "SMB response did not meet required protection");
++                                return -1;
++                        }
+                 }
+                 if (smb2->hdr.status == SMB2_STATUS_PENDING) {
+                         /* Pending. Just treat the rest of the data as
+@@ -883,6 +914,14 @@
+                 return -1;
+         }
+ 
++        if (smb2_is_server(smb2) && smb2->gumbo_require_authenticated &&
++            gumbo_smb2_validate_packet(smb2->gumbo_require_encryption, 1,
++                                      smb2->hdr.command, smb2->enc != NULL,
++                                      smb2->hdr.flags, smb2->hdr.status) != 0) {
++                smb2_set_error(smb2, "SMB response did not meet required protection");
++                return -1;
++        }
++
+         if (smb2->hdr.status == SMB2_STATUS_PENDING) {
+                 /* This was a pending command. Just ignore it and proceed
+                  * to read the next chain.
+@@ -920,9 +959,9 @@
+          * bypass signing entirely. MS-SMB2 3.2.5.1.3 requires us to drop
+          * such a message instead.
+          */
+-        if (smb2->sign &&
+-            (smb2->hdr.command != SMB2_NEGOTIATE) &&
+-            (smb2->hdr.command != SMB2_SESSION_SETUP) &&
++        if ((smb2->sign || smb2->gumbo_require_authenticated) &&
++            (pdu->header.command != SMB2_NEGOTIATE) &&
++            (pdu->header.command != SMB2_SESSION_SETUP) &&
+             !smb2->enc) {
+                 uint8_t signature[16] _U_;
+ 

@@ -3,6 +3,7 @@ import Testing
 @testable import GumboCore
 
 private actor AlbumDeletionDrive: WritableRemoteDrive {
+    nonisolated let capabilities: RemoteCapabilities = [.read, .ranges, .delete]
     nonisolated let id = "album-deletion-fixture"
     nonisolated let displayName = "Fixture NAS"
     var entries: [String: RemoteEntry]

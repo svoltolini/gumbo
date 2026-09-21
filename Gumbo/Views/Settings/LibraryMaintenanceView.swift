@@ -241,7 +241,7 @@ struct ProblemFilesView: View {
     @State private var confirmingDelete = false
 
     private var context: MaintenanceContext { MaintenanceContext(library, profiles) }
-    private var canStart: Bool { library.canMaintainFiles && !library.metadataWriter.isWriting && !library.isDeletingFiles && !isWorking }
+    private var canStart: Bool { library.canInspectFiles && !library.metadataWriter.isWriting && !library.isDeletingFiles && !isWorking }
     private var chosen: [MusicFileInspection] { findings.filter { $0.canDelete && selected.contains($0.id) } }
 
     var body: some View {
@@ -249,7 +249,7 @@ struct ProblemFilesView: View {
             Section {
                 Text("Check songs with missing playback information. Only empty files or confirmed MP4 structural damage can be selected for deletion. Connection errors, unfamiliar formats and recent files are kept.")
                 Button("Check Files") { inspectFiles() }.disabled(!canStart)
-                if !library.canMaintainFiles { Text("Connect as the library owner to check and change shared files.").font(.footnote) }
+                if !library.canInspectFiles { Text("Connect to a music server to check its files.").font(.footnote) }
             }
             if isWorking {
                 Section {
@@ -266,7 +266,7 @@ struct ProblemFilesView: View {
                         Text(finding.track.title).font(.headline)
                         Text(finding.track.path ?? "No file path").font(.caption).foregroundStyle(.secondary).selectableText()
                         Text(finding.explanation).font(.callout)
-                        if finding.canDelete {
+                        if finding.canDelete && library.canDeleteFiles {
                             Toggle("Select for deletion", isOn: Binding(
                                 get: { selected.contains(finding.id) },
                                 set: { if $0 { selected.insert(finding.id) } else { selected.remove(finding.id) } }
@@ -276,12 +276,12 @@ struct ProblemFilesView: View {
                     }
                 }
             }
-            if !chosen.isEmpty {
+            if !chosen.isEmpty && library.canDeleteFiles {
                 Section {
                     Button("Delete \(chosen.count) Files from NAS", role: .destructive) { confirmingDelete = true }
                         .disabled(!canStart)
                 } footer: {
-                    Text("Deletion removes the original files for all NAS users. Copies already downloaded to devices may remain. Gumbo cannot undo this.")
+                    Text("Deletion removes the original files for all NAS users. Other devices remove downloaded copies after a successful library refresh. Apple Watch updates when it syncs with iPhone. Gumbo cannot undo this.")
                 }
             }
             MaintenanceFailures(failures: failures)
@@ -306,7 +306,7 @@ struct ProblemFilesView: View {
     }
 
     private func inspectFiles() {
-        guard canStart, let drive = library.drive as? any WritableRemoteDrive else { return }
+        guard canStart, let drive = library.drive as? any RemoteFileDrive else { return }
         let candidates = library.tracks.filter(MusicFileInspector.needsInspection)
         let scope = context
         findings = []; selected = []; failures = []; summary = nil
@@ -336,7 +336,7 @@ struct ProblemFilesView: View {
     }
 
     private func deleteChosen() {
-        guard canStart else { return }
+        guard canStart, library.canDeleteFiles else { return }
         let review = chosen
         let scope = context
         isWorking = true

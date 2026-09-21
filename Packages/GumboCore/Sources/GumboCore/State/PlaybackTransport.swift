@@ -24,6 +24,7 @@ nonisolated enum PlaybackTransportStatus: Equatable, Sendable {
 final class AVPlaybackTransport: PlaybackTransport {
     private let player: AVPlayer
     private let item: AVPlayerItem
+    private let media: RemoteMediaAsset
     private var timeObserver: Any?
     private var notifications: [any NSObjectProtocol] = []
     private var observations: [NSKeyValueObservation] = []
@@ -51,8 +52,14 @@ final class AVPlaybackTransport: PlaybackTransport {
         set { player.volume = newValue }
     }
 
-    init(url: URL) {
-        item = AVPlayerItem(url: url)
+    convenience init(url: URL) { self.init(source: .url(url)) }
+
+    init(source: RemoteMediaSource) {
+        media = RemoteMediaAsset(source)
+        switch source {
+        case .url(let url): item = AVPlayerItem(url: url)
+        case .file: item = AVPlayerItem(asset: media.asset)
+        }
         player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
@@ -95,6 +102,7 @@ final class AVPlaybackTransport: PlaybackTransport {
         ended = nil
         player.pause()
         item.cancelPendingSeeks()
+        media.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         observations.removeAll()
