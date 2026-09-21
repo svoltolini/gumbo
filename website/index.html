@@ -34,8 +34,8 @@
   <link rel="icon" href="https://gumbo.one/favicon.ico" sizes="16x16 32x32 48x48" type="image/x-icon">
   <link rel="icon" href="https://gumbo.one/favicon.svg" sizes="any" type="image/svg+xml">
   <link rel="apple-touch-icon" href="https://gumbo.one/apple-touch-icon.png" sizes="180x180">
-  <link rel="stylesheet" href="styles.css">
-  <script src="site.js" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260921-2">
+  <script src="site.js?v=20260921-2" defer></script>
   <noscript><style>.site-header { position: relative; }</style></noscript>
 </head>
 <body>
@@ -65,16 +65,20 @@
   <header class="site-header">
     <nav class="nav container" aria-label="Main navigation">
       <a class="wordmark" href="./" aria-label="Gumbo home"><span>Gumbo</span></a>
+      <details class="product-menu" name="site-navigation">
+        <summary aria-label="Choose a Gumbo app, Music selected"><span>Music</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>
+        <div class="product-menu-panel">
+          <p class="product-menu-label">Apps by Gumbo</p>
+          <a href="./" aria-current="page"><img src="assets/logo.svg" width="44" height="44" alt=""><span><strong>Gumbo Music</strong><small>Available in beta</small></span></a>
+          <a href="film/"><img src="assets/film-logo.svg" width="44" height="44" alt=""><span><strong>Gumbo Film</strong><small>In development</small></span></a>
+        </div>
+      </details>
       <div class="nav-links"><a href="#devices">Devices</a><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a></div>
       <a class="button button-small header-beta" href="#beta" data-beta-link aria-describedby="header-beta-note beta-status">Join the beta <svg class="icon" aria-hidden="true"><use href="#arrow"/></svg></a>
-      <details class="mobile-menu">
+      <details class="mobile-menu" name="site-navigation">
         <summary aria-label="Section menu"><svg class="icon menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><svg class="icon close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></summary>
-        <div class="mobile-menu-links"><a href="#devices">Devices</a><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a></div>
+        <div class="mobile-menu-links"><a href="#devices">Devices</a><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a><a href="#beta" data-beta-link>Join the beta</a></div>
       </details>
-    </nav>
-    <nav class="product-nav container" aria-label="Gumbo products">
-      <a href="./" aria-current="page">Gumbo Music <span>Beta</span></a>
-      <a href="./film/">Gumbo Film <span>In development</span></a>
     </nav>
     <noscript>
       <p id="header-beta-note" class="no-script-note container">JavaScript is off. “Join the beta” takes you to beta details on this page. Enable JavaScript to open the TestFlight invitation.</p>
@@ -101,7 +105,7 @@
         <p class="hero-note">Current beta: Synology NAS with DSM 7 or later.<br> Now in beta · Check availability in TestFlight.</p>
       </div>
 
-      <figure class="product-preview" aria-label="Gumbo Music interfaces on Mac, iPhone and Apple Watch">
+      <figure class="product-preview" aria-label="Gumbo Music interface illustrations on Mac and iPhone">
         <div class="preview-glow" aria-hidden="true"></div>
         <!-- SCREENSHOT SLOT 1: replace .desktop-preview with an image of the Mac library.
              Keep class="desktop-preview product-screenshot" and add useful alt text. -->
@@ -140,9 +144,6 @@
           <div class="phone-bottom"><svg class="icon"><use href="#shuffle"/></svg><span>⌁</span><svg class="icon"><use href="#heart"/></svg></div>
           <span class="home-indicator"></span>
         </div>
-        <div class="watch-preview">
-          <div class="watch-screen"><img src="assets/gumbo-watch-playlists.png" width="416" height="496" alt="Gumbo Music on Apple Watch, showing sample playlists including Late shift and Sunday, slowly."></div>
-        </div>
       </figure>
     </section>
 
@@ -165,16 +166,21 @@
         <li><svg class="icon" aria-hidden="true"><use href="#tv"/></svg><span>Apple TV</span></li>
         <li><svg class="icon" aria-hidden="true"><use href="#watch"/></svg><span>Apple Watch</span></li>
       </ul>
+      <article class="watch-spotlight" aria-labelledby="watch-title">
+        <div class="watch-copy">
+          <p class="eyebrow">Apple Watch</p>
+          <h3 id="watch-title">A few favourites.<br><span class="soft-text">A little more freedom.</span></h3>
+          <p>Set up with your paired iPhone, sync playlists, then download songs to your Watch and listen offline with your phone left behind.</p>
+        </div>
+        <figure class="watch-app-preview">
+          <img src="assets/gumbo-watch-playlists.png" width="416" height="496" loading="lazy" alt="Gumbo Music on Apple Watch, showing sample playlists including Late shift and Sunday, slowly.">
+        </figure>
+      </article>
       <div class="device-grid">
         <article class="device-card">
           <svg class="icon" aria-hidden="true"><use href="#tv"/></svg>
           <p class="device-label">Apple TV</p><h3>Give your albums<br>the big screen.</h3>
           <p>Browse your collection with the Apple TV remote and stream straight from your NAS. A native app for a night in.</p>
-        </article>
-        <article class="device-card">
-          <svg class="icon" aria-hidden="true"><use href="#watch"/></svg>
-          <p class="device-label">Apple Watch</p><h3>A few favourites.<br>A little more freedom.</h3>
-          <p>Set up with your paired iPhone, sync playlists, then download songs to your Watch and listen offline with your phone left behind.</p>
         </article>
         <article class="device-card">
           <svg class="icon" aria-hidden="true"><use href="#car"/></svg>
