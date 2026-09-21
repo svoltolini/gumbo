@@ -1,8 +1,30 @@
 /* Progressive enhancement only: the content and section links work without JavaScript. */
 (() => {
   "use strict";
+  const menu = document.querySelector(".mobile-menu");
+  if (menu) {
+    const closeMenu = () => { menu.open = false; };
+    menu.querySelectorAll("a").forEach(link => {
+      link.addEventListener("click", closeMenu);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && menu.open) {
+        closeMenu();
+        menu.querySelector("summary").focus();
+      }
+    });
+    document.addEventListener("click", event => {
+      if (!menu.contains(event.target)) closeMenu();
+    });
+    menu.addEventListener("focusout", event => {
+      if (event.relatedTarget && !menu.contains(event.relatedTarget)) closeMenu();
+    });
+    window.matchMedia("(max-width: 760px)").addEventListener("change", closeMenu);
+  }
+
   const status = document.getElementById("beta-status");
   const links = document.querySelectorAll("[data-beta-link]");
+  if (!status || !links.length) return;
   let invitation = null;
 
   try {

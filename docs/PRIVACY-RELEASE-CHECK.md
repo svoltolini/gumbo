@@ -2,24 +2,30 @@
 
 This is an engineering inventory and publication checklist, not a claim that App Store privacy answers have been published.
 
+## Website policy source — 21 September 2026
+
+[`website/privacy/index.html`](../website/privacy/index.html) is the publication source for [gumbo.one/privacy/](https://gumbo.one/privacy/), covering the app and website. Production availability must be checked after deployment. The policy uses TestFlight's feedback/developer-contact route during the beta; an approved public support email and the developer's support-retention practices remain operational follow-up. This website work does not update App Store Connect privacy fields, tvOS policy text or app-level privacy answers.
+
 ## Previously verified store state (batch 4)
 
 This section records the previous app identity. It was not refreshed during the September 20 remediation and does not establish the current Gumbo App Store record or published privacy state. New-identity verification is tracked in [#119](https://github.com/svoltolini/gumbo/issues/119).
 
-App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b91431c1962`, en-GB localization `4f44c0ad-b6c9-47e9-85cb-cae23e2c7bb2`. `privacyPolicyUrl`, `privacyChoicesUrl` and `privacyPolicyText` were all null. The owner confirmed there is no public website or support contact yet. The API record is a preparation-for-submission record; this batch does not submit a public release.
+App Store Connect API: app `6811461121`, app info `67902bd2-bf96-476e-b090-3b91431c1962`, en-GB localization `4f44c0ad-b6c9-47e9-85cb-cae23e2c7bb2`. `privacyPolicyUrl`, `privacyChoicesUrl` and `privacyPolicyText` were all null. At that time, the owner confirmed there was no public website or support contact. The API record was a preparation-for-submission record; that batch did not submit a public release.
 
 ## Data flow inventory
 
 | Feature | Data and destination | Source evidence |
 | --- | --- | --- |
 | NAS sign-in and playback | Credentials, folder/media requests to the configured NAS; catalogue/downloads stored on device | `Networking/SynologyClient.swift`, `State/AppModel.swift`, `State/LibraryStore.swift`, `State/DownloadManager.swift` |
-| Optional genre lookup | User-started album and artist text queries to Apple music search; no audio, NAS paths or credentials; review before NAS tag writes | `Networking/GenreLookup.swift`, `LibraryMaintenanceView.swift` |
+| Optional genre lookup | User-started album and artist text queries, plus the device's country/region setting, to Apple music search; no audio, NAS paths or credentials; review before NAS tag writes | `Networking/GenreLookup.swift`, `LibraryMaintenanceView.swift` |
 | Shared-file maintenance | Owner-controlled reviewed genre edits and confirmed damaged-file deletion on the connected NAS; no Gumbo service receives files | `MetadataWriter.swift`, `MusicFileInspection.swift` |
 | Album artwork | NAS-folder images and embedded music pictures only; no external artwork search or image requests | `Indexing/CoverStore.swift`, source reads in `LibraryIndexer.swift` and `LibraryStore.swift`, `GumboShared/ArtworkPolicy.swift` |
 | Profile sync | Name, chosen photo, role, dates, Apple user-record association, PIN verification values; favourites, playlists, searches, recent plays and settings in private/family-shared CloudKit zone | `CloudSync.record(for:)`, `Models/Profile.swift`, `ProfileStateMerge.swift` |
 | Family connection | NAS address, names, account and music folder in family CloudKit record; selected Family Access password in `record.encryptedValues`; anyone with the share link can join | `CloudSync.record(for: FamilyInfo)` |
 | Watch and widgets | Watch playlist metadata, mosaic colour pairs, and the connection information needed for NAS downloads; no transferred cover image files. Widgets receive cover copies and metadata in an app-group snapshot. | `GumboWatch/WatchStore.swift`, `WatchDownloads.swift`, `Models/WatchCatalogue.swift`, `WidgetFeed.swift`, `GumboShared/WidgetSnapshot.swift` |
-| Diagnostics | Local diagnostic file, potentially included in device backups, copied on user action; Apple separately provides TestFlight feedback/crash reports according to Apple settings | `DiagnosticsLog.swift`, `DiagnosticsView.swift` |
+| Diagnostics | Local diagnostic file, potentially included in device backups, copied on user action; no automatic upload by Gumbo | `DiagnosticsLog.swift`, `DiagnosticsView.swift` |
+| TestFlight | Apple provides beta usage/crash information, including sessions, installation information and build version. Public-link enrolment does not itself expose name/email; submitted feedback can include contact information, comments, screenshots and diagnostics | [TestFlight & Privacy](https://www.apple.com/legal/privacy/data/en/test-flight/), [public invitation and feedback guidance](https://testflight.apple.com/join/GensWMTh) |
+| Website | Static content with no analytics scripts, sign-up form, or cookies/browser storage set by site code; Vercel processes hosting/security requests, separately from the NAS library | `website/index.html`, `website/site.js`, `website/vercel.json`, `website/privacy/index.html` |
 | Biometrics | Operating-system authentication result; no biometric template exposed to Gumbo | `ProfileStore.swift` |
 
 The package manifests include GumboCore and GumboShared, with no third-party SDK dependency. The project targets include privacy manifests declaring required UserDefaults/file-timestamp reasons, no tracking, and no developer-collected data types. These manifests are not substitutes for the app-level App Store answers.
@@ -36,8 +42,8 @@ The no-tracking manifest declaration is consistent with the reviewed source. The
 
 ## Remaining publication work
 
-1. Complete and host `PRIVACY-POLICY.md` with a real support contact and support-retention practice.
-2. Set the public URL and Apple TV policy text, then verify read-back through App Store Connect.
+1. Verify the deployed policy at `https://gumbo.one/privacy/`. Confirm an approved public support email and support-retention practice beyond the current TestFlight contact route.
+2. Set that public URL and Apple TV policy text, then verify read-back through App Store Connect. The website change does not perform these store updates.
 3. Review, save and publish the app-level privacy answers for the final release. This has not been performed by these source changes.
 4. Confirm onboarding and Settings behavior on the signed TestFlight builds across platforms.
 
