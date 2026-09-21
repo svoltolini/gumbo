@@ -1659,6 +1659,10 @@ _smb2_open_async_with_oplock_or_lease(struct smb2_context *smb2, const char *pat
                  * symlinks or silently grant write/delete sharing on a retry. */
                 req.share_access = SMB2_FILE_SHARE_READ;
                 req.create_options |= SMB2_FILE_OPEN_REPARSE_POINT;
+                if (smb2->gumbo_read_snapshot == 2) {
+                        req.desired_access |= SMB2_DELETE;
+                        req.create_options |= SMB2_FILE_NON_DIRECTORY_FILE;
+                }
         }
 
         if (lease_state && lease_key) {

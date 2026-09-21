@@ -9,6 +9,10 @@ struct smb2_context;
 struct smb2fh;
 /* One read handle denies cooperating SMB writers/deleters until close. No lease fallback. */
 struct smb2fh *gumbo_smb2_open_read_snapshot(struct smb2_context *context, const char *path);
+/* Read + DELETE access, never DELETE_ON_CLOSE until explicitly marked after review. */
+struct smb2fh *gumbo_smb2_open_delete_snapshot(struct smb2_context *context, const char *path);
+/* Marks this exact open file for deletion. Caller must close and observe both acknowledgements. */
+int gumbo_smb2_mark_delete(struct smb2_context *context, struct smb2fh *file);
 void gumbo_smb2_require_secure_session(struct smb2_context *context, int require_encryption);
 void gumbo_smb2_set_cancellation(struct smb2_context *context, int (*callback)(void *), void *data);
 int gumbo_smb2_directory_budget(uint64_t entries, uint64_t pages, uint64_t bytes, uint64_t elapsed_seconds);

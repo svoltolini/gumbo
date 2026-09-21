@@ -100,7 +100,7 @@ private nonisolated final class SMBProgressGate: @unchecked Sendable {
     func release() { semaphore.signal() }
 }
 
-private nonisolated final class WritableSMBFixture {
+nonisolated final class WritableSMBFixture {
     let context: OpaquePointer
     init() throws {
         context = try #require(smb2_init_context())

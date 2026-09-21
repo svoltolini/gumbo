@@ -24,7 +24,7 @@ Gumbo now uses a separate app identity, with new bundle IDs, CloudKit container,
 
 **Current public TestFlight:** Synology DSM/File Station. Do not infer support for other NAS brands from network discovery or from the development code below.
 
-**This development checkout:** HTTPS WebDAV and authenticated SMB2/3 adapters add browsing, indexing, playback and downloads. WebDAV requires trusted HTTPS. SMB defaults to encrypted SMB3, with an explicit signed SMB2/3 option; SMB1 and guest access are not supported. These adapters are read-only: they do not enable native tag replacement, file deletion or NAS account administration. SMB file preparation is a foreground operation, so keep Gumbo active while downloading.
+**This development checkout:** HTTPS WebDAV and authenticated SMB2/3 adapters add browsing, indexing, playback and downloads. WebDAV requires trusted HTTPS. SMB defaults to encrypted SMB3, with an explicit signed SMB2/3 option; SMB1 and guest access are not supported. WebDAV remains read-only. SMB also supports owner-reviewed album deletion using locked, fingerprinted file handles; native tag replacement and NAS account administration remain unavailable. SMB file preparation is a foreground operation, so keep Gumbo active while downloading.
 
 On Apple Watch, DSM and HTTPS WebDAV use direct server downloads. SMB songs are prepared on a reachable iPhone with Gumbo open, then transferred through WatchConnectivity for local Watch playback. The Watch has no direct SMB client and does not receive the SMB account or password. System-controlled transfer of a prepared file can continue after preparation; this is not background downloading from an SMB server. See [Watch provider behavior](docs/WATCH-PROVIDERS.md).
 

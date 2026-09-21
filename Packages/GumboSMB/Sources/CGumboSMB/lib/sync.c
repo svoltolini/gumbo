@@ -248,6 +248,57 @@ struct smb2fh *gumbo_smb2_open_read_snapshot(struct smb2_context *smb2, const ch
         return result;
 }
 
+struct smb2fh *gumbo_smb2_open_delete_snapshot(struct smb2_context *smb2, const char *path)
+{
+        struct smb2fh *result;
+        smb2->gumbo_read_snapshot = 2;
+        result = smb2_open(smb2, path, 0);
+        smb2->gumbo_read_snapshot = 0;
+        return result;
+}
+
+static void gumbo_delete_cb(struct smb2_context *smb2, int status,
+                            void *command_data, void *private_data)
+{
+        struct sync_cb_data *data = private_data;
+        if (data->status == SMB2_STATUS_CANCELLED) {
+                free(data);
+                return;
+        }
+        data->status = status == SMB2_STATUS_SHUTDOWN ? -ECONNRESET : -nterror_to_errno(status);
+        data->is_finished = 1;
+}
+
+int gumbo_smb2_mark_delete(struct smb2_context *smb2, struct smb2fh *file)
+{
+        struct smb2_set_info_request req;
+        struct smb2_file_disposition_info disposition = { 1 };
+        struct sync_cb_data *data;
+        struct smb2_pdu *pdu;
+        int result;
+        if (!smb2 || !file) return -EINVAL;
+        data = calloc(1, sizeof(*data));
+        if (!data) return -ENOMEM;
+        memset(&req, 0, sizeof(req));
+        req.info_type = SMB2_0_INFO_FILE;
+        req.file_info_class = SMB2_FILE_DISPOSITION_INFORMATION;
+        memcpy(req.file_id, smb2_get_file_id(file), SMB2_FD_SIZE);
+        req.input_data = &disposition;
+        pdu = smb2_cmd_set_info_async(smb2, &req, gumbo_delete_cb, data);
+        if (!pdu) { free(data); return -ENOMEM; }
+        smb2_queue_pdu(smb2, pdu);
+        result = wait_for_reply(smb2, data);
+        if (result < 0) {
+                if (data->is_finished) { free(data); return result; }
+                /* A later reply/context teardown owns the callback state. Never retry a delete. */
+                data->status = SMB2_STATUS_CANCELLED;
+                return result;
+        }
+        result = data->status;
+        free(data);
+        return result;
+}
+
 struct smb2fh *smb2_open(struct smb2_context *smb2, const char *path, int flags)
 {
         struct smb2_pdu *pdu;
