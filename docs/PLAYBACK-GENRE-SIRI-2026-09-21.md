@@ -21,7 +21,7 @@ The same isolated genre editor, sample catalogue and fake read-only drive then p
 - Stopping while the fake drive waited: the stopped result and Done remained responsive.
 - Accessible progress title, role and song count were preserved.
 
-This establishes the fix for the reproduced UI hang, not a real NAS write or a proven explanation of the earlier process exit. Keep #199 open for the user's retest on a new build.
+This established the fix for the reproduced UI hang. A later installed-app CPU diagnostic and an actual disposable-file save corroborated it; see the [22 September engineering checkpoint](ENGINEERING-CHECK-2026-09-22.md). No separate process-exit report was found, so the evidence describes a freeze rather than asserting a proven termination cause.
 
 ## Siri
 

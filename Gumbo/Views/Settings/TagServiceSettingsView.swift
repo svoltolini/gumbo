@@ -10,6 +10,8 @@ struct TagServiceSettingsView: View {
     @State private var confirmsFolder = false
     @State private var allowsDeletion = false
     @State private var isChecking = false
+    @State private var checkTask: Task<Void, Never>?
+    @State private var checkID = UUID()
     @State private var message: String?
 
     var body: some View {
@@ -48,16 +50,22 @@ struct TagServiceSettingsView: View {
                         let submittedAddress = address, submittedToken = token
                         let submittedAllowsDeletion = allowsDeletion
                         isChecking = true; message = nil
-                        Task {
+                        checkTask?.cancel()
+                        let requestID = UUID()
+                        checkID = requestID
+                        checkTask = Task {
+                            defer {
+                                if checkID == requestID { isChecking = false; checkTask = nil }
+                            }
                             guard profiles.sessionID == expectedSession, model.connection == expectedConnection,
-                                  profiles.canManageProfiles else { isChecking = false; return }
+                                  profiles.canManageProfiles, checkID == requestID else { return }
                             do { try await model.configureTagService(address: submittedAddress, token: submittedToken, allowsReviewedDeletion: submittedAllowsDeletion); token = "" }
+                            catch is CancellationError { }
                             catch {
-                                if profiles.sessionID == expectedSession, model.connection == expectedConnection {
+                                if checkID == requestID, profiles.sessionID == expectedSession, model.connection == expectedConnection {
                                     message = error.localizedDescription
                                 }
                             }
-                            isChecking = false
                         }
                     }
                     .disabled(isChecking || !confirmsFolder || address.isEmpty || token.isEmpty || !profiles.canManageProfiles || !model.isConnected || library.metadataWriter.isWriting || library.isDeletingFiles)
@@ -70,8 +78,19 @@ struct TagServiceSettingsView: View {
         .groupedForm()
         .navigationTitle("Faster Tag Editing")
         .onAppear { address = model.tagServiceConfiguration?.endpoint.absoluteString ?? "" }
-        .onChange(of: profiles.sessionID) { _, _ in token = ""; confirmsFolder = false; allowsDeletion = false; message = nil }
-        .onChange(of: model.connection) { _, _ in token = ""; confirmsFolder = false; allowsDeletion = false; message = nil }
-        .onDisappear { token = "" }
+        .onChange(of: profiles.sessionID) { _, _ in resetCheck() }
+        .onChange(of: model.connection) { _, _ in resetCheck() }
+        .onDisappear { resetCheck() }
+    }
+
+    private func resetCheck() {
+        checkID = UUID()
+        checkTask?.cancel()
+        checkTask = nil
+        isChecking = false
+        token = ""
+        confirmsFolder = false
+        allowsDeletion = false
+        message = nil
     }
 }

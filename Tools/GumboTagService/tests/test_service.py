@@ -5,6 +5,7 @@ import http.client
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -70,6 +71,41 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "validated")
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    @unittest.skipUnless(sys.platform == "linux", "Checks the deployed Linux filesystem behavior")
+    def test_linux_extended_attributes_and_identity_survive_replacement(self):
+        for extension in ("mp3", "flac", "m4a"):
+            with self.subTest(extension=extension):
+                path = self.music / ("tone." + extension)
+                os.setxattr(path, "user.gumbo.fixture", b"preserve exact metadata")
+                before = path.stat()
+                self.assertEqual(self.execute(self.edit(path.name))["status"], "succeeded")
+                self.assertEqual(os.getxattr(path, "user.gumbo.fixture"), b"preserve exact metadata")
+                self.assertEqual((path.stat().st_uid, path.stat().st_gid), (before.st_uid, before.st_gid))
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("setfacl") and shutil.which("getfacl"),
+                         "Linux validation image supplies POSIX ACL tools")
+    def test_linux_named_user_acl_survives_replacement(self):
+        path = self.music / "tone.flac"
+        subprocess.run(["setfacl", "-m", "u:12345:r--", str(path)], check=True)
+        before = subprocess.check_output(["getfacl", "-c", "-p", "-n", str(path)])
+        self.assertEqual(self.execute(self.edit(path.name))["status"], "succeeded")
+        after = subprocess.check_output(["getfacl", "-c", "-p", "-n", str(path)])
+        self.assertEqual(after, before)
+
+    @unittest.skipIf(os.geteuid() == 0, "Requires the production non-root execution model")
+    def test_unwritable_parent_keeps_original_and_leaves_no_recovery_files(self):
+        path = self.music / "tone.mp3"
+        edit = self.edit(path.name)
+        before = path.read_bytes()
+        self.music.chmod(0o500)
+        try:
+            with self.assertRaises(ServiceError):
+                self.execute(edit)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+        finally:
+            self.music.chmod(0o700)
 
     def test_traversal_symlink_hardlink_and_non_audio_paths_rejected(self):
         (self.music / "linked.mp3").symlink_to(self.music / "tone.mp3")

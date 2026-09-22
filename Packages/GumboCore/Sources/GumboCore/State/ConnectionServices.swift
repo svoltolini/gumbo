@@ -2,6 +2,7 @@ import Foundation
 
 /// The external effects of opening or restoring a connection, replaceable in isolated tests.
 struct ConnectionServices {
+    var tagService: (URL, String) throws -> RemoteTagService = { try RemoteTagService(endpoint: $0, token: $1) }
     var openProvider: (ServerConnection, String) async throws -> any RemoteDrive = { try await ProviderDriveFactory.open($0, password: $1) }
     var login: (URL, String, String, String?) async throws -> DSMSession = {
         try await SynologyClient.login(baseURL: $0, account: $1, password: $2, otpCode: $3)
