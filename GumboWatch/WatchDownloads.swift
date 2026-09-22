@@ -251,9 +251,19 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
             let previousTracks = previous?.playlist(matching: playlist)?.tracks
 
             if var saved = manifests[key] {
+                saved.adoptFileRevisions(from: previous?.playlist(matching: playlist) ?? playlist)
+                let previousFiles = saved.files
                 let pruned = saved.pruneInvalidFiles(for: playlist, root: Self.root)
+                manifests[key] = saved
                 if !pruned.isEmpty {
-                    manifests[key] = saved
+                    for id in pruned {
+                        if let path = previousFiles[id] {
+                            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+                            guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
+                                  parts[1] != ".", parts[1] != "..", !parts[1].isEmpty else { continue }
+                            try? FileManager.default.removeItem(at: Self.root.appending(path: key).appending(path: path))
+                        }
+                    }
                     DiagnosticsLog.shared.record("Watch downloads: pruned \(pruned.count) invalid files for \(playlist.name)")
                 }
 
@@ -346,12 +356,18 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         guard let currentTrack = currentCatalogue?.playlists.first(where: { $0.cacheID == job.playlistKey })?.tracks.first(where: { $0.id == job.trackID }) else {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root)); return
         }
+        guard job.fileRevision == currentTrack.fileRevision else {
+            try? FileManager.default.removeItem(at: job.destination(in: Self.root))
+            fail(job: job, message: "This song changed on your server. Download it again to update your saved copy.")
+            return
+        }
         if let failure = WatchDownloadValidation.failure(for: job.destination(in: Self.root), expectedBytes: currentTrack.fileSize) {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root))
             fail(job: job, message: failure.localizedDescription)
             return
         }
         manifests[job.playlistKey]?.files[job.trackID] = job.generation.uuidString + "/" + job.fileName
+        manifests[job.playlistKey]?.fileRevisions[job.trackID] = job.fileRevision
         expected[job.playlistKey]?.remove(job.trackID)
         if expected[job.playlistKey]?.isEmpty == true { expected[job.playlistKey] = nil }
         saveManifests()

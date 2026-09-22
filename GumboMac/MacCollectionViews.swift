@@ -323,6 +323,7 @@ struct MacDownloadsView: View {
 
     private struct MissingRequest: Equatable {
         let revision: UInt64
+        let contentRevision: Int
         let ownerIDs: [String]
     }
 
@@ -370,7 +371,7 @@ struct MacDownloadsView: View {
         // The folder is read again each time the screen opens, so the figure matches what is there now.
         .task { downloads.refreshUnusedStorage() }
         // Manifest-only arithmetic, kept out of the body and redone when download state moves.
-        .task(id: MissingRequest(revision: downloads.stateRevision, ownerIDs: owners.map(\.id))) {
+        .task(id: MissingRequest(revision: downloads.stateRevision, contentRevision: library.contentRevision, ownerIDs: owners.map(\.id))) {
             missing = owners.filter { downloads.missingCount(for: $0) > 0 }
         }
     }
@@ -428,9 +429,9 @@ private struct MacMissingSongsRow: View {
                 .foregroundStyle(Palette.accent)
                 .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(missing.count == 1 ? "1 download is missing songs" : "\(missing.count) downloads are missing songs")
+                Text(missing.count == 1 ? "1 download needs updating" : "\(missing.count) downloads need updating")
                     .font(.body.weight(.medium))
-                Text("Restored from iCloud. Songs already on this Mac are kept; only the rest come down.")
+                Text("Download missing songs and update files that changed on your server. Other saved songs are kept.")
                     .font(.footnote).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer(minLength: 8)

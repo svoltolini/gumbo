@@ -24,3 +24,11 @@ No real NAS tags or files were edited/deleted. Playback observations establish t
 ## Still pending
 
 Spoken Siri and its full request/denial/offline matrix, physical direct-touch scrolling and software keyboard, the original reported genre-save process exit, paired Watch and CarPlay, additional NAS hardware, multi-account family convergence, physical background-transfer tests and real-NAS helper measurements remain separate acceptance gates. France encryption and final App Store review requirements remain tracked in their own issues.
+
+## Download freshness update
+
+Development Mac build **202609221515** was subsequently installed and launched with Production CloudKit and existing user data retained. The Downloads screen displayed the new missing/changed-file explanation and existing album memberships with Retry actions; no transfer was automatically started. The prepared binary records base `f805126` and code/test patch SHA-256 `03688f03b641fb98b28c2395698f1bedef694dda013015ae62c1e9c9874af484`.
+
+All **734 core tests in 57 suites** passed with isolated Samba fixtures, plus signed macOS/iOS/Watch/tvOS builds and signature checks. See [download freshness](DOWNLOAD-FRESHNESS.md) for behavioral evidence and limitations. The iPhone remains on the earlier installed development build until a later device update; no new physical-iPhone pass is claimed here.
+
+The owner confirmed that no additional Watch, TV, CarPlay or non-Synology NAS hardware is available. Simulator and protocol-fixture coverage will remain separate from those unverified physical journeys; acquiring hardware is not required of the owner.

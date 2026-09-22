@@ -33,11 +33,12 @@ private func singleTrackAlbum() -> Album {
 @Test @MainActor func cacheMigrationKeepsRealFilesAndScopesIdenticalTracksToTheirNAS() throws {
     let directory = try downloadTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let album = singleTrackAlbum()
+    var album = singleTrackAlbum()
+    album.tracks[0].fileSize = 5
     let track = album.tracks[0]
     let owner = DownloadOwner(album: album, profileID: "default")
-    let a = DownloadRecord(trackID: track.id, driveID: "nas-a", fileName: "old-a.flac", bytes: 4, owners: [owner.id])
-    let b = DownloadRecord(trackID: track.id, driveID: "nas-b", fileName: "old-b.flac", bytes: 4, owners: [owner.id])
+    let a = DownloadRecord(trackID: track.id, driveID: "nas-a", fileName: "old-a.flac", bytes: 5, owners: [owner.id])
+    let b = DownloadRecord(trackID: track.id, driveID: "nas-b", fileName: "old-b.flac", bytes: 5, owners: [owner.id])
     let invalid = DownloadRecord(trackID: "missing", driveID: "nas-a", fileName: "", bytes: 100, owners: [owner.id])
     try Data("NAS A".utf8).write(to: directory.appending(path: a.fileName))
     try Data("NAS B".utf8).write(to: directory.appending(path: b.fileName))
@@ -65,7 +66,8 @@ private func singleTrackAlbum() -> Album {
 @Test @MainActor func renamedAlbumKeepsItsDownloadsUnderTheNewIdentity() throws {
     let directory = try downloadTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let album = singleTrackAlbum()
+    var album = singleTrackAlbum()
+    album.tracks[0].fileSize = 4
     let track = album.tracks[0]
     var renamed = album
     renamed.title = album.title + " (Remastered)"

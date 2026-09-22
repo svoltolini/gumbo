@@ -18,14 +18,21 @@ public nonisolated struct DownloadRecord: Codable, Hashable, Sendable {
     /// A fresh download after a NAS deletion belongs to that deletion epoch. Older manifest
     /// records cannot become playable again if the process stopped before their files were removed.
     public var serverDeletionEpoch: String?
+    public var fileRevision: DownloadFileRevision?
 
-    public init(trackID: String, driveID: String, fileName: String, bytes: Int64, owners: Set<String>, serverDeletionEpoch: String? = nil) {
+    public init(trackID: String, driveID: String, fileName: String, bytes: Int64, owners: Set<String>, serverDeletionEpoch: String? = nil, fileRevision: DownloadFileRevision? = nil) {
         self.trackID = trackID
         self.driveID = driveID
         self.fileName = fileName
         self.bytes = bytes
         self.owners = owners
         self.serverDeletionEpoch = serverDeletionEpoch
+        self.fileRevision = fileRevision
+    }
+
+    public func matches(_ track: Track) -> Bool {
+        if let size = track.fileSize, size > 0, size != bytes { return false }
+        return fileRevision?.matches(DownloadFileRevision(track: track)) ?? true
     }
 
     private enum LegacyKeys: String, CodingKey { case albumID }
@@ -37,6 +44,7 @@ public nonisolated struct DownloadRecord: Codable, Hashable, Sendable {
         fileName = try container.decode(String.self, forKey: .fileName)
         bytes = try container.decode(Int64.self, forKey: .bytes)
         serverDeletionEpoch = try container.decodeIfPresent(String.self, forKey: .serverDeletionEpoch)
+        fileRevision = try container.decodeIfPresent(DownloadFileRevision.self, forKey: .fileRevision)
         if let owners = try container.decodeIfPresent(Set<String>.self, forKey: .owners) {
             self.owners = owners
         } else if let albumID = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(String.self, forKey: .albumID) {
@@ -157,6 +165,7 @@ public nonisolated struct DownloadJob: Codable, Sendable {
     public let attemptID: String
     public var authentication: DownloadAuthentication?
     public var requiresForeground = false
+    public var fileRevision: DownloadFileRevision?
 
     public var incomingFileName: String { Self.incomingFileName(cacheKey: cacheKey, attemptID: attemptID) }
 
@@ -185,6 +194,7 @@ public nonisolated struct DownloadJob: Codable, Sendable {
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
         authentication = try container.decodeIfPresent(DownloadAuthentication.self, forKey: .authentication)
         requiresForeground = try container.decodeIfPresent(Bool.self, forKey: .requiresForeground) ?? false
+        fileRevision = try container.decodeIfPresent(DownloadFileRevision.self, forKey: .fileRevision)
         trackID = try container.decode(String.self, forKey: .trackID)
         driveID = try container.decode(String.self, forKey: .driveID)
         fileName = try container.decode(String.self, forKey: .fileName)
@@ -231,6 +241,8 @@ public final class DownloadManager {
     /// Read from the current catalogue, including when its server is offline.
     public var driveIDProvider: () -> String = { "" }
     public var remoteSourceProvider: ((Track) -> RemoteDownloadSource?)?
+    /// Current known catalogue identity, scoped to the requested source. Nil means unavailable.
+    public var fileRevisionProvider: ((String, String) -> DownloadFileRevision?)?
     public var requiresOpenAppForDownloads = false
     /// Reclaimable bytes from interrupted foreground downloads, excluding active/queued work.
     /// Updated at lifecycle/storage checkpoints, never by progress-driven UI reads.
@@ -541,6 +553,7 @@ public final class DownloadManager {
         let key = Self.cacheKey(trackID: track.id, driveID: driveID)
         guard let record = records[key] else { return nil }
         if record.fileName.isEmpty { return simulatedKeys.contains(key) ? record : nil }
+        guard record.matches(track) else { return nil }
         return FileManager.default.fileExists(atPath: cacheDirectory.appending(path: record.fileName).path) ? record : nil
     }
 
@@ -599,6 +612,17 @@ public final class DownloadManager {
                 let key = Self.cacheKey(trackID: track.id, driveID: driveID)
                 if var record = records[key], !record.fileName.isEmpty {
                     if FileManager.default.fileExists(atPath: cacheDirectory.appending(path: record.fileName).path) {
+                        if !record.matches(track) {
+                            // Keep the file and all memberships until an explicit retry replaces it.
+                            // Its manifest entry also prevents size-only orphan adoption.
+                            report.missingSongs += 1
+                            continue
+                        }
+                        if record.fileRevision == nil {
+                            record.fileRevision = DownloadFileRevision(track: track)
+                            records[key] = record
+                            changed = true
+                        }
                         if record.owners.insert(owner.id).inserted {
                             records[key] = record
                             changed = true
@@ -614,7 +638,7 @@ public final class DownloadManager {
                     continue
                 }
                 if let file = validFile(for: track, key: key, in: inventory) {
-                    records[key] = DownloadRecord(trackID: track.id, driveID: driveID, fileName: file.fileName, bytes: file.bytes, owners: [owner.id])
+                    records[key] = DownloadRecord(trackID: track.id, driveID: driveID, fileName: file.fileName, bytes: file.bytes, owners: [owner.id], fileRevision: DownloadFileRevision(track: track))
                     changed = true
                     report.attachedFiles += 1
                 } else {
@@ -831,7 +855,8 @@ public final class DownloadManager {
         let pending = pendingByOwner[owner.id] ?? []
         return owner.tracks.filter { track in
             let key = Self.cacheKey(trackID: track.id, driveID: driveID)
-            return records[key]?.owners.contains(owner.id) != true && !pending.contains(key)
+            let saved = records[key]
+            return (saved?.owners.contains(owner.id) != true || saved?.matches(track) == false) && !pending.contains(key)
         }.count
     }
 
@@ -864,7 +889,12 @@ public final class DownloadManager {
         }
         let request = requests[requestKey(ownerID: owner.id, driveID: driveID)]
         if request?.cancelled == true { return .cancelled(done: done, total: tracks.count) }
+        let outdated = tracks.contains { track in
+            let record = records[Self.cacheKey(trackID: track.id, driveID: driveID)]
+            return record?.owners.contains(owner.id) == true && record?.matches(track) == false
+        }
         let error = request?.errors.sorted(by: { $0.key < $1.key }).first?.value
+            ?? (outdated ? "Music changed on your server. Download again to update your saved copy." : nil)
         if done > 0 { return .partial(done: done, total: tracks.count, message: error) }
         if let error { return .failed(message: error) }
         // Membership came back from iCloud but the songs did not: kept listed, with a retry offered.
@@ -959,7 +989,7 @@ public final class DownloadManager {
             if let existing = records[key], existing.fileName.isEmpty || !FileManager.default.fileExists(atPath: cacheDirectory.appending(path: existing.fileName).path) {
                 if !existing.fileName.isEmpty || !isSample { records[key] = nil }
             }
-            if var record = records[key] {
+            if var record = records[key], record.fileName.isEmpty || record.matches(track) {
                 if record.owners.insert(owner.id).inserted {
                     records[key] = record
                     shared += 1
@@ -968,17 +998,18 @@ public final class DownloadManager {
             }
             let existing = jobs[key] ?? initialJobs[key]
             let hasLiveTask = tasks[key].map { $0.state == .running || $0.state == .suspended } == true
-            if let existing, (isRestoringTasks || hasLiveTask || simulations[key] != nil || foregroundSources[key] != nil), accept(existing) {
+            if let existing, existing.fileRevision?.matches(DownloadFileRevision(track: track)) != false,
+               (isRestoringTasks || hasLiveTask || simulations[key] != nil || foregroundSources[key] != nil), accept(existing) {
                 pending.insert(key)
                 continue
             }
             // The file can be in the folder without a manifest entry, e.g. after a reinstall kept the
             // folder but not its index. A complete copy is attached rather than fetched again.
-            if !driveID.isEmpty {
+            if !driveID.isEmpty, records[key] == nil {
                 if inventory == nil { inventory = DownloadCacheInventory.read(directory: cacheDirectory) }
                 if let inventory, let file = validFile(for: track, key: key, in: inventory) {
                     if let existing { retire(existing) }
-                    records[key] = DownloadRecord(trackID: track.id, driveID: driveID, fileName: file.fileName, bytes: file.bytes, owners: [owner.id])
+                    records[key] = DownloadRecord(trackID: track.id, driveID: driveID, fileName: file.fileName, bytes: file.bytes, owners: [owner.id], fileRevision: DownloadFileRevision(track: track))
                     attached += 1
                     continue
                 }
@@ -1009,6 +1040,7 @@ public final class DownloadManager {
                 expectedBytes: track.fileSize, ownerTitle: owner.title, ownerSubtitle: owner.subtitle,
                 trackTitle: track.title, ownerTrackCount: owner.tracks.count, attemptID: attemptID
             )
+            job.fileRevision = DownloadFileRevision(track: track)
             if case .http(_, let authentication) = remoteSource { job.authentication = authentication }
             if case .file = remoteSource { job.requiresForeground = true }
             jobs[key] = job
@@ -1495,6 +1527,10 @@ public final class DownloadManager {
         var problem = failure
         if problem == nil, !(200..<300).contains(status) { problem = "The server answered with HTTP \(status)." }
         if !simulated {
+            if problem == nil, let revision = job.fileRevision,
+               let current = fileRevisionProvider?(job.driveID, job.trackID), !revision.matches(current) {
+                problem = "“\(job.trackTitle)” changed on your server. Update your library, then retry."
+            }
             if problem == nil, !FileManager.default.fileExists(atPath: incoming.path) || bytes <= 0 {
                 problem = "“\(job.trackTitle)” could not be saved. Try downloading it again."
             }
@@ -1513,6 +1549,7 @@ public final class DownloadManager {
         }
         // Cancellation removes ownership immediately, even if the session finishes the file later.
         let owners = Set(pendingByOwner.filter { $0.value.contains(job.cacheKey) }.keys)
+        var replacedFileName: String?
         if owners.isEmpty {
             if !simulated { try? FileManager.default.removeItem(at: incoming) }
         } else {
@@ -1527,10 +1564,17 @@ public final class DownloadManager {
                     return
                 }
             }
+            let previous = records[job.cacheKey]
             records[job.cacheKey] = DownloadRecord(trackID: job.trackID, driveID: job.driveID, fileName: simulated ? "" : job.fileName,
-                                                  bytes: bytes, owners: owners, serverDeletionEpoch: serverDeletionEpochs[job.cacheKey])
+                                                  bytes: bytes, owners: owners.union(previous?.owners ?? []),
+                                                  serverDeletionEpoch: serverDeletionEpochs[job.cacheKey], fileRevision: job.fileRevision)
+            replacedFileName = previous?.fileName
         }
-        saveManifest()
+        // Publish the replacement before removing the previous copy; failure never consumes it.
+        let persisted = saveManifest()
+        if persisted, let replacedFileName, !replacedFileName.isEmpty, replacedFileName != job.fileName {
+            try? FileManager.default.removeItem(at: cacheDirectory.appending(path: replacedFileName))
+        }
         settle(job)
         refreshActivity(force: true)
     }
@@ -1685,9 +1729,13 @@ public final class DownloadManager {
         }, uniquingKeysWith: { first, _ in first })
     }
 
-    private func saveManifest() {
+    @discardableResult private func saveManifest() -> Bool {
         let list = records.values.filter { !$0.fileName.isEmpty }
-        if let data = try? JSONEncoder().encode(list) { try? data.write(to: manifestURL, options: .atomic) }
+        do {
+            let data = try JSONEncoder().encode(list)
+            try data.write(to: manifestURL, options: .atomic)
+            return true
+        } catch { return false }
     }
 
     private func savePendingOwners() {

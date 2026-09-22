@@ -3,7 +3,8 @@ import Testing
 @testable import GumboCore
 
 @Test func backgroundDownloadSnapshotPreservesOccurrencesAndTerminalStates() throws {
-    let first = SampleLibrary.catalogue.albums[0].tracks[0]
+    var first = SampleLibrary.catalogue.albums[0].tracks[0]
+    first.fileSize = 4
     let second = SampleLibrary.catalogue.albums[0].tracks[1]
     let playlist = Playlist(id: "duplicates", name: "Duplicates", summary: "", covers: [], tracks: [first, second, first])
     let owner = DownloadOwner(playlist: playlist, profileID: "profile")
@@ -73,7 +74,8 @@ private struct DownloadReadFixture {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         audioURL = directory.appending(path: "fixture.wav")
         try Data([0, 0, 0, 0]).write(to: audioURL)
-        let track = SampleLibrary.catalogue.albums[0].tracks[0]
+        var track = SampleLibrary.catalogue.albums[0].tracks[0]
+        track.fileSize = 4
         owner = DownloadOwner(playlist: Playlist(id: "fixture", name: "Fixture", summary: "", covers: [], tracks: [track, track]), profileID: "profile")
         let record = DownloadRecord(trackID: track.id, driveID: "source", fileName: "fixture.wav", bytes: 4, owners: [owner.id, "album:legacy"])
         try JSONEncoder().encode([record]).write(to: directory.appending(path: "downloads.json"))

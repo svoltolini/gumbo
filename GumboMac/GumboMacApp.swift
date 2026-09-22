@@ -53,6 +53,10 @@ struct GumboMacApp: App {
         let downloads = DownloadManager()
         downloads.driveIDProvider = { [library] in library.catalogue.driveID }
         downloads.remoteSourceProvider = { [model] in model.downloadSource(for: $0) }
+        downloads.fileRevisionProvider = { [library] source, id in
+            guard library.catalogue.driveID == source else { return nil }
+            return library.track(id: id).map(DownloadFileRevision.init)
+        }
         model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
         if !UserDefaults.standard.bool(forKey: "downloads.ownersScoped"), let owner = profiles.owner {
             downloads.adoptLegacyOwners(into: owner.id)
