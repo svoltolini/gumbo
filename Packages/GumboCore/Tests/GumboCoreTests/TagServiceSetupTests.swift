@@ -70,7 +70,8 @@ private struct SetupDrive: RemoteFileDrive {
     var model: AppModel!
     let token = String(repeating: "t", count: 43)
 
-    init() throws {
+    /// `hiddenTwinFirst` lists the "._" twin macOS leaves beside the song first, as an older catalogue did.
+    init(hiddenTwinFirst: Bool = false) throws {
         defaults = UserDefaults(suiteName: suite)!
         defaults.set(3, forKey: "coverCacheVersion")
         profiles = ProfileStore(directory: directory, defaults: defaults)
@@ -83,7 +84,12 @@ private struct SetupDrive: RemoteFileDrive {
         catalogue.albums = Array(catalogue.albums.prefix(1))
         var track = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(catalogue.albums[0].tracks[0])) as? [String: Any])
         track["path"] = "/music/album/song.flac"; track["fileSize"] = 12
-        catalogue.albums[0].tracks = [try JSONDecoder().decode(Track.self, from: JSONSerialization.data(withJSONObject: track))]
+        var tracks = [try JSONDecoder().decode(Track.self, from: JSONSerialization.data(withJSONObject: track))]
+        if hiddenTwinFirst {
+            track["id"] = "/music/album/._song.flac"; track["path"] = "/music/album/._song.flac"; track["fileSize"] = 4096
+            tracks.insert(try JSONDecoder().decode(Track.self, from: JSONSerialization.data(withJSONObject: track)), at: 0)
+        }
+        catalogue.albums[0].tracks = tracks
         defaults.set(try JSONEncoder().encode(connection), forKey: "connection")
         passwords[connection.keychainAccount] = "fixture"
         var services = ConnectionServices()
@@ -131,6 +137,16 @@ private struct SetupDrive: RemoteFileDrive {
         await #expect(throws: CancellationError.self) { try await old.value }
         #expect(f.model.tagServiceConfiguration?.endpoint.host == "current.example")
         #expect(f.passwords.keys.filter { $0.hasPrefix("metadata-helper-v1:") }.count == 1)
+        #expect(await f.replies.paths.filter { $0 == "/v1/files/stat" }.count == 1)
+        await f.cleanUp()
+    }
+
+    /// The helper reports the real song's 12 bytes; checking the 4 KB twin instead would fail as a changed file.
+    @Test func folderMappingIsCheckedOnASongNotItsHiddenTwin() async throws {
+        let f = try SetupFixture(hiddenTwinFirst: true)
+        try await f.ready()
+        try await f.model.configureTagService(address: "https://current.example", token: f.token)
+        #expect(f.model.tagServiceConfiguration?.endpoint.host == "current.example")
         #expect(await f.replies.paths.filter { $0 == "/v1/files/stat" }.count == 1)
         await f.cleanUp()
     }

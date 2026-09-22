@@ -28,22 +28,22 @@ private nonisolated func taggedFLAC(number: Int) -> Data {
 
 /// An album folder as macOS leaves it on an SMB share: every song and picture has a "._" twin,
 /// which sorts before it.
-private nonisolated func albumListing() -> [RemoteEntry] {
-    var entries = [fileEntry(albumFolder + "/.DS_Store")]
-    for number in 1...3 {
-        entries.append(fileEntry("\(albumFolder)/._0\(number) - Song \(number).flac"))
-        entries.append(fileEntry("\(albumFolder)/0\(number) - Song \(number).flac", size: 30_000_000))
+private nonisolated func albumListing(in folder: String = albumFolder, songs: ClosedRange<Int> = 1...3) -> [RemoteEntry] {
+    var entries = [fileEntry(folder + "/.DS_Store")]
+    for number in songs {
+        entries.append(fileEntry("\(folder)/._0\(number) - Song \(number).flac"))
+        entries.append(fileEntry("\(folder)/0\(number) - Song \(number).flac", size: 30_000_000))
     }
-    entries.append(fileEntry(albumFolder + "/._Cover (Front).jpg"))
-    entries.append(fileEntry(albumFolder + "/Cover (Front).jpg", size: Int64(folderPicture.count)))
+    entries.append(fileEntry(folder + "/._Cover (Front).jpg"))
+    entries.append(fileEntry(folder + "/Cover (Front).jpg", size: Int64(folderPicture.count)))
     return entries
 }
 
-private nonisolated func albumContents() -> [String: Data] {
-    var contents = [albumFolder + "/._Cover (Front).jpg": appleDouble, albumFolder + "/Cover (Front).jpg": folderPicture]
+private nonisolated func albumContents(in folder: String) -> [String: Data] {
+    var contents = [folder + "/._Cover (Front).jpg": appleDouble, folder + "/Cover (Front).jpg": folderPicture]
     for number in 1...3 {
-        contents["\(albumFolder)/._0\(number) - Song \(number).flac"] = appleDouble
-        contents["\(albumFolder)/0\(number) - Song \(number).flac"] = taggedFLAC(number: number)
+        contents["\(folder)/._0\(number) - Song \(number).flac"] = appleDouble
+        contents["\(folder)/0\(number) - Song \(number).flac"] = taggedFLAC(number: number)
     }
     return contents
 }
@@ -51,14 +51,20 @@ private nonisolated func albumContents() -> [String: Data] {
 private actor HiddenFileDrive: RemoteDrive {
     let id = "hidden-file-fixture"
     let displayName = "Hidden file fixture"
-    let tree: [String: [RemoteEntry]] = [
-        "/music": [folderEntry("/music/Real Artist")],
-        "/music/Real Artist": [folderEntry(albumFolder)],
-        albumFolder: albumListing(),
-    ]
-    let contents = albumContents()
+    let tree: [String: [RemoteEntry]]
+    let contents: [String: Data]
     private(set) var reads: [String] = []
     private(set) var downloads: [String] = []
+
+    /// `songs` numbers the songs still in the folder; their tags are always "ALBUM=Album".
+    init(folder: String = albumFolder, songs: ClosedRange<Int> = 1...3) {
+        tree = [
+            "/music": [folderEntry("/music/Real Artist")],
+            "/music/Real Artist": [folderEntry(folder)],
+            folder: albumListing(in: folder, songs: songs),
+        ]
+        contents = albumContents(in: folder)
+    }
 
     func roots() async throws -> [RemoteEntry] { [] }
     func list(_ path: String) async throws -> [RemoteEntry] { tree[path] ?? [] }
@@ -94,6 +100,14 @@ private actor HiddenFileDrive: RemoteDrive {
     }
     #expect(indexer.phase == .done)
     return try #require(latest)
+}
+
+@MainActor private func finishIndexing(_ model: AppModel) async throws {
+    for _ in 0..<1000 {
+        if !model.isScanning { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.indexer.phase == .done)
 }
 
 @Suite(.serialized) @MainActor struct HiddenFileTests {
@@ -162,13 +176,18 @@ private actor HiddenFileDrive: RemoteDrive {
         }
     }
 
-    @Test func libraryScannedWithGhostsHealsOnTheNextScan() async throws {
+    /// The songs are tagged "Album". In a folder named so, the ghosts joined them; in "Album [FLAC]"
+    /// they stayed apart under the folder's title, and neither album kept the folder's cover path.
+    @Test(arguments: ["Album", "Album [FLAC]"])
+    func libraryScannedWithGhostsHealsOnTheNextScan(folderName: String) async throws {
         try await withCovers {
-            let drive = HiddenFileDrive()
-            let listing = albumListing()
+            let folder = "/music/Real Artist/" + folderName
+            let coverPath = folder + "/Cover (Front).jpg"
+            let drive = HiddenFileDrive(folder: folder)
+            let listing = albumListing(in: folder)
             let ghostCover = try #require(listing.first { $0.name == "._Cover (Front).jpg" })
             // What older builds made of the folder: every twin was a song, and one lent the cover.
-            var previous = Catalogue.build(folders: [ScannedFolder(path: albumFolder, audio: listing.filter { $0.fileExtension == "flac" }, cover: ghostCover)],
+            var previous = Catalogue.build(folders: [ScannedFolder(path: folder, audio: listing.filter { $0.fileExtension == "flac" }, cover: ghostCover)],
                                            rootPath: "/music", serverName: "NAS", driveID: "hidden-file-fixture", existing: nil)
             for a in previous.albums.indices {
                 for t in previous.albums[a].tracks.indices where !previous.albums[a].tracks[t].isHiddenFile {
@@ -180,28 +199,91 @@ private actor HiddenFileDrive: RemoteDrive {
                 }
             }
             previous.regroupByTags()
-            let stale = try #require(previous.albums.first)
-            #expect(previous.albums.count == 1)
-            #expect(stale.tracks.count == 6)
-            #expect(stale.artist == "Various Artists", "Half the credits were unique ghosts, so nobody had a majority")
-            #expect(stale.coverPath == ghostCover.path)
-            // The twin's bytes were stored for the folder's album and copied to the regrouped one.
-            let folderAlbumID = Album.makeID(title: "Album", artist: "Real Artist")
-            CoverStore.save(appleDouble, for: folderAlbumID)
-            CoverStore.save(appleDouble, for: stale.id)
+            if folderName == "Album" {
+                let stale = try #require(previous.albums.first)
+                #expect(previous.albums.count == 1)
+                #expect(stale.tracks.count == 6)
+                #expect(stale.artist == "Various Artists", "Half the credits were unique ghosts, so nobody had a majority")
+                #expect(stale.coverPath == ghostCover.path)
+            } else {
+                #expect(previous.albums.count == 2)
+                #expect(previous.albums.allSatisfy { $0.coverPath == nil })
+            }
+            // The twin's bytes were stored for the folder's album, then copied to or adopted by the albums
+            // made from it; a scan stopped before its albums settled also kept them as a song's picture.
+            let folderAlbumID = Album.makeID(title: folderName, artist: "Real Artist")
+            let storedIDs = Set([folderAlbumID] + previous.albums.map(\.id))
+            for id in storedIDs { CoverStore.save(appleDouble, for: id) }
+            CoverStore.saveTrackCover(appleDouble, for: folder + "/" + songNames[0])
 
             let healed = try await scan(drive, existing: previous)
             let album = try #require(healed.albums.first)
             #expect(healed.albums.count == 1)
             #expect(album.tracks.map(\.fileName) == songNames)
             #expect(album.artist == "Real Artist")
-            #expect(album.id == folderAlbumID)
+            #expect(album.id == Album.makeID(title: "Album", artist: "Real Artist"))
             #expect(album.coverPath == coverPath)
             #expect(try Data(contentsOf: CoverStore.fileURL(for: album.id)) == folderPicture)
-            #expect(!CoverStore.hasCover(for: stale.id))
+            #expect(storedIDs.allSatisfy { $0 == album.id || !CoverStore.hasCover(for: $0) })
             #expect(previous.removedTrackIDs(present: Set(healed.albums.flatMap(\.tracks).map(\.id))).isEmpty)
             #expect(await drive.reads.isEmpty, "Tags already read are kept, and the twins are never read")
             #expect(await drive.downloads == [coverPath])
+
+            // Healed, the library is left alone: nothing is looked up or fetched again.
+            let again = try await scan(drive, existing: healed)
+            #expect(again.albums.map(\.id) == [album.id])
+            #expect(again.albums.first?.artist == "Real Artist")
+            #expect(try Data(contentsOf: CoverStore.fileURL(for: album.id)) == folderPicture)
+            #expect(await drive.downloads == [coverPath])
+        }
+    }
+
+    @Test func coverSavedFromATwinIsReplacedWhenTheFolderIsIndexedAfresh() async throws {
+        try await withCovers {
+            // Picking another music folder and coming back forgets the catalogue, but not the folder's covers.
+            let albumID = Album.makeID(title: "Album", artist: "Real Artist")
+            CoverStore.save(appleDouble, for: albumID)
+            let drive = HiddenFileDrive()
+            let catalogue = try await scan(drive, existing: nil)
+            #expect(catalogue.albums.map(\.id) == [albumID])
+            #expect(try Data(contentsOf: CoverStore.fileURL(for: albumID)) == folderPicture)
+            #expect(await drive.downloads == [coverPath])
+        }
+    }
+
+    @Test func refreshReportsRealDeletionsButNotTheGhostsItDrops() async throws {
+        try await withCovers {
+            let suite = "GumboHiddenFileTests.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            var services = ConnectionServices()
+            services.login = { url, _, _, _ in DSMSession(baseURL: url, sid: "fixture", apis: [:]) }
+            services.info = { _ in nil }
+            services.deletePassword = { _ in }
+            services.log = { _ in }
+            let library = LibraryStore()
+            let model = AppModel(library: library, defaults: defaults, services: services, restoresSession: false)
+            #expect(model.enterAddress("https://nas.example:5001"))
+            await model.signIn(account: "fixture", password: "fixture", otpCode: "", remember: false)
+            library.drive = HiddenFileDrive()
+            model.chooseMusicFolder(path: "/music", showsProgress: false)
+            try await finishIndexing(model)
+            // What an older build kept for the folder: every twin listed as a song.
+            let songsAndTwins = albumListing().filter { $0.fileExtension == "flac" }
+            let previous = Catalogue.build(folders: [ScannedFolder(path: albumFolder, audio: songsAndTwins, cover: nil)],
+                                           rootPath: "/music", serverName: "NAS", driveID: "hidden-file-fixture", existing: nil)
+            var deletions: [Set<String>] = []
+            library.onServerTracksDeleted = { _, ids in deletions.append(ids) }
+
+            library.replace(with: previous, drive: HiddenFileDrive())
+            model.rescan()
+            try await finishIndexing(model)
+            #expect(deletions.isEmpty, "The twins were never deleted from the NAS")
+
+            library.replace(with: previous, drive: HiddenFileDrive(songs: 1...2))
+            model.rescan()
+            try await finishIndexing(model)
+            #expect(deletions == [[albumFolder + "/" + songNames[2]]])
         }
     }
 

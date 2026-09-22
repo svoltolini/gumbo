@@ -393,19 +393,25 @@ public nonisolated struct Catalogue: Codable, Sendable {
         }
     }
 
-    /// Scans before hidden files were ignored could store "._Cover (Front).jpg", which holds only
-    /// Finder metadata, as an album's cover; an album with a cover never looks for one again. Forget
-    /// it under the old album and the folder albums rebuilt from its songs, before regrouping can
-    /// copy it on, so the cover pass fetches the real picture.
-    nonisolated static func discardHiddenFolderCovers(previous: Catalogue, rebuilt: Catalogue) {
-        let affected = previous.albums.filter { album in
-            album.coverPath.map { RemoteDriveSupport.isHidden(($0 as NSString).lastPathComponent) } ?? false
+    /// Whether a scan made before hidden files were ignored saved this catalogue: it lists a "._"
+    /// twin as a song or as an album's cover, which no scan does now.
+    var listsHiddenFiles: Bool {
+        albums.contains { album in
+            (album.coverPath.map { RemoteDriveSupport.isHidden(($0 as NSString).lastPathComponent) } ?? false)
+                || album.tracks.contains(where: \.isHiddenFile)
         }
-        guard !affected.isEmpty else { return }
-        let songs = Set(affected.flatMap(\.tracks).map(\.id))
-        let rebuiltIDs = rebuilt.albums.filter { album in album.tracks.contains { songs.contains($0.id) } }.map(\.id)
-        for id in Set(affected.map(\.id)).union(rebuiltIDs) { CoverStore.remove(for: id) }
-        diagnostics("Discarded covers read from hidden files for \(affected.count) albums; they are looked up again")
+    }
+
+    /// Such scans could save "._Cover (Front).jpg", which holds only Finder metadata, as a cover:
+    /// the folder's album's, then the albums regrouping copied it to, or a song's picture its album
+    /// adopted. An album with a cover never looks for one again, so forget those by their content,
+    /// before regrouping can copy them on, and the cover pass fetches the real picture. Only needed
+    /// after such a catalogue, or with none of this folder to tell (covers outlive a switch to another
+    /// folder and back), so a healed library is not looked through on every refresh.
+    nonisolated static func discardFinderMetadataCovers(previous: Catalogue?, driveID: String, rootPath: String) {
+        if let previous, previous.driveID == driveID, previous.rootPath == rootPath, !previous.listsHiddenFiles { return }
+        let removed = CoverStore.removeFinderMetadata()
+        if removed > 0 { diagnostics("Discarded \(removed) covers read from hidden files; they are looked up again") }
     }
 
     /// Longest directory prefix shared by every path.
