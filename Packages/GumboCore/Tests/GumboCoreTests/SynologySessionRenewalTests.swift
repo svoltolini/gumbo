@@ -193,18 +193,47 @@ private nonisolated func refusal(_ code: Int) -> DSMDownloadFixture.Reply {
         let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: { _ in
             guard await ledger.login() > 1 else { throw SynologyError.unreachable("offline") }
             return renewalSession("renewed")
-        }, renewalInterval: .milliseconds(200)) { url in
+        }, renewalInterval: .seconds(2)) { url in
             guard await ledger.request(url) == "renewed" else { throw expiredListing() }
             return renewalPage([])
         }
         await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
-        // Within the interval the failure stands without another sign-in.
+        // Within the interval the failure stands without another sign-in. The interval leaves room
+        // for other suites holding the main actor, which these requests resume on.
         await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
         #expect(await ledger.logins == 1)
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(2100))
         try await drive.checkSession(folder: "/music")
         #expect(await ledger.logins == 2)
         #expect(drive.session.sid == "renewed")
+    }
+
+    /// Why DSM refused the new sign-in is for the sign-in to show. As the request's own error, a
+    /// password to change (Auth 408) would read as a missing folder, a blocked address (407) as a
+    /// read-only file.
+    @Test(arguments: [407, 408])
+    func aRefusedRenewalReportsTheEndedSession(_ code: Int) async throws {
+        let ledger = RenewalLedger()
+        let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: { _ in
+            _ = await ledger.login()
+            throw SynologyError.api(code: code, api: "SYNO.API.Auth")
+        }) { url in
+            _ = await ledger.request(url)
+            throw expiredListing()
+        }
+        for _ in 0..<2 {
+            do {
+                _ = try await drive.list("/music")
+                Issue.record("A session that could not be renewed must not be reported as a listing")
+            } catch {
+                #expect((error as? SynologyError)?.isSessionExpired == true)
+                #expect(!error.isMissingPath)
+                #expect(!error.isWriteDenied)
+            }
+        }
+        // Neither weaker listing parameters nor another sign-in follow the refusal.
+        #expect(await ledger.logins == 1)
+        #expect(await ledger.sessions == ["expired", "expired"])
     }
 
     @Test func aRenewalTheAppDeclinesDoesNotHoldOffTheNext() async throws {

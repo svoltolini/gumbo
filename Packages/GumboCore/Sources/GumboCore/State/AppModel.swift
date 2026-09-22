@@ -123,6 +123,7 @@ public final class AppModel {
         isReconnecting = false
         isJoiningFamily = false
         pendingReconnectPassword = nil
+        reconnectRequestedDuringAttempt = false
         indexer.cancel()
         demoTask?.cancel()
         demoTask = nil
@@ -300,7 +301,12 @@ public final class AppModel {
             return
         }
         isReconnecting = true
-        defer { if generation == connectionGeneration { isReconnecting = false } }
+        defer {
+            if generation == connectionGeneration {
+                isReconnecting = false
+                answerReconnectRequestedDuringAttempt()
+            }
+        }
         let connection = saved
         do {
             let opened = try await openConnection(connection, password: password)
@@ -606,6 +612,9 @@ public final class AppModel {
     /// password, an account DSM won't let in). Trying again unasked would repeat a refusal that DSM
     /// counts towards blocking the device.
     private var awaitsSignIn = false
+    /// Set when a reason to reconnect came while the launch sign-in or a reconnection was on its way.
+    /// That attempt may have set out on the network being left, so if it fails, another follows.
+    private(set) var reconnectRequestedDuringAttempt = false
     private var stopObservingNetwork: (() -> Void)?
 
     /// A library that opened without its server, for example launched away from a home-only NAS,
@@ -613,7 +622,11 @@ public final class AppModel {
     /// An attempt that can't reach the server stays quiet; a refused sign-in asks the person once.
     private func reconnectIfOffline() {
         guard stage == .ready, !isDemo, let saved = connection, library.drive == nil, pendingServer == nil, !awaitsSignIn,
-              !isRestoring, !isReconnecting, !isSigningIn, !isJoiningFamily else { return }
+              !isSigningIn, !isJoiningFamily else { return }
+        guard !isRestoring, !isReconnecting else {
+            reconnectRequestedDuringAttempt = true
+            return
+        }
         let now = ContinuousClock.now
         if let last = lastAutomaticReconnect, now < last + automaticReconnectInterval {
             // Too soon after the last attempt: one more follows when the interval is up.
@@ -630,6 +643,14 @@ public final class AppModel {
         services.log("\(saved.name) is offline; reconnecting")
         let generation = connectionGeneration
         Task { await reconnect(within: generation) }
+    }
+
+    /// Called as the launch sign-in or a reconnection ends: a reason to reconnect that came meanwhile
+    /// is answered now, if the library is still offline, spaced out like any other attempt.
+    private func answerReconnectRequestedDuringAttempt() {
+        guard reconnectRequestedDuringAttempt else { return }
+        reconnectRequestedDuringAttempt = false
+        reconnectIfOffline()
     }
 
     /// Watches for network changes only while there is a saved server to go back to.
@@ -814,7 +835,12 @@ public final class AppModel {
         isRestoring = true
         Task { [weak self] in
             guard let self else { return }
-            defer { if generation == connectionGeneration { isRestoring = false } }
+            defer {
+                if generation == connectionGeneration {
+                    isRestoring = false
+                    answerReconnectRequestedDuringAttempt()
+                }
+            }
             let connection = saved
             do {
                 let opened = try await openConnection(connection, password: password)

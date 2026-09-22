@@ -41,6 +41,10 @@ import Testing
         continuation?.resume(returning: DSMSession(baseURL: URL(string: "https://nas.example:5001")!, sid: sid, apis: [:]))
         continuation = nil
     }
+    func fail(_ error: any Error) {
+        continuation?.resume(throwing: error)
+        continuation = nil
+    }
 }
 
 @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
@@ -422,6 +426,98 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
     #expect(model.pendingServer?.host == saved.host)
 }
 
+@Test @MainActor func anAutomaticAttemptThatIsRefusedAsksOnceAndStops() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    let saved = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { _, _, _, _ in
+        logins += 1
+        // Launched away from home; back home, DSM turns the saved password down.
+        guard logins > 1 else { throw SynologyError.unreachable("The request timed out.") }
+        throw SynologyError.api(code: 400, api: "SYNO.API.Auth")
+    }
+    let model = f.model(restore: true)
+    model.automaticReconnectInterval = .zero
+    try await waitUntil { !model.isRestoring }
+    #expect(model.pendingServer == nil)
+    model.scenePhaseChanged(.active)
+    try await waitUntil { model.pendingServer != nil }
+    #expect(logins == 2)
+    #expect(model.pendingServer?.host == saved.host)
+    #expect(model.stage == .ready && !model.isConnected)
+    model.cancelSignIn()
+    for _ in 0..<3 { model.scenePhaseChanged(.active) }
+    await model.waitForDrive(upTo: .milliseconds(30))
+    #expect(logins == 2)
+    #expect(model.pendingServer == nil)
+}
+
+/// The app becomes active, as it does right after launch, while the launch sign-in still waits
+/// for the server.
+@Test(arguments: [true, false])
+@MainActor func aTriggerDuringTheLaunchSignInIsAnsweredOnlyIfThatFails(_ launchConnects: Bool) async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    let pending = PendingLogin()
+    var logins = 0
+    f.services.login = { url, account, password, otp in
+        logins += 1
+        if logins == 1 { return try await pending.login(url, account, password, otp) }
+        return DSMSession(baseURL: url, sid: "home", apis: [:])
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { pending.continuation != nil }
+    model.scenePhaseChanged(.active)
+    await model.waitForDrive(upTo: .milliseconds(30))
+    // No second sign-in alongside the first, and no follow-up waiting out the interval.
+    #expect(logins == 1)
+    #expect(model.pendingAutomaticReconnect == nil)
+    #expect(model.reconnectRequestedDuringAttempt)
+    if launchConnects {
+        pending.finish("launch")
+    } else {
+        // For example, it set out on the network the app launched on.
+        pending.fail(SynologyError.unreachable("The network connection was lost."))
+    }
+    try await waitUntil { model.isConnected && !model.isReconnecting }
+    #expect(logins == (launchConnects ? 1 : 2))
+    #expect(!model.reconnectRequestedDuringAttempt)
+    #expect(model.pendingServer == nil)
+}
+
+@Test @MainActor func aNetworkChangeDuringAnAutomaticAttemptIsAnsweredWhenItFails() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var networkChanged: (@Sendable () -> Void)?
+    f.services.observeNetwork = { onChange in
+        networkChanged = onChange
+        return {}
+    }
+    let pending = PendingLogin()
+    var logins = 0
+    f.services.login = { url, account, password, otp in
+        logins += 1
+        switch logins {
+        case 1: throw SynologyError.unreachable("The request timed out.")
+        case 2: return try await pending.login(url, account, password, otp)
+        default: return DSMSession(baseURL: url, sid: "home", apis: [:])
+        }
+    }
+    let model = f.model(restore: true)
+    model.automaticReconnectInterval = .zero
+    try await waitUntil { !model.isRestoring }
+    model.scenePhaseChanged(.active)
+    try await waitUntil { pending.continuation != nil }
+    // Home Wi-Fi comes up while that attempt is still on its way over the network it set out on.
+    networkChanged?()
+    try await waitUntil { model.reconnectRequestedDuringAttempt }
+    #expect(logins == 2)
+    pending.fail(SynologyError.unreachable("The network connection was lost."))
+    try await waitUntil { model.isConnected && !model.isReconnecting }
+    #expect(logins == 3)
+    #expect(model.pendingServer == nil)
+}
+
 @Test @MainActor func networkChangeReconnectsAnOfflineLibraryUntilSignOut() async throws {
     let f = ConnectionFixture(); defer { f.cleanUp() }
     _ = try f.saveLibrary()
@@ -448,6 +544,15 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
     #expect(observers == 1 && stops == 0)
     await model.signOut()
     #expect(stops == 1)
+}
+
+@Test func onlyAMoveToAnotherUsableNetworkIsReported() {
+    var moves = NetworkMoveFilter<String>()
+    // The first report is the network the app already had; then the same one again, a move to
+    // Wi-Fi, losing the network, and finding Wi-Fi again.
+    let reports = [("cellular", true), ("cellular", true), ("wifi", true), ("none", false), ("wifi", true)]
+    let reported = reports.map { moves.isMove(to: $0.0, usable: $0.1) }
+    #expect(reported == [false, false, true, false, true])
 }
 
 @Test @MainActor func endedSessionIsRenewedWithTheSavedPasswordAndSignOutEndsTheNewOne() async throws {
@@ -614,6 +719,53 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
     #expect(logins == asked)
 }
 
+/// A server that doesn't answer the renewal, for example while it restarts, needs no one to sign
+/// in by hand: the library keeps its drive, and a later request may renew the session.
+@Test @MainActor func renewalThatCannotReachTheServerStaysQuietAndKeepsTheLibrary() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        guard logins == 1 else { throw SynologyError.unreachable("The request timed out.") }
+        return fileStationSession(url, "restored")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+    #expect(logins == 2)
+    #expect(model.pendingServer == nil && model.signInError == nil)
+    #expect((f.library.drive as? SynologyDrive) === drive && model.isConnected)
+    #expect(drive.session.sid == "restored")
+}
+
+@Test @MainActor func anEndedSessionWaitsForAReconnectionInProgress() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    let pending = PendingLogin()
+    var logins = 0
+    f.services.login = { url, account, password, otp in
+        logins += 1
+        if logins == 1 { return fileStationSession(url, "restored") }
+        return try await pending.login(url, account, password, otp)
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    let reconnect = Task { await model.reconnect() }
+    try await waitUntil { pending.continuation != nil }
+    // The reconnection brings its own session; the old drive doesn't sign in alongside it.
+    await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+    #expect(logins == 2)
+    pending.finish("reconnected")
+    await reconnect.value
+    #expect((f.library.drive as? SynologyDrive)?.session.sid == "reconnected")
+    #expect(logins == 2)
+}
+
 @Test @MainActor func automaticReconnectionIsNoNewConnectionIntent() async throws {
     let f = ConnectionFixture(); defer { f.cleanUp() }
     _ = try f.saveLibrary()
@@ -641,6 +793,55 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
     await model.reconnect()
     #expect(model.playbackConnectionToken != token)
     #expect(connectionChanges == 1)
+}
+
+@Test @MainActor func anAutomaticAttemptStillSigningInGivesWayToSignOut() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    let pending = PendingLogin()
+    var logins = 0
+    f.services.login = { url, account, password, otp in
+        logins += 1
+        guard logins > 1 else { throw SynologyError.unreachable("The request timed out.") }
+        return try await pending.login(url, account, password, otp)
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    model.scenePhaseChanged(.active)
+    try await waitUntil { pending.continuation != nil }
+    await model.signOut()
+    pending.finish("late-automatic")
+    try await waitUntil { f.loggedOut == ["late-automatic"] }
+    #expect(model.connection == nil && f.library.drive == nil && !model.isReconnecting)
+    #expect(model.stage == .welcome)
+}
+
+@Test @MainActor func anAutomaticAttemptStillSigningInGivesWayToReconnect() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    let pending = PendingLogin()
+    var logins = 0
+    f.services.login = { url, account, password, otp in
+        logins += 1
+        switch logins {
+        case 1: throw SynologyError.unreachable("The request timed out.")
+        case 2: return try await pending.login(url, account, password, otp)
+        default: return DSMSession(baseURL: url, sid: "asked", apis: [:])
+        }
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    model.scenePhaseChanged(.active)
+    try await waitUntil { pending.continuation != nil }
+    // Reconnect in Settings while the automatic attempt still waits for the server.
+    await model.reconnect()
+    #expect(model.isConnected && !model.isReconnecting)
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    #expect(drive.session.sid == "asked")
+    pending.finish("late-automatic")
+    try await waitUntil { f.loggedOut == ["late-automatic"] }
+    #expect((f.library.drive as? SynologyDrive) === drive)
+    #expect(logins == 3)
 }
 
 @Test @MainActor func aVoiceRequestWaitingForTheServerReconnectsAndPlays() async throws {
@@ -688,15 +889,17 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
         throw SynologyError.unreachable("The request timed out.")
     }
     let model = f.model(restore: true)
-    model.automaticReconnectInterval = .milliseconds(400)
+    // Long enough that the triggers below come within it even while other suites hold the main actor.
+    model.automaticReconnectInterval = .seconds(1)
     try await waitUntil { !model.isRestoring }
     model.scenePhaseChanged(.active)
     try await waitUntil { logins == 2 && !model.isReconnecting }
     for _ in 0..<3 { model.scenePhaseChanged(.active) }
     #expect(logins == 2)
     // With nothing else happening, the follow-up comes when the interval is up, and only once.
+    try await Task.sleep(for: .seconds(1))
     try await waitUntil { logins == 3 && !model.isReconnecting }
-    try await Task.sleep(for: .milliseconds(600))
+    try await Task.sleep(for: .milliseconds(1200))
     #expect(logins == 3)
     #expect(model.pendingAutomaticReconnect == nil)
     // Signing out cancels a follow-up that is still waiting.

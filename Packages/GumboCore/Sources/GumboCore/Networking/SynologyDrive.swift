@@ -49,7 +49,8 @@ public nonisolated final class SynologyDrive: RemoteDrive {
 
     /// Runs a request with the current session. When DSM answers that the session has ended, the
     /// drive signs in again, once for all the requests that noticed together, and repeats the
-    /// request with the new session. A second refusal is reported as it is.
+    /// request with the new session. A second refusal is reported as it is, and so is the ended
+    /// session when DSM turns the sign-in down.
     private func withSession<T>(_ request: (DSMSession) async throws -> T) async throws -> T {
         let session = state.current
         do {
@@ -66,6 +67,11 @@ public nonisolated final class SynologyDrive: RemoteDrive {
             } catch is CancellationError {
                 // The app declined to renew for now; the request itself wasn't cancelled.
                 try Task.checkCancellation()
+                throw error
+            } catch let refusal as SynologyError where refusal.refusesSignIn {
+                // Why DSM refused is for the sign-in to show. As this request's own error, a password
+                // to change (Auth 408) would read as a missing folder, a blocked address (407) as a
+                // read-only file.
                 throw error
             }
             let value = try await request(renewed)
