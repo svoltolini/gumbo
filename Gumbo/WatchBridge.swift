@@ -11,9 +11,15 @@ import UIKit
 /// Watch to clear its cached credentials, catalogue, and downloads. This message is delivered
 /// even when the Watch is disconnected — WatchConnectivity queues `transferUserInfo` payloads
 /// and delivers them when the Watch becomes reachable again.
+///
+/// The grant is saved with the library it covers, so relaunching this app, even in the
+/// background with no profile open yet, keeps its revision and the Watch keeps its downloads.
 @MainActor
 final class WatchBridge: NSObject, WCSessionDelegate {
-    /// Asked for the current state whenever a sync is due.
+    /// The library a grant covers (open profile, source and folder), or nil while no profile is
+    /// open on a ready library. Cheap, so the grant follows the app even with no Watch in reach.
+    var scopeProvider: (() -> String?)?
+    /// Asked for the current state whenever a sync is due. Its scope matches `scopeProvider`.
     var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?, scope: String)?)?
     var artworkProvider: ((WatchCatalogue) -> [WatchArtworkSource])?
     /// Produces a dedicated temporary copy, never a path into the phone's offline cache.
@@ -34,19 +40,19 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private static let deletionKey = "watch.serverDeletions.v1"
     private var serverDeletions: [String: [String]] = [:]
     private var deletionRevision: UInt64 = 0
-    private var snapshotRevision: UInt64 = 0
 
-    private static let authorizationKey = "watch.authorization"
-    private var authorization: WatchAuthorization
-    private var authorizationScope: String?
+    private static let grantKey = "watch.grant.v1"
+    /// Earlier versions saved the authorization alone, here.
+    private static let legacyAuthorizationKey = "watch.authorization"
+    private var currentGrant: WatchGrant
+    private var authorization: WatchAuthorization { currentGrant.authorization }
+    private var authorizationScope: String? { currentGrant.scope }
 
     override init() {
-        let saved = WatchAuthorization.decode(UserDefaults.standard.data(forKey: Self.authorizationKey))
-            ?? WatchAuthorization(revision: 0, isGranted: false)
-        authorization = saved.successor(granted: false)
+        currentGrant = WatchGrant.restored(from: UserDefaults.standard.data(forKey: Self.grantKey),
+                                           legacyAuthorization: UserDefaults.standard.data(forKey: Self.legacyAuthorizationKey))
         serverDeletions = UserDefaults.standard.dictionary(forKey: Self.deletionKey) as? [String: [String]] ?? [:]
         deletionRevision = UInt64(UserDefaults.standard.string(forKey: Self.deletionKey + ".revision") ?? "0") ?? 0
-        UserDefaults.standard.set(authorization.encoded, forKey: Self.authorizationKey)
         super.init()
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -91,8 +97,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         prepareArtwork(sources, scope: scope)
         let ready = Set(preparedArtworkSources).intersection(sources)
         catalogue.artwork = WatchArtwork.bounded(preparedArtwork, albumIDs: Set(ready.map(\.albumID)))
-        snapshotRevision += 1
-        catalogue.snapshotRevision = snapshotRevision
+        catalogue.snapshotRevision = currentGrant.nextSnapshotRevision()
+        persistGrant()
         return catalogue
     }
 
@@ -105,7 +111,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         artworkTask = Task { [weak self, artworkBuilder] in
             let images = await artworkBuilder.thumbnails(for: sources, scope: scope)
             guard !Task.isCancelled, let self, self.artworkRequestID == requestID,
-                  self.authorizationScope == scope, self.provider?()?.scope == scope else { return }
+                  self.authorizationScope == scope, self.scopeProvider?() == scope else { return }
             self.preparedArtworkSources = sources
             self.preparedArtwork = images
             self.artworkTask = nil
@@ -126,34 +132,36 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// profile is locked or switched, so another profile's data never leaks. The revocation is
     /// queued via `transferUserInfo` so a disconnected Watch receives it on next sync.
     func revoke() {
-        cancelAllRelay()
-        clearArtwork()
-        authorization = authorization.successor(granted: false)
-        authorizationScope = nil
-        persistAuthorization()
-        lastCatalogueKey = nil
-        lastCredentials = nil
+        currentGrant.revoke()
+        grantChanged()
         sendRevocation()
     }
 
-    private func persistAuthorization() {
-        UserDefaults.standard.set(authorization.encoded, forKey: Self.authorizationKey)
+    private func persistGrant() {
+        UserDefaults.standard.set(currentGrant.encoded, forKey: Self.grantKey)
+        UserDefaults.standard.removeObject(forKey: Self.legacyAuthorizationKey)
     }
 
     private func sendRevocation() {
-        guard WCSession.isSupported(), WCSession.default.activationState == .activated,
+        // Revision zero: nothing was ever granted from this install, and the Watch ignores it.
+        guard authorization.revision > 0, WCSession.isSupported(), WCSession.default.activationState == .activated,
               WCSession.default.isPaired, WCSession.default.isWatchAppInstalled else { return }
         _ = WCSession.default.transferUserInfo(["kind": "revoke", "authorization": authorization.encoded!])
     }
 
-    private func authorize(scope: String) {
-        guard !authorization.isGranted || authorizationScope != scope else { return }
-        clearArtwork()
+    /// Moves the grant with the library now open: kept for the same one, granted anew for any
+    /// other, revoked when a library open in this process closes. A grant restored at launch is
+    /// left alone until a library opens, so a relaunch never makes the Watch clear its downloads.
+    private func followLibrary() {
+        guard currentGrant.update(scope: scopeProvider?()) != .unchanged else { return }
+        grantChanged()
+    }
+
+    /// Nothing prepared or sent under the previous revision may continue under the new one.
+    private func grantChanged() {
         cancelAllRelay()
-        authorization = authorization.successor(granted: true)
-        authorizationScope = scope
-        snapshotRevision = 0
-        persistAuthorization()
+        clearArtwork()
+        persistGrant()
         lastCatalogueKey = nil
         lastCredentials = nil
     }
@@ -161,16 +169,15 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// Sends whatever changed since the last time; nothing when no watch is paired.
     func sync() {
         guard WCSession.isSupported() else { return }
+        followLibrary()
         let session = WCSession.default
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
             DiagnosticsLog.shared.record("Watch sync skipped: state \(session.activationState.rawValue), paired \(session.isPaired), app installed \(session.isWatchAppInstalled)")
             return
         }
-        guard let state = provider?() else {
-            if authorization.isGranted { revoke() } else { sendRevocation() }
-            return
-        }
-        authorize(scope: state.scope)
+        guard authorization.isGranted else { sendRevocation(); return }
+        // A grant restored at launch waits for its library; the Watch keeps what it already has.
+        guard let state = provider?(), state.scope == authorizationScope else { return }
         let catalogue = catalogueWithDeletions(state.catalogue, sourceID: state.credentials?.driveID, scope: state.scope)
         if let key = catalogue.contentKey, key != lastCatalogueKey, let data = try? JSONEncoder().encode(catalogue) {
             let url = FileManager.default.temporaryDirectory.appending(path: "watch-catalogue-\(UUID().uuidString).json")
@@ -247,11 +254,13 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     private func syncReply() -> [String: Any] {
-        guard let state = provider?() else {
-            if authorization.isGranted { revoke() }
-            return ["status": "revoked", "authorization": authorization.encoded!]
+        followLibrary()
+        guard authorization.isGranted else { return ["status": "revoked", "authorization": authorization.encoded!] }
+        guard let state = provider?(), state.scope == authorizationScope else {
+            // Relaunched with no profile open yet: the same revision tells the Watch to keep
+            // everything; the catalogue follows once the library opens.
+            return ["status": "waiting", "authorization": authorization.encoded!]
         }
-        authorize(scope: state.scope)
         var reply: [String: Any] = ["status": "ok", "authorization": authorization.encoded!]
         if let data = try? JSONEncoder().encode(catalogueWithDeletions(state.catalogue, sourceID: state.credentials?.driveID, scope: state.scope)),
            let packed = try? (data as NSData).compressed(using: .lzfse) as Data, packed.count <= 60_000 {

@@ -216,7 +216,7 @@ struct GumboApp: App {
         _player = State(initialValue: player)
         _downloads = State(initialValue: downloads)
         // A profile opening loads its data everywhere; switching away stops the music first.
-        profiles.onActivate = { [library, model, player, downloads, widgetFeed, profiles] profile in
+        profiles.onActivate = { [library, model, player, downloads, widgetFeed, watchBridge, profiles] profile in
             downloads.activeProfileID = profile.id
             library.loadProfileState()
             reconcileDownloads()
@@ -224,6 +224,9 @@ struct GumboApp: App {
             let settings = profiles.state.settings
             player.applySettings(repeatMode: PlayerModel.RepeatMode(rawValue: settings.repeatMode) ?? .off, shuffle: settings.shuffle)
             widgetFeed.refresh()
+            // The Watch grant sees every opening, so it knows the library was open here before a
+            // sign-out or folder change closes it, whether or not a Watch is in reach.
+            watchBridge.sync()
         }
         profiles.onDeactivate = { [model, player, library, downloads, widgetFeed, watchBridge] in
             downloads.revokeForegroundDownloads()
@@ -262,11 +265,18 @@ struct GumboApp: App {
         // Sample layout fixtures do not contact iCloud or change their profile as account checks finish.
         if !Self.isLayoutFixture { cloud.start() }
         // A paired Apple Watch gets the active profile's playlists and its own way into the server.
-        watchBridge.provider = { [library, model, profiles] in
+        // Its grant covers the profile, source and folder, never the profile session, which is new
+        // on every opening: relaunching must not make the Watch clear its downloads.
+        let watchScope: () -> String? = { [library, model, profiles] in
             guard model.stage == .ready, let active = profiles.active else { return nil }
+            return WatchGrant.scope(profileID: active.id, sourceID: library.catalogue.driveID, rootPath: library.catalogue.rootPath)
+        }
+        watchBridge.scopeProvider = watchScope
+        watchBridge.provider = { [library, model, profiles] in
+            guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name
             let catalogue = library.watchCatalogue(serverName: model.connection?.name ?? "Gumbo", profileName: profileName)
-            return (catalogue, model.watchCredentials(), "\(profiles.sessionID?.uuidString ?? "locked")|\(library.catalogue.driveID)|\(library.catalogue.rootPath)")
+            return (catalogue, model.watchCredentials(), scope)
         }
         watchBridge.audioFileProvider = { [model, library, profiles, downloads] playlist, watchTrack in
             guard let profileSession = profiles.sessionID, profiles.active?.id == playlist.profileID,
