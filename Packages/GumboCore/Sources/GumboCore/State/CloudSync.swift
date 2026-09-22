@@ -111,11 +111,26 @@ public final class CloudSync {
         isStarted = true
         accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                self?.accountChanged()
+                self?.accountChangeNotified()
                 await self?.refresh(reason: "iCloud account changed")
             }
         }
         Task { await refresh(reason: "launch") }
+    }
+
+    /// CloudKit posts this for every change of account status without saying which. A verified account
+    /// is revoked at once, before anything more runs in it, even when iCloud was only unavailable for a
+    /// moment: the open profile locks once rather than ever running under another account. With no
+    /// verified account there is nothing to revoke, so signing in only stops the work in flight and,
+    /// as at a launch signed in, the open profile keeps playing.
+    func accountChangeNotified() {
+        if currentUserRecordName != nil {
+            accountChanged()
+        } else {
+            generation = UUID()
+            for task in uploads.values { task.cancel() }
+            uploads = [:]
+        }
     }
 
     /// Revocation happens before any new account request, including while an old request is suspended.
@@ -164,7 +179,7 @@ public final class CloudSync {
             throw CancellationError()
         case .unavailable:
             // No evidence of another account: keep the account, its sync state and the open profile.
-            throw SyncFailure.message("iCloud is temporarily unavailable. Gumbo will try again.")
+            throw SyncFailure.message("iCloud is temporarily unavailable. Try again in a moment.")
         }
         guard currentUserRecordName != identity else { return }
         if currentUserRecordName != nil {
@@ -462,22 +477,7 @@ public final class CloudSync {
             remoteStamps[record.recordID.recordName] = decoded.state.updatedAt
             remoteStateDigests[record.recordID.recordName] = decoded.digest
         case "Family":
-            let provider: ProviderConfiguration?
-            if let stored = record["providerConnection"] {
-                guard let data = stored as? Data else { throw ProviderError.invalidConfiguration }
-                provider = try JSONDecoder().decode(ProviderConfiguration.self, from: data)
-            } else { provider = nil }
-            let info = FamilyInfo(
-                name: record["name"] as? String ?? "Family",
-                serverName: record["serverName"] as? String ?? "",
-                serverAccount: record["serverAccount"] as? String ?? "",
-                musicPath: record["musicPath"] as? String,
-                updatedAt: record["updatedAt"] as? Date ?? .distantPast,
-                familyAccount: record["familyAccount"] as? String,
-                familyPassword: record.encryptedValues["familyPassword"] as? String,
-                address: record["address"] as? String,
-                provider: provider
-            )
+            let info = try Self.familyInfo(from: record)
             remoteStamps[record.recordID.recordName] = info.updatedAt
             family = info
             onFamilyInfo?(info)
@@ -863,7 +863,8 @@ public final class CloudSync {
                 if record.recordType == "Family", let plan = familyInFlight {
                     familyInFlight = nil
                     recordFamilyUpload(plan.upload)
-                    family = plan.info
+                    // Fields this device did not write stay unknown until a pull, rather than read as its own.
+                    if plan.knowsRecord { family = plan.info }
                 }
             case .failure(let error):
                 guard let ours = records.first(where: { $0.recordID == id }) else { throw error }
@@ -901,6 +902,7 @@ public final class CloudSync {
                             for key in ours.changedKeys() where !encryptedKeys.contains(key) { server[key] = ours[key] }
                             for key in encryptedKeys { server.encryptedValues[key] = ours.encryptedValues[key] }
                             retry.append(server)
+                            if ours.recordType == "Family" { familyInFlight?.rebase(onto: try? Self.familyInfo(from: server)) }
                         }
                     } else {
                         try await apply(server)
@@ -1076,6 +1078,25 @@ public final class CloudSync {
     private func recordFamilyUpload(_ upload: FamilyRecordUpload) {
         if accountState?.zones[zoneOwnerName] == nil { accountState?.zones[zoneOwnerName] = .init() }
         accountState?.zones[zoneOwnerName]?.familyUpload = upload
+    }
+
+    private static func familyInfo(from record: CKRecord) throws -> FamilyInfo {
+        let provider: ProviderConfiguration?
+        if let stored = record["providerConnection"] {
+            guard let data = stored as? Data else { throw ProviderError.invalidConfiguration }
+            provider = try JSONDecoder().decode(ProviderConfiguration.self, from: data)
+        } else { provider = nil }
+        return FamilyInfo(
+            name: record["name"] as? String ?? "Family",
+            serverName: record["serverName"] as? String ?? "",
+            serverAccount: record["serverAccount"] as? String ?? "",
+            musicPath: record["musicPath"] as? String,
+            updatedAt: record["updatedAt"] as? Date ?? .distantPast,
+            familyAccount: record["familyAccount"] as? String,
+            familyPassword: record.encryptedValues["familyPassword"] as? String,
+            address: record["address"] as? String,
+            provider: provider
+        )
     }
 
     private static func profile(from record: CKRecord) -> Profile? {

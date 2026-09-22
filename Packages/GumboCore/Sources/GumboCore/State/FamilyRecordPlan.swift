@@ -54,6 +54,9 @@ nonisolated struct FamilyRecordPlan: Equatable, Sendable {
     var info: FamilyInfo
     var writesDetails: Bool
     var writesCredentials: Bool
+    /// Whether `info` is the whole record. Planned against an unknown iCloud copy, the fields this
+    /// device does not write are iCloud's, and `info` has only this device's view of them.
+    var knowsRecord: Bool
     /// Becomes this device's last upload once CloudKit accepts the record, or at once when nothing needs sending.
     var upload: FamilyRecordUpload
 
@@ -84,6 +87,8 @@ nonisolated struct FamilyRecordPlan: Equatable, Sendable {
             writesCredentials = known.map { $0.familyAccount != nil || $0.familyPassword != nil } ?? true
         } else {
             // Never held here: the family keeps what it has, and a record created again gets it back.
+            // Kept even beside details this device changes: it cannot tell whether another address
+            // still reaches the NAS they were made for, and erasing them would cut every member off.
             credentials = (server?.familyAccount, server?.familyPassword)
             writesCredentials = recreating && credentials.account != nil
         }
@@ -96,6 +101,23 @@ nonisolated struct FamilyRecordPlan: Equatable, Sendable {
         self.info = info
         self.writesDetails = writesDetails
         self.writesCredentials = writesCredentials
+        knowsRecord = known != nil || recreating || (writesDetails && writesCredentials)
         self.upload = upload
+    }
+
+    /// The save is retried on top of iCloud's current copy (nil when unreadable): the fields this
+    /// device does not write read as that copy does.
+    mutating func rebase(onto server: FamilyInfo?) {
+        guard let server else {
+            knowsRecord = false
+            return
+        }
+        var merged = writesDetails ? info : server
+        merged.familyAccount = writesCredentials ? info.familyAccount : server.familyAccount
+        merged.familyPassword = writesCredentials ? info.familyPassword : server.familyPassword
+        merged.credentialsRevision = nil
+        merged.updatedAt = info.updatedAt
+        info = merged
+        knowsRecord = true
     }
 }

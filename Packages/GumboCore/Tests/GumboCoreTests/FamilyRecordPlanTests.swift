@@ -47,6 +47,43 @@ import Testing
         #expect(!FamilyRecordPlan(intent: other, lastUpload: first.upload, server: nil).needsSave)
     }
 
+    /// Another address may reach the same NAS, so a device without Family Access never erases the
+    /// family's credentials, even beside details it cannot match to the server they were made for.
+    @Test func deviceWithoutFamilyAccessKeepsTheCredentialsBesideDetailsForAnotherAddress() {
+        var moved = details
+        moved.address = "https://192.168.1.20:5001"
+        let plan = FamilyRecordPlan(intent: moved, lastUpload: FamilyRecordUpload(details),
+                                    server: server(details, account: "family-reader", password: "first"))
+        #expect(plan.writesDetails)
+        #expect(!plan.writesCredentials)
+        #expect(plan.info.address == "https://192.168.1.20:5001")
+        #expect(plan.info.familyAccount == "family-reader")
+        #expect(plan.info.familyPassword == "first")
+    }
+
+    @Test func recordPlannedWithoutICloudsCopyKnowsOnlyWhatItWrites() {
+        var other = details
+        other.name = "Owner's iPad family"
+        // After a relaunch, iCloud's copy is unknown until it changes again.
+        let detailsOnly = FamilyRecordPlan(intent: other, lastUpload: FamilyRecordUpload(details), server: nil)
+        #expect(detailsOnly.writesDetails && !detailsOnly.writesCredentials)
+        #expect(!detailsOnly.knowsRecord)
+        #expect(FamilyRecordPlan(intent: holding("first", revision: "r1"), lastUpload: nil, server: nil).knowsRecord)
+        #expect(FamilyRecordPlan(intent: other, lastUpload: nil, server: server(details, account: "family-reader", password: "first")).knowsRecord)
+        #expect(FamilyRecordPlan(intent: other, lastUpload: FamilyRecordUpload(details), server: nil, recreating: true).knowsRecord)
+
+        // A conflict is retried on top of iCloud's copy, which supplies everything not written here.
+        var retried = detailsOnly
+        retried.rebase(onto: server(details, account: "family-reader", password: "first"))
+        #expect(retried.knowsRecord)
+        #expect(retried.info.name == "Owner's iPad family")
+        #expect(retried.info.familyAccount == "family-reader")
+        #expect(retried.info.familyPassword == "first")
+        var unreadable = FamilyRecordPlan(intent: other, lastUpload: nil, server: server(details, account: "family-reader", password: "first"))
+        unreadable.rebase(onto: nil)
+        #expect(!unreadable.knowsRecord)
+    }
+
     @Test func credentialsHeldHereAreSentOnceAndAfterEachLocalChange() {
         let intent = holding("first", revision: "r1")
         let first = FamilyRecordPlan(intent: intent, lastUpload: nil, server: nil)

@@ -1124,6 +1124,72 @@ private func seededMissingRecordFixture() async throws -> (CloudFixture, String)
     #expect(deactivations == 0)
 }
 
+@Test @MainActor func cloudSigningInWhileRunningWithoutAnAccountKeepsTheProfileOpen() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.account = nil
+    var deactivations = 0
+    f.profiles.onDeactivate = { deactivations += 1 }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    await f.sync.refresh(reason: "launch without an account")
+    f.account = "A"
+    f.sync.accountChangeNotified()
+    await f.sync.refresh(reason: "iCloud account changed")
+    #expect(!f.profiles.isLocked)
+    #expect(deactivations == 0)
+    #expect(f.sync.currentUserRecordName == "A")
+    #expect(f.sync.isActive)
+
+    // A verified account is still revoked the moment CloudKit reports a change.
+    f.sync.accountChangeNotified()
+    #expect(f.profiles.isLocked)
+    #expect(deactivations == 1)
+    #expect(f.sync.currentUserRecordName == nil)
+}
+
+@Test @MainActor func cloudLaunchWithoutAnAccountKeepsThePreviousAccountsSyncStateForItsReturn() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    f.pages = [.init(records: [], token: Data("cursor".utf8))]
+    await f.sync.refresh(reason: "signed in")
+    #expect(f.sync.isActive)
+    let before = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+
+    f.relaunch(restoreProfiles: true) // Signed out while Gumbo was not running.
+    f.account = nil
+    var deactivations = 0
+    f.profiles.onDeactivate = { deactivations += 1 }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    await f.sync.refresh(reason: "launch without an account")
+    #expect(!f.profiles.isLocked)
+    #expect(deactivations == 0)
+    #expect(f.sync.status == .noAccount)
+    let kept = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(kept.zones[CKCurrentUserDefaultName]?.changeToken == Data("cursor".utf8))
+    #expect(kept.subscribed == before.subscribed)
+    #expect(kept.profileIDs == before.profileIDs)
+
+    f.account = "A"
+    await f.sync.refresh(reason: "signed in again")
+    #expect(f.sync.isActive)
+    #expect(f.requests.last?.1 == Data("cursor".utf8))
+    #expect(f.subscriptions == 1)
+    #expect(deactivations == 0)
+}
+
+@Test @MainActor func cloudInvitationWhileICloudIsUnavailableKeepsTheAccountAndPromisesNoRetry() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    var deactivations = 0
+    f.profiles.onDeactivate = { deactivations += 1 }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    await f.sync.refresh(reason: "signed in")
+    f.identityUnavailable = true
+    let message = await f.sync.accept(url: try #require(URL(string: "https://www.icloud.com/share/0gumbo-fixture#Family")))
+    #expect(message == "iCloud is temporarily unavailable. Try again in a moment.")
+    #expect(!f.profiles.isLocked)
+    #expect(deactivations == 0)
+    #expect(f.sync.currentUserRecordName == "A")
+}
+
 // MARK: - Family record uploads (#222, #250)
 
 private let familyDetails = FamilyInfo(name: "NAS family", serverName: "NAS", serverAccount: "owner", musicPath: "/music",
@@ -1203,7 +1269,29 @@ private let familyDetails = FamilyInfo(name: "NAS family", serverName: "NAS", se
     #expect(record["name"] as? String == familyDetails.name)
     #expect(record["familyAccount"] as? String == "family-reader")
     #expect(record.encryptedValues["familyPassword"] as? String == "kept-fixture")
+    // What this device knows of the family now reads as iCloud's copy does.
+    #expect(fixture.sync.family?.name == familyDetails.name)
+    #expect(fixture.sync.family?.familyAccount == "family-reader")
+    #expect(fixture.sync.family?.familyPassword == "kept-fixture")
     if case .synced = fixture.sync.status {} else { Issue.record("The family record should reconcile") }
+}
+
+@Test @MainActor func familyDetailsSentWithoutKnowingICloudsCopyLeaveTheRestUnknown() async throws {
+    let (fixture, _) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var local = familyDetails
+    fixture.sync.familyInfoProvider = { local }
+    await fixture.sync.refresh(reason: "details sent")
+    #expect(fixture.familyUploads.count == 1)
+
+    fixture.relaunch()
+    fixture.profiles.sync = nil
+    fixture.sync.familyInfoProvider = { local }
+    local.musicPath = "/music/library"
+    await fixture.sync.refresh(reason: "details changed after relaunch")
+    #expect(fixture.familyUploads.count == 2)
+    // iCloud may hold another device's credentials: this device's lack of them says nothing.
+    #expect(fixture.sync.family == nil)
 }
 
 @Test @MainActor func familyUploadIsNotRepeatedAfterRelaunchAndFollowsRotationAndRemovalHere() async throws {
@@ -1289,6 +1377,108 @@ private let familyDetails = FamilyInfo(name: "NAS family", serverName: "NAS", se
     #expect(fixture.familyUploads.count == 3)
     #expect(fixture.familyUploads.last?.encryptedValues["familyPassword"] as? String == "rotated-fixture")
     #expect(fixture.sync.family?.familyPassword == "rotated-fixture")
+    await fixture.sync.refresh(reason: "settled")
+    #expect(fixture.familyUploads.count == 3)
+}
+
+@Test @MainActor func failedFamilyRotationAfterAnAcceptedUploadIsSentAgain() async throws {
+    let (fixture, _) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var info = familyDetails
+    info.familyAccount = "family-reader"
+    info.familyPassword = "first-fixture"
+    info.credentialsRevision = "first"
+    fixture.sync.familyInfoProvider = { info }
+    await fixture.sync.refresh(reason: "set up")
+    #expect(fixture.familyUploads.count == 1)
+
+    info.familyPassword = "rotated-fixture"
+    info.credentialsRevision = "rotated"
+    fixture.saveOutcomes = { records in
+        var results: [CKRecord.ID: Result<CKRecord, any Error>] = [:]
+        for record in records {
+            if record.recordType == "Family" { results[record.recordID] = .failure(CKError(.networkFailure)) }
+            else { results[record.recordID] = .success(record) }
+        }
+        return results
+    }
+    await fixture.sync.refresh(reason: "rotation fails")
+    #expect(fixture.familyUploads.count == 2)
+    #expect(fixture.sync.family?.familyPassword == "first-fixture")
+    fixture.saveOutcomes = nil
+    await fixture.sync.refresh(reason: "next refresh")
+    #expect(fixture.familyUploads.count == 3)
+    #expect(fixture.familyUploads.last?.encryptedValues["familyPassword"] as? String == "rotated-fixture")
+    await fixture.sync.refresh(reason: "settled")
+    #expect(fixture.familyUploads.count == 3)
+}
+
+@Test @MainActor func familyRecordDeletedFromICloudIsCreatedAgainWithTheFamilysCredentials() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.profiles.sync = nil
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    var local = familyDetails
+    local.name = "Owner's iPad family" // This device holds no Family Access.
+    f.sync.familyInfoProvider = { local }
+    var shared = familyDetails
+    shared.familyAccount = "family-reader"
+    shared.familyPassword = "kept-fixture"
+    f.pages = [.init(records: [.success(f.familyRecord(shared, updatedAt: Date(timeIntervalSince1970: 100)))], token: Data("1".utf8))]
+    await f.sync.refresh(reason: "second owner device")
+    #expect(f.familyUploads.count == 1)
+
+    let id = CKRecord.ID(recordName: "family", zoneID: .init(zoneName: "Family", ownerName: CKCurrentUserDefaultName))
+    f.pages = [.init(records: [], deletions: [.init(id: id, type: "Family")], token: Data("2".utf8))]
+    await f.sync.refresh(reason: "family record deleted")
+    let created = try #require(f.familyUploads.last)
+    #expect(f.familyUploads.count == 2)
+    #expect(created["name"] as? String == "Owner's iPad family")
+    #expect(created["serverName"] as? String == "NAS")
+    #expect(created["familyAccount"] as? String == "family-reader")
+    #expect(created.encryptedValues["familyPassword"] as? String == "kept-fixture")
+    await f.sync.refresh(reason: "settled")
+    #expect(f.familyUploads.count == 2)
+}
+
+@Test @MainActor func familyRecordMissingOnSaveIsCreatedAgainInFullAndCountsAsSent() async throws {
+    let (fixture, _) = try await seededMissingRecordFixture()
+    defer { fixture.cleanUp() }
+    var info = familyDetails
+    info.familyAccount = "family-reader"
+    info.familyPassword = "first-fixture"
+    info.credentialsRevision = "first"
+    fixture.sync.familyInfoProvider = { info }
+    await fixture.sync.refresh(reason: "set up")
+    #expect(fixture.familyUploads.count == 1)
+
+    info.familyPassword = "rotated-fixture"
+    info.credentialsRevision = "rotated"
+    var rejected = false
+    fixture.saveOutcomes = { records in
+        var results: [CKRecord.ID: Result<CKRecord, any Error>] = [:]
+        for record in records {
+            if record.recordType == "Family", !rejected {
+                rejected = true
+                results[record.recordID] = .failure(CKError(.unknownItem))
+            } else { results[record.recordID] = .success(record) }
+        }
+        return results
+    }
+    await fixture.sync.refresh(reason: "rotated, but the record is gone")
+    let created = try #require(fixture.familyUploads.last)
+    #expect(fixture.familyUploads.count == 3)
+    #expect(!fixture.familyUploads[1].changedKeys().contains("serverName"))
+    #expect(created["name"] as? String == familyDetails.name)
+    #expect(created["serverName"] as? String == "NAS")
+    #expect(created["serverAccount"] as? String == "owner")
+    #expect(created["musicPath"] as? String == "/music")
+    #expect(created["address"] as? String == familyDetails.address)
+    #expect(created["familyAccount"] as? String == "family-reader")
+    #expect(created.encryptedValues["familyPassword"] as? String == "rotated-fixture")
+    let upload = try fixture.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName).zones[CKCurrentUserDefaultName]?.familyUpload
+    #expect(upload == FamilyRecordUpload(info))
+    #expect(fixture.sync.family?.familyPassword == "rotated-fixture")
+    if case .synced = fixture.sync.status {} else { Issue.record("The family record should be created again") }
     await fixture.sync.refresh(reason: "settled")
     #expect(fixture.familyUploads.count == 3)
 }
