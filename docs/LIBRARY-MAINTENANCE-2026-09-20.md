@@ -20,6 +20,7 @@ Advanced Settings contains two owner-controlled tools. **Find Missing Genres** s
 | No network, expired sign-in, missing file, short response | Report the check as unavailable. Do not label the file corrupt or enable deletion. |
 | Active download / conversion | Files modified within an hour, without a modification time, or changing during inspection are kept. Recheck once work finishes. |
 | Valid music with a hash filename | Parse its actual audio container. A readable index is kept even when the filename resembles a failed conversion. |
+| Hidden `._` companions left by macOS copies | Never songs: scans skip them, Problem Files never lists them, and tag writes and deletion refuse them. A library indexed by an older build drops them on its next complete update without reporting them as deleted from the NAS. |
 | Unsupported / unusual format | Keep the file for a separate check. Raw AAC, non-MP4 formats and unrecognized MP4 layouts are not condemned because parsing failed. |
 | Huge / malformed MP4 headers | Bound reads, arithmetic and atom count. Parsing runs away from the UI thread. |
 | Unknown album, regional catalogue gap, remix/deluxe edition, several artist credits | Exact full-credit matching; no guess when the result is absent or ambiguous. Manual genre entry remains available. |

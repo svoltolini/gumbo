@@ -196,6 +196,9 @@ public final class LibraryIndexer {
                         CoverStore.$directoryOverride.withValue(coverDirectory) {
                             CoverStore.$indexingRun.withValue(run) {
                                 var built = Catalogue.build(folders: folders, rootPath: rootPath, serverName: serverName, driveID: driveID, existing: existing, forceMetadataReread: forceMetadataReread)
+                                if let existing, existing.driveID == driveID, existing.rootPath == rootPath {
+                                    Catalogue.discardHiddenFolderCovers(previous: existing, rebuilt: built)
+                                }
                                 if run.isActive, built.enrichedTrackCount > 0 { built.regroupByTags() }
                                 return built
                             }

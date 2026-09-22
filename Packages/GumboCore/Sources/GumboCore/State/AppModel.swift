@@ -461,8 +461,7 @@ public final class AppModel {
             let presentIDs = Set(catalogue.albums.flatMap(\.tracks).map(\.id))
             self.onVerifiedServerListing?(catalogue.driveID, presentIDs)
             guard let existing, existing.driveID == catalogue.driveID, existing.rootPath == catalogue.rootPath else { return }
-            let previousIDs = Set(existing.albums.flatMap(\.tracks).map(\.id))
-            let removed = previousIDs.subtracting(presentIDs)
+            let removed = existing.removedTrackIDs(present: presentIDs)
             if !removed.isEmpty { self.library.onServerTracksDeleted?(catalogue.driveID, removed) }
         }) { [weak self] catalogue in
             guard let self, generation == connectionGeneration,
@@ -914,7 +913,7 @@ public final class AppModel {
         }
         // Catch a wrong mount before enabling writes. The user explicitly confirms the folder mapping.
         guard let sample = library.catalogue.albums.flatMap(\.tracks).first(where: { track in
-            guard let path = track.path else { return false }
+            guard let path = track.path, !track.isHiddenFile else { return false }
             let extensionName = (path as NSString).pathExtension.lowercased()
             return allowsReviewedDeletion ? RemoteDriveSupport.audioExtensions.contains(extensionName) : ["mp3", "flac", "m4a"].contains(extensionName)
         }), let path = sample.path else { throw MetadataWriteError.noFile }

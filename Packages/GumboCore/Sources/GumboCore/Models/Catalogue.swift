@@ -393,6 +393,21 @@ public nonisolated struct Catalogue: Codable, Sendable {
         }
     }
 
+    /// Scans before hidden files were ignored could store "._Cover (Front).jpg", which holds only
+    /// Finder metadata, as an album's cover; an album with a cover never looks for one again. Forget
+    /// it under the old album and the folder albums rebuilt from its songs, before regrouping can
+    /// copy it on, so the cover pass fetches the real picture.
+    nonisolated static func discardHiddenFolderCovers(previous: Catalogue, rebuilt: Catalogue) {
+        let affected = previous.albums.filter { album in
+            album.coverPath.map { RemoteDriveSupport.isHidden(($0 as NSString).lastPathComponent) } ?? false
+        }
+        guard !affected.isEmpty else { return }
+        let songs = Set(affected.flatMap(\.tracks).map(\.id))
+        let rebuiltIDs = rebuilt.albums.filter { album in album.tracks.contains { songs.contains($0.id) } }.map(\.id)
+        for id in Set(affected.map(\.id)).union(rebuiltIDs) { CoverStore.remove(for: id) }
+        diagnostics("Discarded covers read from hidden files for \(affected.count) albums; they are looked up again")
+    }
+
     /// Longest directory prefix shared by every path.
     public nonisolated static func commonDirectory(of paths: [String]) -> String? {
         guard var common = paths.first.map({ Array($0.split(separator: "/").dropLast()) }) else { return nil }
@@ -409,6 +424,13 @@ public nonisolated struct Catalogue: Codable, Sendable {
     /// The album that currently holds a track, wherever regrouping has moved it.
     public func album(containing trackID: String) -> Album? {
         albums.first { album in album.tracks.contains { $0.id == trackID } }
+    }
+
+    /// Songs this catalogue lists that a newer complete listing no longer has. Hidden "._" files kept
+    /// by a catalogue saved before scans ignored them were not deleted from the server: reported as
+    /// deletions, they would stop playback and add a lasting download and Watch marker for each one.
+    func removedTrackIDs(present: Set<String>) -> Set<String> {
+        Set(albums.flatMap(\.tracks).filter { !$0.isHiddenFile }.map(\.id)).subtracting(present)
     }
 
     /// Replaces one track with its enriched version and refreshes its album's tags. The track is
