@@ -20,6 +20,7 @@ import Testing
         services.log = { _ in }
         services.info = { _ in nil }
         services.logout = { [weak self] in self?.loggedOut.append($0.sid) }
+        services.observeNetwork = { _ in {} }
     }
 
     func cleanUp() { defaults.removePersistentDomain(forName: suite) }
@@ -313,4 +314,257 @@ import Testing
     await model.reconnect()
     #expect(model.pendingServer?.host == saved.host)
     #expect(f.library.catalogue.trackCount == catalogue.trackCount)
+}
+
+// MARK: - Offline launches and ended sessions
+
+extension ConnectionFixture {
+    /// A saved server whose cached library opens before the server answers. Automatic library
+    /// refreshes are off, so no scan runs alongside the connection under test.
+    func saveLibrary() throws -> ServerConnection {
+        let saved = ServerConnection(name: "NAS", baseURL: URL(string: "https://nas.example:5001")!, account: "listener", musicPath: "/music")
+        try save(saved)
+        var catalogue = SampleLibrary.catalogue
+        catalogue.driveID = saved.sourceID
+        catalogue.rootPath = "/music"
+        services.loadCatalogue = { catalogue }
+        defaults.set(false, forKey: "watchFolder")
+        return saved
+    }
+}
+
+private nonisolated func fileStationSession(_ url: URL, _ sid: String) -> DSMSession {
+    let fileStation = SynologyAPIDescriptor(path: "entry.cgi", minVersion: 1, maxVersion: 2)
+    return DSMSession(baseURL: url, sid: sid, apis: ["SYNO.FileStation.List": fileStation, "SYNO.FileStation.Download": fileStation],
+                      account: "listener")
+}
+
+/// A drive whose first session, "restored", has since been ended by the server.
+private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ renewal: @escaping SynologyDrive.SessionRenewal) -> SynologyDrive {
+    SynologyDrive(session: session, displayName: name, renewal: renewal) { url in
+        let sid = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "_sid" }?.value
+        guard sid != "restored" else { throw SynologyError.api(code: 119, api: "SYNO.FileStation.List") }
+        return SynologyFileList(files: [], offset: 0, total: 0)
+    }
+}
+
+@Test @MainActor func offlineLaunchReconnectsWhenTheAppBecomesActive() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    let saved = try f.saveLibrary()
+    var reachable = false
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        guard reachable else { throw SynologyError.unreachable("The request timed out.") }
+        return DSMSession(baseURL: url, sid: "home", apis: [:])
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    #expect(model.stage == .ready && !model.isConnected)
+    #expect(model.pendingServer == nil)
+    reachable = true
+    model.scenePhaseChanged(.active)
+    try await waitUntil { model.isConnected }
+    #expect(logins == 2)
+    #expect(model.signInError == nil)
+    #expect(model.pendingServer == nil)
+    #expect(model.connection == saved)
+    #expect(f.library.catalogue.trackCount == SampleLibrary.catalogue.trackCount)
+}
+
+@Test @MainActor func automaticReconnectionStaysQuietAndIsSpacedOut() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { _, _, _, _ in
+        logins += 1
+        throw SynologyError.unreachable("The request timed out.")
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    model.scenePhaseChanged(.active)
+    try await waitUntil { logins == 2 && !model.isReconnecting }
+    // Coming straight back waits for the interval instead of asking the server again.
+    model.scenePhaseChanged(.inactive)
+    model.scenePhaseChanged(.active)
+    await model.waitForDrive(upTo: .milliseconds(30))
+    #expect(logins == 2)
+    // A server that can't be reached never brings up the sign-in sheet.
+    #expect(model.pendingServer == nil && !model.needsOTP)
+    #expect(model.stage == .ready && !model.isConnected)
+    #expect(model.signInError != nil)
+    model.automaticReconnectInterval = .zero
+    model.scenePhaseChanged(.active)
+    try await waitUntil { logins == 3 && !model.isReconnecting }
+    #expect(model.pendingServer == nil)
+}
+
+@Test @MainActor func automaticReconnectionWaitsForThePersonAfterARefusedSignIn() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    let saved = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { _, _, _, _ in
+        logins += 1
+        throw SynologyError.api(code: 400, api: "SYNO.API.Auth")
+    }
+    let model = f.model(restore: true)
+    model.automaticReconnectInterval = .zero
+    try await waitUntil { !model.isRestoring }
+    #expect(model.pendingServer?.host == saved.host)
+    model.cancelSignIn()
+    for _ in 0..<3 { model.scenePhaseChanged(.active) }
+    await model.waitForDrive(upTo: .milliseconds(30))
+    #expect(logins == 1)
+    #expect(model.pendingServer == nil)
+    // Reconnect stays available whenever someone asks for it.
+    await model.reconnect()
+    #expect(logins == 2)
+    #expect(model.pendingServer?.host == saved.host)
+}
+
+@Test @MainActor func networkChangeReconnectsAnOfflineLibraryUntilSignOut() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var networkChanged: (@Sendable () -> Void)?
+    var observers = 0
+    var stops = 0
+    f.services.observeNetwork = { onChange in
+        observers += 1
+        networkChanged = onChange
+        return { stops += 1 }
+    }
+    var reachable = false
+    f.services.login = { url, _, _, _ in
+        guard reachable else { throw SynologyError.unreachable("offline") }
+        return DSMSession(baseURL: url, sid: "home", apis: [:])
+    }
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    #expect(observers == 1)
+    #expect(!model.isConnected)
+    reachable = true
+    networkChanged?()
+    try await waitUntil { model.isConnected }
+    #expect(observers == 1 && stops == 0)
+    await model.signOut()
+    #expect(stops == 1)
+}
+
+@Test @MainActor func endedSessionIsRenewedWithTheSavedPasswordAndSignOutEndsTheNewOne() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins: [String?] = []
+    f.services.login = { url, _, password, otp in
+        logins.append(otp)
+        #expect(password == "test password")
+        return fileStationSession(url, logins.count == 1 ? "restored" : "renewed")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    try await drive.checkSession(folder: "/music")
+    #expect(logins == [nil, nil])
+    #expect(drive.session.sid == "renewed")
+    #expect((f.library.drive as? SynologyDrive) === drive)
+    #expect(model.isConnected && model.pendingServer == nil)
+    await model.signOut()
+    #expect(f.loggedOut == ["renewed"])
+}
+
+@Test @MainActor func foregroundChecksAnIdleSessionAndRenewsItBeforePlayback() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        return fileStationSession(url, logins == 1 ? "restored" : "renewed")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    // A session that answered moments ago isn't checked.
+    model.scenePhaseChanged(.active)
+    await model.waitForDrive(upTo: .milliseconds(30))
+    #expect(logins == 1)
+    model.sessionCheckIdleTime = .zero
+    model.scenePhaseChanged(.active)
+    try await waitUntil { drive.session.sid == "renewed" }
+    #expect(logins == 2)
+    #expect(drive.streamURL(for: "/music/a.flac").flatMap(drive.sessionID(of:)) == "renewed")
+}
+
+@Test @MainActor func renewalNeedingAOneTimeCodeAsksOnceAndLeavesTheLibraryOffline() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    let saved = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        guard logins == 1 else { throw SynologyError.twoFactorRequired }
+        return fileStationSession(url, "restored")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    model.automaticReconnectInterval = .zero
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+    #expect(logins == 2)
+    #expect(model.needsOTP)
+    #expect(model.pendingServer?.host == saved.host)
+    #expect(model.pendingReconnectPassword == "test password")
+    #expect(model.stage == .ready && !model.isConnected)
+    #expect(f.library.catalogue.trackCount == SampleLibrary.catalogue.trackCount)
+    // Neither the old drive nor the app coming back signs in again by itself.
+    await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+    model.cancelSignIn()
+    model.scenePhaseChanged(.active)
+    await model.waitForDrive(upTo: .milliseconds(30))
+    #expect(logins == 2)
+    await model.signOut()
+    #expect(f.loggedOut.isEmpty)
+}
+
+@Test @MainActor func aDriveLeftBehindBySignOutNeverSignsInAgain() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        return fileStationSession(url, "restored")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    await model.signOut()
+    await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+    #expect(logins == 1)
+    #expect(model.pendingServer == nil)
+}
+
+@Test @MainActor func failedStreamIsLoadedAgainOnlyWithAFreshSession() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    var logins = 0
+    f.services.login = { url, _, _, _ in
+        logins += 1
+        return fileStationSession(url, logins == 1 ? "restored" : "renewed")
+    }
+    f.services.synologyDrive = expiringDrive
+    let model = f.model(restore: true)
+    try await waitUntil { !model.isRestoring }
+    let drive = try #require(f.library.drive as? SynologyDrive)
+    let stale = try #require(drive.streamURL(for: "/music/a.flac"))
+    #expect(await model.recoverStream(from: stale))
+    #expect(logins == 2)
+    // Already renewed: the player may try again without another sign-in.
+    #expect(await model.recoverStream(from: stale))
+    #expect(logins == 2)
+    // A song that failed on a working session, or a downloaded file, is not retried.
+    let fresh = try #require(drive.streamURL(for: "/music/a.flac"))
+    #expect(await model.recoverStream(from: fresh) == false)
+    #expect(await model.recoverStream(from: URL(filePath: "/downloads/a.flac")) == false)
+    #expect(logins == 2)
 }

@@ -852,6 +852,80 @@ import Testing
         #expect(!WidgetFeed.Signature(library: library, player: fixture.model, downloads: downloads).isPlaying)
     }
 
+    @Test func streamRefusedForAnEndedSessionLoadsOnceMoreWithAFreshAddress() async throws {
+        let fixture = PlaybackFixture()
+        var address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
+        let renewed = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=renewed"))
+        fixture.model.streamURLProvider = { _ in address }
+        var asked: [URL] = []
+        fixture.model.streamFailureRecovery = { url in
+            asked.append(url)
+            address = renewed
+            return true
+        }
+        fixture.model.play(queue: [track("first")], title: "Queue")
+        fixture.transports[0].status = .failed("Cannot Open")
+        #expect(fixture.model.lastError == "Cannot Open")
+        try await playbackWaitUntil { fixture.transports.count == 2 }
+        #expect(asked.map(\.absoluteString) == ["https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"])
+        #expect(fixture.urls.last == renewed)
+        #expect(fixture.transports[0].invalidated)
+        #expect(fixture.model.lastError == nil)
+        #expect(fixture.model.queueTitle == "Queue")
+        fixture.transports[1].status = .ready
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.startedTrackIDs == ["first"])
+        // The reloaded song failing again is reported; there is one recovery per request to play.
+        fixture.transports[1].status = .failed("Cannot Open")
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(fixture.transports.count == 2)
+        #expect(asked.count == 1)
+        #expect(!fixture.model.isPlaying)
+        #expect(fixture.model.lastError == "Cannot Open")
+    }
+
+    @Test func streamRecoveryYieldsToALaterCommandAndToAnUnrecoverableFailure() async throws {
+        let fixture = PlaybackFixture()
+        let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
+        fixture.model.streamURLProvider = { _ in address }
+        var answer = true
+        var asked = 0
+        fixture.model.streamFailureRecovery = { _ in
+            asked += 1
+            try? await Task.sleep(for: .milliseconds(20))
+            return answer
+        }
+        fixture.model.play(queue: [track("first")], title: nil)
+        fixture.transports[0].status = .failed("Cannot Open")
+        // Pause arrives while the connection is being checked: no song starts behind the listener's back.
+        fixture.model.pause()
+        try await playbackWaitUntil { asked == 1 }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(fixture.transports.count == 1)
+        #expect(!fixture.model.isPlaying)
+
+        answer = false
+        fixture.model.resume()
+        #expect(fixture.transports.count == 2)
+        fixture.transports[1].status = .failed("Cannot Open")
+        try await playbackWaitUntil { asked == 2 }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(fixture.transports.count == 2)
+        #expect(fixture.model.lastError == "Cannot Open")
+    }
+
+    @Test func downloadedSongFailureIsNotSentForStreamRecovery() async throws {
+        let fixture = PlaybackFixture()
+        var asked = 0
+        fixture.model.streamFailureRecovery = { _ in asked += 1; return true }
+        fixture.model.play(queue: [track("first")], title: nil)
+        fixture.transports[0].status = .failed("Damaged file")
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(asked == 0)
+        #expect(fixture.transports.count == 1)
+        #expect(fixture.model.lastError == "Damaged file")
+    }
+
     private func preparedRecovery() -> PlaybackFixture {
         let fixture = PlaybackFixture(status: .ready)
         fixture.model.play(queue: [track("first")], title: nil)
@@ -865,6 +939,14 @@ import Testing
         Track(id: id, albumID: "album", title: id, index: 0, number: 1, disc: 1,
               duration: 120, codec: "m4a", path: "/\(id).m4a", format: "AAC", isEnriched: false)
     }
+}
+
+@MainActor private func playbackWaitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<200 {
+        if condition() { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(condition(), "The asynchronous playback recovery should have finished")
 }
 
 nonisolated enum PlaybackCommand: CaseIterable, Sendable {

@@ -228,6 +228,14 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
         }
     }
 
+    /// DSM no longer accepts the session a request carried: it timed out (106), a later sign-in
+    /// replaced it (107), or the server no longer knows it (119), for example after a restart.
+    /// The saved password still works; signing in again is enough.
+    public var isSessionExpired: Bool {
+        if case .api(let code, _) = self { return [106, 107, 119].contains(code) }
+        return false
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidAddress:
@@ -242,7 +250,7 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
             case ("SYNO.API.Auth", 401): "This account is disabled."
             case ("SYNO.API.Auth", 402): "This account isn't allowed to sign in."
             case ("SYNO.API.Auth", 403), ("SYNO.API.Auth", 404): "A two-factor code is required."
-            case (_, 119): "The session has expired. Sign in again."
+            case (_, 106), (_, 107), (_, 119): "The session has expired. Sign in again."
             case ("SYNO.FileStation.List", 408), ("SYNO.FileStation.List", 407): "This account can't open that folder."
             case ("SYNO.FileStation.Upload", 1805), (_, 414): "A file with that name already exists on the server."
             case (_, 407), (_, 411): "This account can only read the music folder, so its files can't be changed."

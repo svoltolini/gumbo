@@ -8,7 +8,15 @@ struct ConnectionServices {
         try await SynologyClient.login(baseURL: $0, account: $1, password: $2, otpCode: $3)
     }
     var info: (DSMSession) async -> SynologyDSMInfo? = { await SynologyClient.info($0) }
+    var synologyDrive: (DSMSession, String, @escaping SynologyDrive.SessionRenewal) -> SynologyDrive = {
+        SynologyDrive(session: $0, displayName: $1, renewal: $2)
+    }
     var logout: (DSMSession) async -> Void = { await SynologyClient.logout($0) }
+    /// Calls back after each move to another usable network until the returned function stops it.
+    var observeNetwork: (@escaping @Sendable () -> Void) -> () -> Void = { onChange in
+        let observer = NetworkPathObserver(onChange: onChange)
+        return { observer.cancel() }
+    }
     var password: (String) -> String? = { KeychainStore.password(for: $0) }
     var savePassword: (String, String) -> Void = { KeychainStore.save(password: $0, for: $1) }
     var deletePassword: (String) -> Void = { KeychainStore.delete(account: $0) }

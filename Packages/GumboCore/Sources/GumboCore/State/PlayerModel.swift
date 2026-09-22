@@ -77,6 +77,10 @@ public final class PlayerModel {
     /// Resolves a stream URL for a track; nil means the file is not reachable right now.
     public var streamURLProvider: ((Track) -> URL?)?
     public var mediaSourceProvider: ((Track) -> RemoteMediaSource?)?
+    /// Asked once when a song streaming from the server fails, with the address it used; true when
+    /// a fresh address can be made, for example because the server session has been renewed, and
+    /// the song then loads again from where it stopped.
+    public var streamFailureRecovery: ((URL) async -> Bool)?
     public var sourceIDProvider: (() -> String)?
     /// Whether a track without a URL may pretend to play (the sample library) instead of reporting an error.
     public var allowsSimulation: (() -> Bool)?
@@ -96,6 +100,8 @@ public final class PlayerModel {
     private var seekGeneration = UUID()
     private var pendingStartPosition: TimeInterval?
     private var recoverySeekInFlight = false
+    /// The server address the current song streams from, until its one recovery attempt is used.
+    private var recoverableStream: URL?
     private var hasRecordedTrackStart = false
     private var ticker: Task<Void, Never>?
     private var anchorDate: Date?
@@ -341,7 +347,7 @@ public final class PlayerModel {
         }
     }
 
-    private func load(index: Int, autoplay: Bool, resumingAt savedPosition: TimeInterval = 0, isRetry: Bool = false) {
+    private func load(index: Int, autoplay: Bool, resumingAt savedPosition: TimeInterval = 0, isRetry: Bool = false, isRecovery: Bool = false) {
         let alreadyRecordedStart = isRetry && hasRecordedTrackStart
         teardown()
         self.index = index
@@ -366,6 +372,7 @@ public final class PlayerModel {
             }
             player.volume = volume
             self.player = player
+            if case .url(let url) = source, !url.isFileURL, !isRecovery { recoverableStream = url }
             pendingStartPosition = position > 0 ? position : nil
             let generation = playbackGeneration
             player.positionChanged = { [weak self] seconds in
@@ -413,6 +420,7 @@ public final class PlayerModel {
         isSimulated = false
         pendingStartPosition = nil
         recoverySeekInFlight = false
+        recoverableStream = nil
         if nowPlayingArtwork == nil { artworkAlbumID = nil }
         stopTicker()
         anchorDate = nil
@@ -427,10 +435,12 @@ public final class PlayerModel {
         case .loading:
             isPlaying = false
         case .failed(let message):
+            let wasWanted = wantsToPlay
             wantsToPlay = false
             isPlaying = false
             lastError = message
             player.pause()
+            if wasWanted { recoverStream() }
         case .ready:
             if let requestedPosition = pendingStartPosition, !recoverySeekInFlight {
                 let target = player.duration.map { min(requestedPosition, $0) } ?? requestedPosition
@@ -461,6 +471,23 @@ public final class PlayerModel {
             }
         }
         updateNowPlayingInfo()
+    }
+
+    /// A streamed song may have failed only because its address went out of date, as when the
+    /// server ended the session it carried. Ask once; when a fresh address can be made, load the
+    /// song again from the same place, unless the listener has asked for something else meanwhile.
+    private func recoverStream() {
+        guard let url = recoverableStream, streamFailureRecovery != nil else { return }
+        recoverableStream = nil
+        let generation = playbackGeneration
+        let command = commandRevision
+        let resumeAt = position
+        Task { [weak self] in
+            guard let recovery = self?.streamFailureRecovery else { return }
+            let recovered = await recovery(url)
+            guard recovered, let self, playbackGeneration == generation, commandRevision == command else { return }
+            load(index: index, autoplay: true, resumingAt: resumeAt, isRetry: true, isRecovery: true)
+        }
     }
 
     private func recordTrackStart() {

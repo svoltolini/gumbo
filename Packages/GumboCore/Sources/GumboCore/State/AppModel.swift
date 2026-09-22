@@ -23,7 +23,9 @@ public final class AppModel {
     public private(set) var isSigningIn = false
     public var signInError: String?
     public private(set) var needsOTP = false
-    public private(set) var connection: ServerConnection?
+    public private(set) var connection: ServerConnection? {
+        didSet { updateNetworkObservation() }
+    }
     public private(set) var isRestoring = false
     public private(set) var isReconnecting = false
     /// Password stored temporarily when 2FA is required during reconnect/restore, so the user only needs to enter the OTP code.
@@ -243,6 +245,7 @@ public final class AppModel {
             // not silently restore this device from the remaining synchronized copy.
             if !remember { recordCredentialSync(false, for: connection) }
             self.session = opened.session
+            awaitsSignIn = false
             let drive = opened.drive
             services.log("Signed in to \(name) at \(server.address)")
             pendingServer = nil
@@ -298,6 +301,12 @@ public final class AppModel {
             saveConnection()
             library.drive = opened.drive
             signInError = nil
+            awaitsSignIn = false
+            // A library that opened offline has not started its refreshes yet.
+            if stage == .ready, !library.isEmpty {
+                refreshIfStale(olderThan: 30 * 60)
+                startAutoRefresh()
+            }
         } catch SynologyError.twoFactorRequired {
             guard isCurrent(generation) else { return }
             pendingReconnectPassword = password
@@ -321,6 +330,7 @@ public final class AppModel {
     }
 
     private func requestReauthentication(_ saved: ServerConnection, needsOTP: Bool) {
+        awaitsSignIn = true
         if stage != .ready { stage = .discovering }
         pendingServer = DiscoveredServer(name: saved.name, baseURL: saved.baseURL, model: nil, provider: saved.provider)
         self.needsOTP = needsOTP
@@ -345,7 +355,68 @@ public final class AppModel {
         let session = try await services.login(connection.baseURL, connection.account, password, otp)
         let info = await services.info(session)
         let name = info?.model.map { "Synology \($0)" } ?? connection.name
-        return (session, SynologyDrive(session: session, displayName: name), name)
+        let sourceID = connection.sourceID
+        // DSM ends sessions after a while; the drive then asks for a new one instead of failing from then on.
+        let drive = services.synologyDrive(session, name) { [weak self] expired in
+            guard let self else { throw SynologyError.notSignedIn }
+            return try await self.renewSession(expired, sourceID: sourceID)
+        }
+        return (session, drive, name)
+    }
+
+    /// Signs in again with the saved password when DSM ends the session the library's drive uses,
+    /// so playback and refreshes carry on unnoticed. Only the session this connection holds now is
+    /// renewed. What only the person can answer, a one-time code or a changed password, is asked
+    /// once through the usual sign-in, and the library stays offline rather than repeat a refusal.
+    private func renewSession(_ expired: DSMSession, sourceID: String) async throws -> DSMSession {
+        func stillCurrent() -> Bool {
+            session?.sid == expired.sid && connection?.sourceID == sourceID
+                && !isSigningIn && !isReconnecting && !isRestoring && !isJoiningFamily
+        }
+        guard stillCurrent(), let saved = connection else { throw SynologyError.notSignedIn }
+        guard let password = storedPassword(for: saved) else {
+            sessionNeedsSignIn(expired, saved, needsOTP: false)
+            throw SynologyError.notSignedIn
+        }
+        services.log("\(saved.name) ended the session; signing in again")
+        let renewed: DSMSession
+        do {
+            renewed = try await services.login(saved.baseURL, saved.account, password, nil)
+        } catch SynologyError.twoFactorRequired {
+            if stillCurrent() {
+                pendingReconnectPassword = password
+                sessionNeedsSignIn(expired, saved, needsOTP: true)
+            }
+            throw SynologyError.twoFactorRequired
+        } catch let error as SynologyError where error.requiresNewCredentials {
+            if stillCurrent() {
+                sessionNeedsSignIn(expired, saved, needsOTP: false)
+                signInError = error.localizedDescription
+            }
+            throw error
+        } catch let error as NASTransportError {
+            if stillCurrent() {
+                sessionNeedsSignIn(expired, saved, needsOTP: false)
+                signInError = error.localizedDescription
+            }
+            throw error
+        }
+        guard stillCurrent() else {
+            await services.logout(renewed)
+            throw CancellationError()
+        }
+        // Sign-out and account administration use the live session from now on.
+        session = renewed
+        services.log("Signed in to \(saved.name) again")
+        return renewed
+    }
+
+    /// The ended session can't be renewed without the person: the library goes offline and the
+    /// sign-in sheet asks for what is missing.
+    private func sessionNeedsSignIn(_ expired: DSMSession, _ saved: ServerConnection, needsOTP: Bool) {
+        if let drive = library.drive as? SynologyDrive, drive.session.sid == expired.sid { library.drive = nil }
+        session = nil
+        requestReauthentication(saved, needsOTP: needsOTP)
     }
 
     public func downloadSource(for track: Track) -> RemoteDownloadSource? {
@@ -500,11 +571,84 @@ public final class AppModel {
 
     private var autoRefreshTask: Task<Void, Never>?
 
-    /// Refreshes stale library data on activation while preserving the screen the user chose.
+    /// Reconnects an offline library, checks a session that sat unused and refreshes stale library
+    /// data on activation, while preserving the screen the user chose.
     /// Playback state is not a navigation request; only a tap or an explicit link opens the player.
     public func scenePhaseChanged(_ phase: ScenePhase) {
         guard phase == .active else { return }
+        reconnectIfOffline()
+        checkSessionIfIdle()
         refreshIfStale(olderThan: 30 * 60)
+    }
+
+    // MARK: Automatic reconnection
+
+    /// Automatic attempts are at least this far apart, however often the app returns or the network changes.
+    var automaticReconnectInterval: Duration = .seconds(20)
+    private var lastAutomaticReconnect: ContinuousClock.Instant?
+    private var pendingAutomaticReconnect: Task<Void, Never>?
+    /// Set while only the person can put the sign-in right (a one-time code, a rejected or missing
+    /// password). Trying again unasked would repeat a refusal that DSM counts towards blocking the device.
+    private var awaitsSignIn = false
+    private var stopObservingNetwork: (() -> Void)?
+
+    /// A library that opened without its server, for example launched away from a home-only NAS,
+    /// connects again by itself when the app returns, the network changes or a song needs the server.
+    /// An attempt that can't reach the server stays quiet; a refused sign-in asks the person once.
+    private func reconnectIfOffline() {
+        guard stage == .ready, !isDemo, let saved = connection, library.drive == nil, pendingServer == nil, !awaitsSignIn,
+              !isRestoring, !isReconnecting, !isSigningIn, !isJoiningFamily else { return }
+        let now = ContinuousClock.now
+        if let last = lastAutomaticReconnect, now < last + automaticReconnectInterval {
+            // Too soon after the last attempt: one more follows when the interval is up.
+            guard pendingAutomaticReconnect == nil else { return }
+            let delay = last + automaticReconnectInterval - now
+            pendingAutomaticReconnect = Task { [weak self] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                self?.pendingAutomaticReconnect = nil
+                self?.reconnectIfOffline()
+            }
+            return
+        }
+        lastAutomaticReconnect = now
+        services.log("\(saved.name) is offline; reconnecting")
+        Task { await reconnect() }
+    }
+
+    /// Watches for network changes only while there is a saved server to go back to.
+    private func updateNetworkObservation() {
+        guard connection != nil else {
+            stopObservingNetwork?()
+            stopObservingNetwork = nil
+            return
+        }
+        guard stopObservingNetwork == nil else { return }
+        stopObservingNetwork = services.observeNetwork { [weak self] in
+            Task { @MainActor in self?.reconnectIfOffline() }
+        }
+    }
+
+    /// Unused this long, a session is checked before the next song's stream address is made.
+    var sessionCheckIdleTime: Duration = .seconds(5 * 60)
+
+    /// DSM ends sessions that sit unused, and a player fetches a song's address on its own, where a
+    /// refusal only reads as a broken track. After a pause one small request finds out first, and
+    /// the drive renews the session if it has ended.
+    private func checkSessionIfIdle() {
+        guard stage == .ready, !isDemo, !isRestoring, !isReconnecting, let folder = connection?.musicPath,
+              let drive = library.drive as? SynologyDrive, drive.timeSinceLastResponse >= sessionCheckIdleTime else { return }
+        Task { try? await drive.checkSession(folder: folder) }
+    }
+
+    /// A song streaming from DSM failed. Its address may carry a session that has ended, or one
+    /// renewed since: check, renewing if needed, and report whether a fresh address can be made now,
+    /// so the player loads the song once more.
+    public func recoverStream(from url: URL) async -> Bool {
+        guard !isDemo, let folder = connection?.musicPath, let drive = library.drive as? SynologyDrive,
+              let used = drive.sessionID(of: url) else { return false }
+        if used == drive.session.sid { try? await drive.checkSession(folder: folder) }
+        guard let current = library.drive as? SynologyDrive else { return false }
+        return current.session.sid != used
     }
 
     public func refreshIfStale(olderThan age: TimeInterval) {
@@ -570,6 +714,10 @@ public final class AppModel {
         needsOTP = false
         demoTask?.cancel()
         autoRefreshTask?.cancel()
+        pendingAutomaticReconnect?.cancel()
+        pendingAutomaticReconnect = nil
+        lastAutomaticReconnect = nil
+        awaitsSignIn = false
         let oldSession = session
         session = nil
         if let connection {
@@ -855,8 +1003,10 @@ public final class AppModel {
         isNowPlayingPresented = false
     }
 
-    /// Waits for the server sign-in that starts at launch, so a song can stream, or gives up after the limit.
+    /// Waits for the server sign-in that starts at launch, or for a reconnection of a library that
+    /// is offline, so a song can stream, or gives up after the limit.
     public func waitForDrive(upTo limit: Duration) async {
+        reconnectIfOffline()
         let deadline = ContinuousClock.now + limit
         while library.drive == nil, !isDemo, ContinuousClock.now < deadline {
             guard !Task.isCancelled else { return }
@@ -1284,6 +1434,7 @@ public final class AppModel {
             saveConnection()
             services.savePassword(password, connection.keychainAccount)
             self.session = opened.session
+            awaitsSignIn = false
             discovery.stop()
             library.replace(with: .empty, drive: opened.drive)
             services.log("Connected to \(name) with the family account at \(url.host() ?? "its address")")

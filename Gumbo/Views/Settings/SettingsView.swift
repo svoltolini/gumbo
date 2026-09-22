@@ -270,11 +270,14 @@ struct SettingsView: View {
                     NavigationLink { FolderPickerView(mode: .settings) } label: {
                         LabeledContent("Music Folder", value: model.musicFolderLabel)
                     }
+                }
+                // Reconnecting only restores the saved sign-in, so every profile may retry.
+                if model.connection != nil {
                     if !model.isConnected {
-                        Button(model.isReconnecting ? "Reconnecting…" : "Reconnect") {
+                        Button(model.isReconnecting || model.isRestoring ? "Reconnecting…" : "Reconnect") {
                             Task { await model.reconnect() }
                         }
-                        .disabled(model.isReconnecting)
+                        .disabled(model.isReconnecting || model.isRestoring)
                     }
                     if let error = model.signInError, !model.isReconnecting {
                         Text(error).foregroundStyle(.red)
