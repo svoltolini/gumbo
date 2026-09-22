@@ -279,6 +279,9 @@ struct GumboApp: App {
         // A profile deleted elsewhere or retired from the family may be the one the Watch still
         // holds while nobody has it open here; its grant ends now rather than at the next sync.
         profiles.onProfilesRemoved = { [watchBridge] in watchBridge.sync() }
+        // Signing out removes the server; the Watch's catalogue and sign-in for it go too, even when
+        // the NAS was out of reach all this launch and its library never opened here.
+        model.onSignedOut = { [watchBridge] in watchBridge.revoke() }
         watchBridge.provider = { [library, model, profiles] in
             guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name

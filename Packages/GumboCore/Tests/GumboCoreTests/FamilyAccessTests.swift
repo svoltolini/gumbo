@@ -43,6 +43,7 @@ import Testing
 
     func makeModel() {
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.login = { url, account, _, _ in
             if self.suspendFamilyLogin, account == "family-reader" {
                 await withCheckedContinuation { self.heldLogin = $0 }
@@ -183,6 +184,24 @@ import Testing
     #expect(await f.model.removeFamilyAccess() == nil)
     #expect(f.model.familyInfo?.familyAccount == nil)
     #expect(f.model.familyInfo?.credentialsRevision == nil)
+}
+
+/// A restore that left the keychain behind keeps the Family Access record but not its password. Sync
+/// must not take that for a removal and clear the credentials every member connects with (#222).
+@Test @MainActor func unreadableFamilyPasswordStillNamesItsAccountForSync() async {
+    let f = FamilyFixture()
+    defer { f.cleanUp() }
+    await f.connect()
+    await f.configureFamily()
+    let held = f.model.familyInfo
+    for key in Array(f.passwords.keys) where key.hasPrefix("family-v2|") { f.passwords.removeValue(forKey: key) }
+    #expect(f.model.familyAccessNeedsVerification)
+    #expect(f.model.familyInfo?.familyAccount == "family-reader")
+    #expect(f.model.familyInfo?.familyPassword == nil)
+    #expect(f.model.familyInfo?.credentialsRevision == held?.credentialsRevision)
+    // Entered again, it is this device's to send once more.
+    #expect(await f.model.useFamilyAccess(account: "family-reader", password: "family-fixture") == nil)
+    #expect(f.model.familyInfo?.familyPassword == "family-fixture")
 }
 
 @Test @MainActor func failedOrUnacknowledgedShareRemovalNeverRotatesNASPassword() async {

@@ -546,6 +546,23 @@ private nonisolated func expiringDrive(_ session: DSMSession, _ name: String, _ 
     #expect(stops == 1)
 }
 
+/// The Watch keeps its own copy of the sign-in. Signing out ends access handed on with the connection,
+/// even when this launch never reached the NAS (#219).
+@Test @MainActor func signOutEndsAccessHandedOnWithTheConnectionEvenOffline() async throws {
+    let f = ConnectionFixture(); defer { f.cleanUp() }
+    _ = try f.saveLibrary()
+    f.services.login = { _, _, _, _ in throw SynologyError.unreachable("offline") }
+    let model = f.model(restore: true)
+    var signedOut = 0
+    model.onSignedOut = { signedOut += 1 }
+    try await waitUntil { !model.isRestoring }
+    #expect(!model.isConnected)
+    #expect(signedOut == 0)
+    await model.signOut()
+    #expect(signedOut == 1)
+    #expect(model.connection == nil)
+}
+
 @Test func onlyAMoveToAnotherUsableNetworkIsReported() {
     var moves = NetworkMoveFilter<String>()
     // The first report is the network the app already had; then the same one again, a move to

@@ -122,6 +122,7 @@ private nonisolated func scanEntry(_ path: String, directory: Bool = false) -> R
             let defaults = try #require(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
             var services = ConnectionServices()
+            services.observeNetwork = { _ in {} }
             services.login = { url, _, _, _ in DSMSession(baseURL: url, sid: "fixture", apis: [:]) }
             services.info = { _ in nil }
             services.deletePassword = { _ in }

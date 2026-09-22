@@ -1218,6 +1218,50 @@ private func seededMissingRecordFixture() async throws -> (CloudFixture, String)
     #expect(deactivations == 0)
 }
 
+/// A Watch grant kept across a relaunch was issued under the account verified before it. Another
+/// account verified first by a later launch, after a notification that found no verified account to
+/// revoke or with Gumbo not running at the time of the switch, ends it as a change seen while running
+/// would, even with no profile open (#219). The same account returning revokes nothing.
+@Test @MainActor func cloudAnotherAccountVerifiedFirstAfterARelaunchRevokesTheEarlierAccountsAccess() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    let owner = try #require(f.profiles.owner)
+    #expect(f.profiles.activate(owner))
+    await f.sync.refresh(reason: "A signed in")
+    #expect(f.sync.isActive)
+
+    f.relaunch(restoreProfiles: true) // A background relaunch: nobody has opened a profile yet.
+    var deactivations = 0
+    f.profiles.onDeactivate = { deactivations += 1 }
+    f.account = nil
+    await f.sync.refresh(reason: "launch without an account")
+    #expect(deactivations == 0)
+    f.account = "B"
+    f.sync.accountChangeNotified()
+    #expect(deactivations == 0)
+    await f.sync.refresh(reason: "iCloud account changed")
+    #expect(f.sync.currentUserRecordName == "B")
+    #expect(deactivations == 1)
+    await f.sync.refresh(reason: "foreground")
+    #expect(deactivations == 1)
+
+    f.profiles.onDeactivate = nil // Quitting is not a revocation.
+    f.relaunch(restoreProfiles: true) // Switched back to A while Gumbo was not running.
+    f.profiles.onDeactivate = { deactivations += 1 }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    let session = f.profiles.sessionID
+    f.account = "A"
+    await f.sync.refresh(reason: "launch")
+    #expect(f.sync.currentUserRecordName == "A")
+    #expect(deactivations == 2)
+    #expect(f.profiles.sessionID != session)
+
+    f.profiles.onDeactivate = nil
+    f.relaunch(restoreProfiles: true)
+    f.profiles.onDeactivate = { deactivations += 1 }
+    await f.sync.refresh(reason: "launch with the same account")
+    #expect(deactivations == 2)
+}
+
 @Test @MainActor func cloudInvitationWhileICloudIsUnavailableKeepsTheAccountAndPromisesNoRetry() async throws {
     let f = try CloudFixture(); defer { f.cleanUp() }
     var deactivations = 0

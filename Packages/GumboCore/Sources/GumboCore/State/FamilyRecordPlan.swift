@@ -68,27 +68,35 @@ nonisolated struct FamilyRecordPlan: Equatable, Sendable {
     ///   - server: The Family record as last read from iCloud, if known.
     ///   - recreating: The record is gone from iCloud and is being created again.
     init(intent: FamilyInfo, lastUpload: FamilyRecordUpload?, server: FamilyInfo?, recreating: Bool = false) {
-        let upload = FamilyRecordUpload(intent)
+        // Held here, but the password cannot be read on this device now, as after a restore that left
+        // the keychain behind: nothing says they changed or were removed, so they are neither sent nor
+        // cleared, and what this device last sent still stands.
+        let unreadable = intent.familyAccount != nil && intent.familyPassword == nil
+        var intent = intent
+        if unreadable { intent.familyAccount = nil }
+        var upload = FamilyRecordUpload(intent)
+        if unreadable { upload.credentials = lastUpload?.credentials }
         // A record being created again has nothing in iCloud to keep or to match.
         let known = recreating ? nil : server
         let writesDetails = recreating
             || (upload.details != lastUpload?.details && known?.hasSameServerDetails(as: intent) != true)
         var credentials = (account: intent.familyAccount, password: intent.familyPassword)
         let writesCredentials: Bool
-        if upload.credentials != nil {
+        if upload.credentials != nil, !unreadable {
             // Held here: sent after being set up, rotated or re-entered on this device, or when iCloud
             // is known to have lost them. Otherwise another device's newer copy stays in place.
             let serverHasThem = known.map { $0.familyAccount == credentials.account && $0.familyPassword == credentials.password } ?? false
             let serverLostThem = known.map { $0.familyAccount == nil && $0.familyPassword == nil } ?? false
             writesCredentials = recreating
                 || (!serverHasThem && (upload.credentials != lastUpload?.credentials || serverLostThem))
-        } else if lastUpload?.credentials != nil {
+        } else if lastUpload?.credentials != nil, !unreadable {
             // Removed, revoked or no longer for this server here: clear what this device sent.
             writesCredentials = known.map { $0.familyAccount != nil || $0.familyPassword != nil } ?? true
         } else {
-            // Never held here: the family keeps what it has, and a record created again gets it back.
-            // Kept even beside details this device changes: it cannot tell whether another address
-            // still reaches the NAS they were made for, and erasing them would cut every member off.
+            // Never held here, or unreadable here: the family keeps what it has, and a record created
+            // again gets it back. Kept even beside details this device changes: it cannot tell whether
+            // another address still reaches the NAS they were made for, and erasing them would cut
+            // every member off.
             credentials = (server?.familyAccount, server?.familyPassword)
             writesCredentials = recreating && credentials.account != nil
         }

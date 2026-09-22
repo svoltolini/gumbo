@@ -865,8 +865,10 @@ import Testing
         }
         fixture.model.play(queue: [track("first")], title: "Queue")
         fixture.transports[0].status = .failed("Cannot Open")
-        #expect(fixture.model.lastError == "Cannot Open")
+        #expect(fixture.model.isPlaybackRequested, "Controls keep showing Pause while the address is renewed")
+        #expect(fixture.model.lastError == nil)
         try await playbackWaitUntil { fixture.transports.count == 2 }
+        #expect(fixture.model.isPlaybackRequested)
         #expect(asked.map(\.absoluteString) == ["https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"])
         #expect(fixture.urls.last == renewed)
         #expect(fixture.transports[0].invalidated)
@@ -912,6 +914,60 @@ import Testing
         try await Task.sleep(for: .milliseconds(60))
         #expect(fixture.transports.count == 2)
         #expect(fixture.model.lastError == "Cannot Open")
+    }
+
+    @Test func streamRecoveryHoldsThePlaybackRequestUntilItSettles() async throws {
+        let fixture = PlaybackFixture()
+        fixture.model.sourceIDProvider = { "source-a" }
+        let songs = [track("first")]
+        let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
+        fixture.model.streamURLProvider = { _ in address }
+        var answer = false
+        var asked = 0
+        fixture.model.streamFailureRecovery = { _ in
+            asked += 1
+            try? await Task.sleep(for: .milliseconds(20))
+            return answer
+        }
+        fixture.model.play(queue: songs, title: nil)
+        fixture.transports[0].status = .failed("Cannot Open")
+        fixture.transports[0].status = .failed("Cannot Open")
+        // Every control, the widget and album controls keep showing Pause, without the error, while
+        // the session is checked, also when the failure is reported twice.
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError == nil)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .loading)
+        try await playbackWaitUntil { fixture.model.lastError != nil }
+        #expect(asked == 1)
+        #expect(!fixture.model.isPlaybackRequested, "A stream that cannot be renewed offers Play, which retries")
+        #expect(fixture.model.lastError == "Cannot Open")
+        #expect(fixture.transports.count == 1)
+
+        // The glyph shows Pause during the renewal, and tapping it pauses: nothing reloads afterwards.
+        answer = true
+        fixture.model.togglePlayPause()
+        #expect(fixture.transports.count == 2)
+        fixture.transports[1].status = .failed("Cannot Open")
+        #expect(fixture.model.isPlaybackRequested)
+        fixture.model.togglePlayPause()
+        #expect(!fixture.model.isPlaybackRequested)
+        try await playbackWaitUntil { asked == 2 }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(fixture.transports.count == 2)
+        #expect(!fixture.model.isPlaying)
+        #expect(!fixture.model.isPlaybackRequested)
+
+        // A widget or CarPlay request that takes over and then never starts a song leaves the failure
+        // shown, not a lasting Pause, and the old song does not start behind it.
+        fixture.model.resume()
+        #expect(fixture.transports.count == 3)
+        fixture.transports[2].status = .failed("Cannot Open")
+        fixture.model.beginDeferredPlaybackCommand()
+        #expect(fixture.model.isPlaybackRequested)
+        try await playbackWaitUntil { fixture.model.lastError != nil }
+        #expect(asked == 3)
+        #expect(fixture.transports.count == 3)
+        #expect(!fixture.model.isPlaybackRequested)
     }
 
     @Test func downloadedSongFailureIsNotSentForStreamRecovery() async throws {

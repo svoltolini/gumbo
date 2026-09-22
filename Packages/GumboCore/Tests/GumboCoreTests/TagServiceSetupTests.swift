@@ -93,6 +93,7 @@ private struct SetupDrive: RemoteFileDrive {
         defaults.set(try JSONEncoder().encode(connection), forKey: "connection")
         passwords[connection.keychainAccount] = "fixture"
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.openProvider = { connection, _ in SetupDrive(id: connection.sourceID) }
         services.password = { self.passwords[$0] }
         services.savePassword = { self.passwords[$1] = $0 }

@@ -147,8 +147,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     /// Tells the Watch to discard any cached credentials and catalogue. Called when the active
-    /// profile is locked or switched, so another profile's data never leaks. The revocation is
-    /// queued via `transferUserInfo` so a disconnected Watch receives it on next sync.
+    /// profile is locked or switched, so another profile's data never leaks, and on sign-out. The
+    /// revocation is queued via `transferUserInfo` so a disconnected Watch receives it on next sync.
     func revoke() {
         currentGrant.revoke()
         grantChanged()

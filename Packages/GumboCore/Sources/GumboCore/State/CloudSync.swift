@@ -151,6 +151,7 @@ public final class CloudSync {
         isShared = false
         needsFamilyInvitation = false
         status = .off
+        try? persistence.saveVerifiedAccount(nil)
         // Even with no profile open: nothing granted under the previous account may carry over.
         profiles?.lock(deactivatingWhenClosed: true)
     }
@@ -187,6 +188,11 @@ public final class CloudSync {
         if currentUserRecordName != nil {
             // A missed notification must still invalidate every previously queued operation.
             accountChanged()
+        } else if let earlier = persistence.verifiedAccount(), earlier != identity {
+            // The account verified here before was replaced while Gumbo was not running, or before this
+            // launch's first check finished. Revoke it as a change seen while running would, so access
+            // still held under it, such as a Watch grant kept across a relaunch, ends too (#219).
+            accountChanged()
         }
         let snapshot: CloudAccountState
         do {
@@ -202,6 +208,7 @@ public final class CloudSync {
                 }
             }
             try persistence.save(loaded)
+            try persistence.saveVerifiedAccount(identity)
             snapshot = loaded
         } catch {
             status = .failed("The iCloud account's sync state could not be read or saved on this device.")

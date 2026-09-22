@@ -39,6 +39,9 @@ public final class AppModel {
     public var onVerifiedServerListing: ((String, Set<String>) -> Void)?
     /// Cancels work holding live provider credentials before any connection intent changes.
     public var onConnectionWillChange: (() -> Void)?
+    /// The saved connection and its password are gone. Access handed on with them, such as the
+    /// Watch's own copy of the sign-in, ends too, even for a library this launch never had ready.
+    public var onSignedOut: (() -> Void)?
     private var pendingCloudConnection: ServerConnection?
     private var pendingCloudCredentialSync = false
     private var credentialSyncRevision = 0
@@ -764,6 +767,7 @@ public final class AppModel {
         }
         connection = nil
         saveConnection()
+        onSignedOut?()
         services.deleteCatalogue()
         library.replace(with: .empty, drive: nil)
         selectedTab = .library
@@ -1155,13 +1159,17 @@ public final class AppModel {
     /// What the family record says about this server, once a folder is chosen.
     public var familyInfo: FamilyInfo? {
         guard let connection, connection.musicPath != nil else { return nil }
-        let access = familyRevocationPending ? nil : familyAccess
+        // Family Access kept here names its account even when its password cannot be read on this
+        // device, so sync keeps iCloud's copy instead of taking it for a removal.
+        let source = connection.sourceID
+        let record = familyRevocationPending ? nil : familyAccessRecords[source].flatMap { $0.sourceID == source ? $0 : nil }
+        let access = record == nil ? nil : familyAccess
         return FamilyInfo(
             name: "\(connection.name) family", serverName: connection.name,
             serverAccount: connection.account, musicPath: connection.musicPath, updatedAt: .distantPast,
-            familyAccount: access?.account, familyPassword: access?.password,
+            familyAccount: record?.account, familyPassword: access?.password,
             address: connection.baseURL.absoluteString, provider: connection.provider,
-            credentialsRevision: access.flatMap { familyAccessRecords[$0.sourceID]?.revision }
+            credentialsRevision: record?.revision
         )
     }
 

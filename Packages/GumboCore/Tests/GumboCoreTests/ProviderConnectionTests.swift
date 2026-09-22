@@ -41,6 +41,7 @@ private struct ConnectionDrive: RemoteFileDrive {
         services.loadCatalogue = { nil }
         services.deleteCatalogue = {}
         services.log = { _ in }
+        services.observeNetwork = { _ in {} }
     }
     func model(restore: Bool = false) -> AppModel { AppModel(library: library, defaults: defaults, services: services, restoresSession: restore) }
     func cleanUp() { defaults.removePersistentDomain(forName: name) }

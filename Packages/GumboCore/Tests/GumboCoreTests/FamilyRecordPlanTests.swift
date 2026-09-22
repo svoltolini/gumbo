@@ -137,6 +137,43 @@ import Testing
         #expect(!FamilyRecordPlan(intent: details, lastUpload: removal.upload, server: server(details, account: "family-reader", password: "new")).needsSave)
     }
 
+    /// Family Access still kept here whose password this device cannot read, as after a restore that
+    /// left the keychain behind, is not a removal: iCloud's copy stays, and so does the last upload.
+    @Test func credentialsHeldButUnreadableHereAreNeitherSentNorCleared() {
+        let intent = holding("first", revision: "r1")
+        let sent = FamilyRecordUpload(intent)
+        var unreadable = intent
+        unreadable.familyPassword = nil
+        let known = server(details, account: "family-reader", password: "first")
+        let plan = FamilyRecordPlan(intent: unreadable, lastUpload: sent, server: known)
+        #expect(!plan.needsSave)
+        #expect(plan.upload == sent)
+        #expect(plan.info.familyPassword == "first")
+        let unknown = FamilyRecordPlan(intent: unreadable, lastUpload: sent, server: nil)
+        #expect(!unknown.needsSave)
+        #expect(unknown.upload == sent)
+        // Beside changed details, only the details are sent.
+        var moved = unreadable
+        moved.musicPath = "/music/library"
+        let detailsOnly = FamilyRecordPlan(intent: moved, lastUpload: sent, server: known)
+        #expect(detailsOnly.writesDetails && !detailsOnly.writesCredentials)
+        #expect(detailsOnly.info.familyPassword == "first")
+        #expect(detailsOnly.upload.credentials == sent.credentials)
+        // Readable again, the same credentials are already sent; removed here, they are cleared.
+        #expect(!FamilyRecordPlan(intent: intent, lastUpload: detailsOnly.upload, server: known).writesCredentials)
+        var removed = moved
+        removed.familyAccount = nil
+        removed.credentialsRevision = nil
+        #expect(FamilyRecordPlan(intent: removed, lastUpload: detailsOnly.upload, server: known).writesCredentials)
+        // A record created again gets iCloud's last copy back, never an account without its password.
+        let recreated = FamilyRecordPlan(intent: unreadable, lastUpload: sent, server: known, recreating: true)
+        #expect(recreated.writesCredentials)
+        #expect(recreated.info.familyPassword == "first")
+        let lost = FamilyRecordPlan(intent: unreadable, lastUpload: sent, server: nil, recreating: true)
+        #expect(!lost.writesCredentials)
+        #expect(lost.info.familyAccount == nil)
+    }
+
     @Test func recordCreatedAgainCarriesEverythingThisDeviceKnows() {
         let intent = holding("first", revision: "r1")
         let known = server(details, account: "family-reader", password: "first")

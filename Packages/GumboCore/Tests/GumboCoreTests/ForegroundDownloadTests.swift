@@ -75,6 +75,7 @@ private actor HeldDownloadDrive: RemoteFileDrive {
         }
         defaults.set(3, forKey: "coverCacheVersion")
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.deleteCatalogue = {}
         services.password = { _ in nil }
         services.deletePassword = { _ in }
