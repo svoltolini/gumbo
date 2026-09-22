@@ -2,6 +2,8 @@
 
 This document provides App Store Review with the information needed to evaluate Gumbo Music.
 
+These notes describe the published Synology beta. The later WebDAV/SMB provider candidate has not been uploaded; its encryption and acceptance gates below must be resolved, and these notes matched to the actual selected build, before submission.
+
 ## What Gumbo does
 
 Gumbo Music streams and downloads music from a personal Synology NAS (Network Attached Storage). It is not a music-streaming service with its own catalogue—users supply their own music files stored on their own NAS hardware.
@@ -18,7 +20,7 @@ Gumbo includes a built-in **sample library** with 12 demonstration albums contai
 
 On Apple Watch the sample supports browsing only; playback requires downloaded audio. Phone, Mac and TV sample playback is simulated.
 
-**Note:** The sample library simulates playback (progress bar, time display, transport controls) but does not produce audio output because no actual audio files are bundled. This is expected behavior for review purposes.
+**Note:** The sample library simulates playback (progress bar, time display, transport controls) but does not produce audio output because no actual audio files are bundled. It supports UI evaluation; it does not establish that Apple will accept the app without access to its real audio functionality.
 
 ### What can be tested with the sample library
 
@@ -41,10 +43,10 @@ On Apple Watch the sample supports browsing only; playback requires downloaded a
 If App Review has access to a Synology NAS or wishes to test full functionality:
 
 1. **NAS requirement:** Synology DiskStation running DSM 7.x or later with File Station enabled
-2. **Network:** The review device and NAS must be on the same local network, or accessible via Tailscale
+2. **Network:** The NAS must be reachable from the review device, either locally or through an owner-configured remote route. HTTPS needs a trusted certificate matching the entered hostname; a reachable Tailscale IP does not by itself solve certificate validation.
 3. **Credentials:** A standard DSM user account with read access to the music folder
 
-The owner can provide temporary demo NAS credentials upon request. Contact information is in App Store Connect.
+No demo server or review credentials have been provisioned. If Apple needs real-audio access, the owner must arrange a dedicated, restricted review account and music they are authorized to share, and provide those details privately in App Store Connect. Personal NAS credentials must not be placed in these public notes. This remains a submission prerequisite to resolve, not an existing access offer.
 
 ## Platform-specific notes
 
@@ -78,16 +80,18 @@ The owner can provide temporary demo NAS credentials upon request. Contact infor
 | App Groups | Share data between main app and widgets |
 | CarPlay Audio | Display playback controls on vehicle screen |
 | Background Audio | Continue playback when app is backgrounded |
-| Background Processing | Complete download and indexing tasks |
+| Background Processing | Request eligible background work; the system controls scheduling and runtime, so completion is not guaranteed |
 | Local Network | Discover and connect to NAS on LAN |
 | Bonjour | Discover NAS services via mDNS |
 
 ## Privacy
 
 - No analytics SDK or advertising framework
-- No data sent to developer servers
-- CloudKit data stored in user's private iCloud container
+- No Gumbo-operated music-upload or analytics service
+- Profile and library-preference data stored in Apple's private or family-shared CloudKit zones; Family Access shares the selected connection details and credentials with members
 - Remembered NAS credentials stored in Keychain; optional iCloud Keychain sync across the same Apple Account on iPhone, iPad and Mac, off by default and separate from Family Access
+- Optional, user-initiated genre suggestions send album/artist names and country or region to Apple's music catalogue; no audio, paths or NAS credentials are sent for that lookup
+- Apple provides beta usage/crash reports and optional TestFlight feedback to the developer under its own terms and settings; the published App Privacy label discloses these practices
 - See in-app Privacy Details for full disclosure
 
 ## Export compliance
