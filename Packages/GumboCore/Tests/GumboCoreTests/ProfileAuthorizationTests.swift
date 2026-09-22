@@ -149,6 +149,23 @@ private final class ProfileFixture {
     #expect(store.libraryState(for: "test-drive").favourites == ["saved-song"])
 }
 
+/// Deactivation revokes the Watch grant, so it must mean a profile was open (#219).
+@Test @MainActor func lockingWithNoProfileOpenDeactivatesNothing() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    var deactivations = 0
+    store.onDeactivate = { deactivations += 1 }
+    store.lock()
+    #expect(deactivations == 0)
+    _ = try fixture.owner()
+    store.lock()
+    #expect(deactivations == 1)
+    store.lock()
+    #expect(deactivations == 1)
+    #expect(store.isLocked)
+}
+
 @Test @MainActor func aRemotePINChangeRequiresANewOpeningAndResetsBiometricEnrollment() throws {
     let fixture = try ProfileFixture()
     defer { fixture.cleanUp() }

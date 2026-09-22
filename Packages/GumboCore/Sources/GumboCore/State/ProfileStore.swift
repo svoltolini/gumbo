@@ -217,14 +217,17 @@ public final class ProfileStore {
     }
 
     /// Back to "Who's listening?": playback stops and the next person picks themselves.
+    /// `onDeactivate` runs only when a profile was open: with none, there is nothing to stop, and
+    /// its Watch revocation would clear the downloads a relaunch is meant to keep.
     public func lock() {
+        let wasOpen = activeID != nil || sessionID != nil
         flushSave()
         authenticationGeneration = UUID()
         unreadableOpening = nil
         activeID = nil
         sessionID = nil
         state = ProfileState()
-        onDeactivate?()
+        if wasOpen { onDeactivate?() }
     }
 
     // MARK: Editing

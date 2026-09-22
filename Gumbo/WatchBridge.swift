@@ -19,6 +19,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// The library a grant covers (open profile, source and folder), or nil while no profile is
     /// open on a ready library. Cheap, so the grant follows the app even with no Watch in reach.
     var scopeProvider: (() -> String?)?
+    /// The open profile, whether or not its library is ready: another profile opening after a
+    /// relaunch revokes the grant before its library loads.
+    var profileProvider: (() -> String?)?
     /// Asked for the current state whenever a sync is due. Its scope matches `scopeProvider`.
     var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?, scope: String)?)?
     var artworkProvider: ((WatchCatalogue) -> [WatchArtworkSource])?
@@ -35,6 +38,11 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private var preparedArtworkSources: [WatchArtworkSource] = []
     private var preparedArtwork: [String: Data] = [:]
     private var artworkRequestID = UUID()
+    /// Thumbnails live only in memory, while the Watch keeps the covers it was sent before this
+    /// launch. Until the first batch is ready, a catalogue under the kept grant waits rather than
+    /// remove them; after a new grant the Watch has cleared its covers, so nothing waits.
+    private var awaitsCoversSinceLaunch = true
+    private var holdsCatalogueForCovers: Bool { awaitsCoversSinceLaunch && artworkTask != nil }
     private var lastCatalogueKey: Data?
     private var lastCredentials: WatchCredentials?
     private static let deletionKey = "watch.serverDeletions.v1"
@@ -115,6 +123,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             self.preparedArtworkSources = sources
             self.preparedArtwork = images
             self.artworkTask = nil
+            self.awaitsCoversSinceLaunch = false
             self.sync()
         }
     }
@@ -150,10 +159,11 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     /// Moves the grant with the library now open: kept for the same one, granted anew for any
-    /// other, revoked when a library open in this process closes. A grant restored at launch is
-    /// left alone until a library opens, so a relaunch never makes the Watch clear its downloads.
+    /// other, revoked when a library open in this process closes or another profile opens. A
+    /// grant restored at launch is left alone until then, so a relaunch never makes the Watch
+    /// clear its downloads.
     private func followLibrary() {
-        guard currentGrant.update(scope: scopeProvider?()) != .unchanged else { return }
+        guard currentGrant.update(scope: scopeProvider?(), profileID: profileProvider?()) != .unchanged else { return }
         grantChanged()
     }
 
@@ -161,6 +171,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private func grantChanged() {
         cancelAllRelay()
         clearArtwork()
+        awaitsCoversSinceLaunch = false
         persistGrant()
         lastCatalogueKey = nil
         lastCredentials = nil
@@ -179,7 +190,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         // A grant restored at launch waits for its library; the Watch keeps what it already has.
         guard let state = provider?(), state.scope == authorizationScope else { return }
         let catalogue = catalogueWithDeletions(state.catalogue, sourceID: state.credentials?.driveID, scope: state.scope)
-        if let key = catalogue.contentKey, key != lastCatalogueKey, let data = try? JSONEncoder().encode(catalogue) {
+        if !holdsCatalogueForCovers, let key = catalogue.contentKey, key != lastCatalogueKey, let data = try? JSONEncoder().encode(catalogue) {
             let url = FileManager.default.temporaryDirectory.appending(path: "watch-catalogue-\(UUID().uuidString).json")
             if (try? data.write(to: url)) != nil {
                 _ = session.transferFile(url, metadata: ["kind": "catalogue", "authorization": authorization.encoded!])
@@ -257,13 +268,18 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         followLibrary()
         guard authorization.isGranted else { return ["status": "revoked", "authorization": authorization.encoded!] }
         guard let state = provider?(), state.scope == authorizationScope else {
-            // Relaunched with no profile open yet: the same revision tells the Watch to keep
-            // everything; the catalogue follows once the library opens.
+            // Relaunched before the granted library is open: the same revision tells the Watch to
+            // keep everything; the catalogue follows once the library opens.
             return ["status": "waiting", "authorization": authorization.encoded!]
         }
         var reply: [String: Any] = ["status": "ok", "authorization": authorization.encoded!]
-        if let data = try? JSONEncoder().encode(catalogueWithDeletions(state.catalogue, sourceID: state.credentials?.driveID, scope: state.scope)),
-           let packed = try? (data as NSData).compressed(using: .lzfse) as Data, packed.count <= 60_000 {
+        let catalogue = catalogueWithDeletions(state.catalogue, sourceID: state.credentials?.driveID, scope: state.scope)
+        if holdsCatalogueForCovers {
+            // The Watch keeps its saved catalogue and covers; the queued file follows with thumbnails.
+            reply["status"] = "waiting"
+            DiagnosticsLog.shared.record("Watch sync: catalogue waits for covers after relaunch")
+        } else if let data = try? JSONEncoder().encode(catalogue),
+                  let packed = try? (data as NSData).compressed(using: .lzfse) as Data, packed.count <= 60_000 {
             reply["catalogue"] = packed
             DiagnosticsLog.shared.record("Watch sync: answered with \(state.catalogue.playlists.count) playlists (\(packed.count) bytes packed)")
         } else {

@@ -223,6 +223,33 @@ private final class CloudFixture {
     #expect(try fixture.persistence.load(account: "B", defaultOwner: CKCurrentUserDefaultName).profileIDs.isEmpty)
 }
 
+/// Without iCloud, every launch and return to the foreground finds no account. That is not an account
+/// change: locking would close the profile opened at launch and make the Watch clear its downloads (#219).
+@Test @MainActor func cloudRefreshWithoutAnAccountKeepsTheOpenProfileUntilAVerifiedAccountLeaves() async throws {
+    let fixture = try CloudFixture()
+    defer { fixture.cleanUp() }
+    var deactivations = 0
+    fixture.profiles.onDeactivate = { deactivations += 1 }
+    fixture.account = nil
+    fixture.profiles.openAutomaticallyIfPossible()
+    let session = try #require(fixture.profiles.sessionID)
+    await fixture.sync.refresh(reason: "launch")
+    await fixture.sync.refresh(reason: "foreground")
+    #expect(fixture.sync.status == .noAccount)
+    #expect(fixture.profiles.sessionID == session)
+    #expect(deactivations == 0)
+
+    fixture.account = "A"
+    await fixture.sync.refresh(reason: "signed in")
+    #expect(fixture.sync.currentUserRecordName == "A")
+    #expect(!fixture.profiles.isLocked)
+    fixture.account = nil // Deliberately no notification: a verified account that leaves still locks.
+    await fixture.sync.refresh(reason: "signed out")
+    #expect(fixture.sync.status == .noAccount)
+    #expect(fixture.profiles.isLocked)
+    #expect(deactivations == 1)
+}
+
 @Test @MainActor func cloudAccountChangeDiscardsASuspendedPageBeforeAnyApplication() async throws {
     let fixture = try CloudFixture()
     defer { fixture.cleanUp() }

@@ -88,6 +88,8 @@ private actor HeldDownloadDrive: RemoteFileDrive {
         // The same synchronous integration hooks used by all three app entry points.
         model.onConnectionWillChange = { [weak manager] in manager?.revokeForegroundDownloads() }
         profiles.onDeactivate = { [weak manager] in manager?.revokeForegroundDownloads() }
+        // Foreground downloads belong to an open profile; locking with none open deactivates nothing.
+        #expect(profiles.activate(try #require(profiles.owner)))
         let album = foregroundAlbum(count: 3)
         let owner = manager.owner(for: album)
         _ = manager.reconcile(albums: [album.id], playlists: [], driveID: drive.id,

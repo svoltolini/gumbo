@@ -272,6 +272,7 @@ struct GumboApp: App {
             return WatchGrant.scope(profileID: active.id, sourceID: library.catalogue.driveID, rootPath: library.catalogue.rootPath)
         }
         watchBridge.scopeProvider = watchScope
+        watchBridge.profileProvider = { [profiles] in profiles.active?.id }
         watchBridge.provider = { [library, model, profiles] in
             guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name

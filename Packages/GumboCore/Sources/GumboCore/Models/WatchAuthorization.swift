@@ -35,32 +35,37 @@ public nonisolated struct WatchGrant: Codable, Sendable {
         /// A new revision: another library, or one opening after a revocation. Nothing prepared
         /// under the previous revision may be sent.
         case granted
-        /// The library this process had open has closed.
+        /// The library this process had open has closed, or another profile has opened.
         case revoked
     }
 
     public private(set) var authorization: WatchAuthorization
     /// The library the granted revision covers; nil while revoked.
     public private(set) var scope: String?
+    /// The profile of that library, so that another profile opening is a switch even before its
+    /// library is ready. Nil while revoked and for a legacy grant, which any opening moves on.
+    public private(set) var profileID: String?
     /// The last catalogue snapshot numbered under this authorization. Saved, so snapshots sent
     /// after a relaunch are still newer than the ones the Watch already has.
     public private(set) var snapshotRevision: UInt64
     /// Whether this process has had the granted library open. A grant restored at launch is held
     /// while no library is open yet, the normal state of a background relaunch or a profile
-    /// waiting for its PIN; only closing a library that was open here revokes it.
+    /// waiting for its PIN; only closing a library that was open here, or another profile
+    /// opening, revokes it.
     private var isConfirmed = false
 
-    private enum CodingKeys: String, CodingKey { case authorization, scope, snapshotRevision }
+    private enum CodingKeys: String, CodingKey { case authorization, scope, profileID, snapshotRevision }
 
-    init(authorization: WatchAuthorization, scope: String? = nil, snapshotRevision: UInt64 = 0) {
+    init(authorization: WatchAuthorization, scope: String? = nil, profileID: String? = nil, snapshotRevision: UInt64 = 0) {
         self.authorization = authorization
         self.scope = scope
+        self.profileID = profileID
         self.snapshotRevision = snapshotRevision
     }
 
     /// The saved grant exactly as it was: a launch by itself never moves the revision.
     /// Earlier versions saved only the authorization, without the library it covered, so a grant
-    /// restored from one is granted anew, clearing the Watch once, when a library next opens.
+    /// restored from one moves on, clearing the Watch once, when a profile or library next opens.
     public static func restored(from data: Data?, legacyAuthorization: Data? = nil) -> Self {
         if let data, let saved = try? JSONDecoder().decode(Self.self, from: data), saved.authorization.revision > 0 {
             return saved
@@ -74,13 +79,15 @@ public nonisolated struct WatchGrant: Codable, Sendable {
         [profileID, sourceID, rootPath].map { "\($0.utf8.count):\($0)" }.joined()
     }
 
-    /// Follows the library now open, nil while none is. The granted library keeps its revision,
-    /// even after a relaunch; any other library, or one opening after a revocation, is granted
-    /// anew. Closing a library that was open in this process revokes; a grant restored at launch
-    /// waits for its library instead.
-    public mutating func update(scope current: String?) -> Change {
+    /// Follows the library now open, nil while none is ready, and the profile open on the iPhone,
+    /// ready or not; `scope` is always that profile's library. The granted library keeps its
+    /// revision, even after a relaunch; any other library, or one opening after a revocation, is
+    /// granted anew. Closing a library that was open in this process revokes, and so does another
+    /// profile opening; a grant restored at launch waits for its own profile's library instead.
+    public mutating func update(scope current: String?, profileID openProfile: String?) -> Change {
         guard let current else {
-            guard authorization.isGranted, isConfirmed else { return .unchanged }
+            let switched = openProfile != nil && openProfile != profileID
+            guard authorization.isGranted, isConfirmed || switched else { return .unchanged }
             revoke()
             return .revoked
         }
@@ -88,6 +95,7 @@ public nonisolated struct WatchGrant: Codable, Sendable {
         guard !authorization.isGranted || scope != current else { return .unchanged }
         authorization = authorization.successor(granted: true)
         scope = current
+        profileID = openProfile
         snapshotRevision = 0
         return .granted
     }
@@ -96,6 +104,7 @@ public nonisolated struct WatchGrant: Codable, Sendable {
     public mutating func revoke() {
         authorization = authorization.successor(granted: false)
         scope = nil
+        profileID = nil
         snapshotRevision = 0
         isConfirmed = false
     }

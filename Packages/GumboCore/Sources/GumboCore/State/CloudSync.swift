@@ -173,7 +173,8 @@ public final class CloudSync {
             identity = account
         case .noAccount:
             // Signed out since this session verified an account: revoke it like any account change.
-            // With no account before either, there is nothing to revoke; the open profile keeps playing.
+            // With no account before either, there is nothing to revoke: the open profile keeps playing,
+            // and the Watch keeps its downloads (#219).
             if currentUserRecordName != nil { accountChanged() }
             status = .noAccount
             throw CancellationError()
