@@ -35,7 +35,8 @@ public nonisolated struct WatchGrant: Codable, Sendable {
         /// A new revision: another library, or one opening after a revocation. Nothing prepared
         /// under the previous revision may be sent.
         case granted
-        /// The library this process had open has closed, or another profile has opened.
+        /// The library this process had open has closed, another profile has opened, or the
+        /// granted profile has left the iPhone.
         case revoked
     }
 
@@ -50,8 +51,8 @@ public nonisolated struct WatchGrant: Codable, Sendable {
     public private(set) var snapshotRevision: UInt64
     /// Whether this process has had the granted library open. A grant restored at launch is held
     /// while no library is open yet, the normal state of a background relaunch or a profile
-    /// waiting for its PIN; only closing a library that was open here, or another profile
-    /// opening, revokes it.
+    /// waiting for its PIN; only closing a library that was open here, another profile opening,
+    /// or its profile leaving the iPhone revokes it.
     private var isConfirmed = false
 
     private enum CodingKeys: String, CodingKey { case authorization, scope, profileID, snapshotRevision }
@@ -66,11 +67,16 @@ public nonisolated struct WatchGrant: Codable, Sendable {
     /// The saved grant exactly as it was: a launch by itself never moves the revision.
     /// Earlier versions saved only the authorization, without the library it covered, so a grant
     /// restored from one moves on, clearing the Watch once, when a profile or library next opens.
+    /// Such a version run again, after a downgrade, saves its own revisions there and the Watch may
+    /// have taken them: one at least as high as the saved grant's wins, or the Watch would refuse
+    /// every grant, catalogue and revocation below it.
     public static func restored(from data: Data?, legacyAuthorization: Data? = nil) -> Self {
-        if let data, let saved = try? JSONDecoder().decode(Self.self, from: data), saved.authorization.revision > 0 {
+        let legacy = WatchAuthorization.decode(legacyAuthorization)
+        if let data, let saved = try? JSONDecoder().decode(Self.self, from: data),
+           saved.authorization.revision > (legacy?.revision ?? 0) {
             return saved
         }
-        return Self(authorization: WatchAuthorization.decode(legacyAuthorization) ?? .init(revision: 0, isGranted: false))
+        return Self(authorization: legacy ?? .init(revision: 0, isGranted: false))
     }
 
     /// Identifies a library by stable identities, never by a profile session, which is new on
@@ -84,10 +90,13 @@ public nonisolated struct WatchGrant: Codable, Sendable {
     /// revision, even after a relaunch; any other library, or one opening after a revocation, is
     /// granted anew. Closing a library that was open in this process revokes, and so does another
     /// profile opening; a grant restored at launch waits for its own profile's library instead.
-    public mutating func update(scope current: String?, profileID openProfile: String?) -> Change {
+    /// `knownProfileIDs` are the profiles on the iPhone, nil while their list cannot be read: the
+    /// granted profile leaving it, deleted or retired from the family, revokes even while closed.
+    public mutating func update(scope current: String?, profileID openProfile: String?, knownProfileIDs: Set<String>? = nil) -> Change {
         guard let current else {
             let switched = openProfile != nil && openProfile != profileID
-            guard authorization.isGranted, isConfirmed || switched else { return .unchanged }
+            let removed = profileID.map { knownProfileIDs?.contains($0) == false } ?? false
+            guard authorization.isGranted, isConfirmed || switched || removed else { return .unchanged }
             revoke()
             return .revoked
         }

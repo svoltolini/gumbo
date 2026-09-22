@@ -151,7 +151,8 @@ public final class CloudSync {
         isShared = false
         needsFamilyInvitation = false
         status = .off
-        profiles?.lock()
+        // Even with no profile open: nothing granted under the previous account may carry over.
+        profiles?.lock(deactivatingWhenClosed: true)
     }
 
     private func check(_ expected: UUID) throws {

@@ -250,6 +250,21 @@ private final class CloudFixture {
     #expect(deactivations == 1)
 }
 
+/// After a background relaunch the Watch keeps the grant of a profile nobody has opened yet. An Apple
+/// Account change must end it too, while an ordinary lock with nothing open deactivates nothing (#219).
+@Test @MainActor func cloudAccountChangeDeactivatesEvenWithNoProfileOpen() throws {
+    let fixture = try CloudFixture()
+    defer { fixture.cleanUp() }
+    var deactivations = 0
+    fixture.profiles.onDeactivate = { deactivations += 1 }
+    #expect(fixture.profiles.isLocked)
+    fixture.profiles.lock()
+    #expect(deactivations == 0)
+    fixture.sync.accountChanged()
+    #expect(deactivations == 1)
+    #expect(fixture.profiles.isLocked)
+}
+
 @Test @MainActor func cloudAccountChangeDiscardsASuspendedPageBeforeAnyApplication() async throws {
     let fixture = try CloudFixture()
     defer { fixture.cleanUp() }

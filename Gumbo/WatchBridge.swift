@@ -22,6 +22,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// The open profile, whether or not its library is ready: another profile opening after a
     /// relaunch revokes the grant before its library loads.
     var profileProvider: (() -> String?)?
+    /// The profiles on this iPhone, nil while their list cannot be read: the granted profile
+    /// deleted or retired from the family revokes the grant even while no profile is open.
+    var knownProfileIDsProvider: (() -> Set<String>?)?
     /// Asked for the current state whenever a sync is due. Its scope matches `scopeProvider`.
     var provider: (() -> (catalogue: WatchCatalogue, credentials: WatchCredentials?, scope: String)?)?
     var artworkProvider: ((WatchCatalogue) -> [WatchArtworkSource])?
@@ -118,8 +121,14 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         artworkRequestID = requestID
         artworkTask = Task { [weak self, artworkBuilder] in
             let images = await artworkBuilder.thumbnails(for: sources, scope: scope)
-            guard !Task.isCancelled, let self, self.artworkRequestID == requestID,
-                  self.authorizationScope == scope, self.scopeProvider?() == scope else { return }
+            guard !Task.isCancelled, let self, self.artworkRequestID == requestID else { return }
+            guard self.authorizationScope == scope, self.scopeProvider?() == scope else {
+                // The library moved while these were drawn and nothing has replaced this batch yet:
+                // the next sync prepares again rather than hold catalogues for a finished task.
+                self.artworkTask = nil
+                self.artworkRequest = nil
+                return
+            }
             self.preparedArtworkSources = sources
             self.preparedArtwork = images
             self.artworkTask = nil
@@ -159,11 +168,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     /// Moves the grant with the library now open: kept for the same one, granted anew for any
-    /// other, revoked when a library open in this process closes or another profile opens. A
-    /// grant restored at launch is left alone until then, so a relaunch never makes the Watch
-    /// clear its downloads.
+    /// other, revoked when a library open in this process closes, another profile opens or the
+    /// granted profile leaves the iPhone. A grant restored at launch is left alone until then, so
+    /// a relaunch never makes the Watch clear its downloads.
     private func followLibrary() {
-        guard currentGrant.update(scope: scopeProvider?(), profileID: profileProvider?()) != .unchanged else { return }
+        guard currentGrant.update(scope: scopeProvider?(), profileID: profileProvider?(),
+                                  knownProfileIDs: knownProfileIDsProvider?()) != .unchanged else { return }
         grantChanged()
     }
 

@@ -96,6 +96,23 @@ import Testing
         #expect(!grant.authorization.isGranted)
     }
 
+    @Test func theGrantedProfileLeavingTheIPhoneWhileClosedRevokes() {
+        var saved = WatchGrant.restored(from: nil)
+        _ = saved.update(scope: library, profileID: profileA, knownProfileIDs: [profileA])
+        let watch = saved.authorization
+        var grant = WatchGrant.restored(from: saved.encoded)
+        // Still on the iPhone, or a profile list that cannot be read: held.
+        let held = [grant.update(scope: nil, profileID: nil, knownProfileIDs: [profileA, "profile-b"]),
+                    grant.update(scope: nil, profileID: nil, knownProfileIDs: nil)]
+        #expect(held == [.unchanged, .unchanged])
+        #expect(grant.authorization == watch)
+        // Deleted on another device, or retired from the family, while nobody has it open here.
+        let removed = grant.update(scope: nil, profileID: nil, knownProfileIDs: ["profile-b"])
+        #expect(removed == .revoked)
+        #expect(!grant.authorization.isGranted)
+        #expect(clearsWatch(holding: watch, on: grant.authorization))
+    }
+
     @Test func explicitRevocationAlwaysMovesTheRevision() {
         var grant = WatchGrant.restored(from: nil)
         _ = grant.update(scope: library, profileID: profileA)
@@ -146,7 +163,7 @@ import Testing
                        grant.update(scope: library, profileID: profileA)]
         #expect(changes == [.unchanged, .granted, .unchanged])
         #expect(grant.authorization == WatchAuthorization(revision: 8, isGranted: true))
-        // Once saved in the new form, the legacy value is no longer consulted.
+        // Once saved in the new form, a lower legacy value left behind is ignored.
         let stale = WatchAuthorization(revision: 3, isGranted: false)
         let restored = WatchGrant.restored(from: grant.encoded, legacyAuthorization: stale.encoded)
         #expect(restored.authorization == grant.authorization)
@@ -154,6 +171,27 @@ import Testing
         var early = WatchGrant.restored(from: nil, legacyAuthorization: legacy.encoded)
         let opened = early.update(scope: nil, profileID: profileA)
         #expect(opened == .revoked)
+    }
+
+    @Test func aDowngradesHigherLegacyRevisionIsContinuedRatherThanRolledBack() {
+        var grant = WatchGrant.restored(from: nil, legacyAuthorization: WatchAuthorization(revision: 7, isGranted: true).encoded)
+        _ = grant.update(scope: library, profileID: profileA)
+        #expect(grant.authorization.revision == 8)
+        // An older version, run again after this one, moved the Watch on to its own revision.
+        let watch = WatchAuthorization(revision: 12, isGranted: false)
+        #expect(!watch.accepts(grant.authorization))
+        var restored = WatchGrant.restored(from: grant.encoded, legacyAuthorization: watch.encoded)
+        #expect(restored.authorization == watch)
+        #expect(restored.scope == nil)
+        #expect(restored.profileID == nil)
+        let reopened = restored.update(scope: library, profileID: profileA)
+        #expect(reopened == .granted)
+        #expect(restored.authorization == WatchAuthorization(revision: 13, isGranted: true))
+        #expect(watch.accepts(restored.authorization))
+        // An equal revision may be that version's grant for another profile, so it is not continued either.
+        let tied = WatchGrant.restored(from: grant.encoded, legacyAuthorization: grant.authorization.encoded)
+        #expect(tied.authorization == grant.authorization)
+        #expect(tied.scope == nil)
     }
 
     @Test func unreadableOrMissingStateStartsWithNothingGranted() {

@@ -273,6 +273,12 @@ struct GumboApp: App {
         }
         watchBridge.scopeProvider = watchScope
         watchBridge.profileProvider = { [profiles] in profiles.active?.id }
+        watchBridge.knownProfileIDsProvider = { [profiles] in
+            profiles.isProfileIndexReadable ? Set(profiles.profiles.map(\.id)) : nil
+        }
+        // A profile deleted elsewhere or retired from the family may be the one the Watch still
+        // holds while nobody has it open here; its grant ends now rather than at the next sync.
+        profiles.onProfilesRemoved = { [watchBridge] in watchBridge.sync() }
         watchBridge.provider = { [library, model, profiles] in
             guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name
