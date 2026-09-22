@@ -905,6 +905,7 @@ import Testing
         try await Task.sleep(for: .milliseconds(60))
         #expect(fixture.transports.count == 1)
         #expect(!fixture.model.isPlaying)
+        #expect(fixture.model.lastError == nil)
 
         answer = false
         fixture.model.resume()
@@ -956,6 +957,7 @@ import Testing
         #expect(fixture.transports.count == 2)
         #expect(!fixture.model.isPlaying)
         #expect(!fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError == nil, "A pause settles the recovery without showing its failure")
 
         // A widget or CarPlay request that takes over and then never starts a song leaves the failure
         // shown, not a lasting Pause, and the old song does not start behind it.
@@ -987,22 +989,21 @@ import Testing
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
         fixture.model.streamURLProvider = { _ in address }
         fixture.model.streamRecoveryDeadline = .milliseconds(30)
-        var answered = false
+        var held: CheckedContinuation<Void, Never>?
         fixture.model.streamFailureRecovery = { _ in
-            try? await Task.sleep(for: .milliseconds(300))
-            answered = true
+            await withCheckedContinuation { held = $0 }
             return true
         }
         fixture.model.play(queue: [track("first")], title: nil)
         fixture.transports[0].status = .failed("Cannot Open")
         #expect(fixture.model.isPlaybackRequested)
         try await playbackWaitUntil { fixture.model.lastError != nil }
-        #expect(!answered, "An unreachable server shows its failure before its requests time out")
+        #expect(held != nil, "An unreachable server shows its failure before its requests time out")
         #expect(!fixture.model.isPlaybackRequested)
         #expect(fixture.model.lastError == "Cannot Open")
 
         // A late answer does not start the song behind the Play the listener now sees.
-        try await playbackWaitUntil { answered }
+        held?.resume()
         try await Task.sleep(for: .milliseconds(30))
         #expect(fixture.transports.count == 1)
         #expect(!fixture.model.isPlaybackRequested)
@@ -1034,6 +1035,65 @@ import Testing
         #expect(fixture.model.isPlaybackRequested)
         #expect(fixture.model.lastError == nil)
         #expect(fixture.transports[2].seeks.map(\.seconds) == [40])
+    }
+
+    @Test func aResumeSeekCutShortBeforeTheFailureIsReportedStillStartsTheRecovery() async throws {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first")], title: nil)
+        fixture.transports[0].positionChanged?(40)
+        fixture.transports[0].status = .failed("Connection lost")
+        let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
+        fixture.model.streamURLProvider = { _ in address }
+        var asked = 0
+        fixture.model.streamFailureRecovery = { _ in
+            asked += 1
+            try? await Task.sleep(for: .milliseconds(20))
+            return true
+        }
+        fixture.model.resume()
+        #expect(fixture.transports.count == 2)
+        // AVFoundation cancels the seek before the item's failed status reaches the player.
+        let transport = fixture.transports[1]
+        let statusChanged = transport.statusChanged
+        transport.statusChanged = nil
+        transport.status = .failed("Cannot Open")
+        transport.seeks[0].completion(false)
+        transport.statusChanged = statusChanged
+        statusChanged?()
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError == nil)
+
+        try await playbackWaitUntil { fixture.transports.count == 3 }
+        #expect(asked == 1)
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.transports[2].seeks.map(\.seconds) == [40])
+    }
+
+    @Test func playingARecoveredSongAgainInPlaceGetsItsOwnRecovery() async throws {
+        let fixture = PlaybackFixture()
+        var address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
+        fixture.model.streamURLProvider = { _ in address }
+        var asked = 0
+        fixture.model.streamFailureRecovery = { _ in
+            asked += 1
+            address = URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=renewed-\(asked)")!
+            return true
+        }
+        fixture.model.play(queue: [track("first")], title: nil)
+        fixture.transports[0].status = .failed("Cannot Open")
+        try await playbackWaitUntil { fixture.transports.count == 2 }
+        fixture.transports[1].status = .ready
+        #expect(fixture.model.isPlaying)
+
+        // A long pause, then Play from the lock screen resumes the recovered song in place; DSM has
+        // ended that session too, and the new request to play may renew it once more.
+        fixture.model.pause()
+        fixture.model.resume()
+        fixture.transports[1].status = .failed("Cannot Open")
+        #expect(fixture.model.isPlaybackRequested)
+        try await playbackWaitUntil { fixture.transports.count == 3 }
+        #expect(asked == 2)
+        #expect(fixture.model.lastError == nil)
     }
 
     private func preparedRecovery() -> PlaybackFixture {

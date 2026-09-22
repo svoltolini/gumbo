@@ -1236,7 +1236,15 @@ public final class CloudSync {
     private func join(_ metadata: CKShare.Metadata) async -> String? {
         var expected = generation
         do {
-            try await verifyIdentity(expected)
+            do {
+                try await verifyIdentity(expected)
+            } catch is CancellationError where currentUserRecordName != nil && !Task.isCancelled {
+                // An invitation that launched Gumbo races the launch's own account check. When that
+                // check revoked an account last verified here before verifying the current one, the
+                // join continues under the account it verified instead of dropping the invitation.
+                expected = generation
+                try await verifyIdentity(expected)
+            }
             expected = generation
             _ = try await container.accept(metadata)
             try check(expected)

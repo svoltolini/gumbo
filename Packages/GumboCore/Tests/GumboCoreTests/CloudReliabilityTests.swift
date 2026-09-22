@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import Foundation
 import Testing
 @testable import GumboCore
@@ -1148,6 +1149,20 @@ private func seededMissingRecordFixture() async throws -> (CloudFixture, String)
     #expect(deactivations == 1)
     #expect(f.sync.currentUserRecordName == "B")
     #expect(f.persistence.verifiedAccount() == "B")
+}
+
+/// The account is recorded as verified before its sync state loads, so a launch that can't read that
+/// state still leaves the device knowing whose access a later, different account must revoke.
+@Test @MainActor func cloudAccountWhoseSyncStateCannotBeReadIsStillRecordedAsVerified() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    let key = SHA256.hash(data: Data("A".utf8)).map { String(format: "%02x", $0) }.joined()
+    let cloud = f.directory.appending(path: "cloud")
+    try FileManager.default.createDirectory(at: cloud, withIntermediateDirectories: true)
+    try Data("not a sync state".utf8).write(to: cloud.appending(path: "account-\(key).json"))
+    await f.sync.refresh(reason: "launch with an unreadable sync state")
+    if case .failed = f.sync.status {} else { Issue.record("An unreadable sync state must surface as a failure") }
+    #expect(f.sync.currentUserRecordName == nil)
+    #expect(f.persistence.verifiedAccount() == "A")
 }
 
 @Test @MainActor func cloudTemporarilyUnavailableAccountNeitherLocksNorResetsSyncState() async throws {

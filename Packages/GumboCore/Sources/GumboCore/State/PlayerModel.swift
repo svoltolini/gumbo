@@ -102,6 +102,9 @@ public final class PlayerModel {
     private var recoverySeekInFlight = false
     /// The server address the current song streams from, until its one recovery attempt is used.
     private var recoverableStream: URL?
+    /// The server address the loaded song streams from, kept so that a new request to play it in
+    /// place, such as Play after a long pause, gets its own recovery attempt.
+    private var currentStream: URL?
     /// Why the current song's stream failed, held back while that attempt runs: the request to play
     /// stands meanwhile, and the failure shows only if the song cannot load again.
     private var pendingStreamFailure: String?
@@ -243,6 +246,9 @@ public final class PlayerModel {
             // Resumes in place. After a failed seek this is the retry, which replaces the old error as a
             // reload would, so album and playlist controls show Pause alongside the transport.
             lastError = nil
+            // A new request to play: if DSM ended the session during a long pause, this one may renew
+            // it too, even for a song that was itself reloaded by a recovery.
+            if recoverableStream == nil { recoverableStream = currentStream }
             playWhenReady()
         }
         updateNowPlayingInfo()
@@ -377,7 +383,10 @@ public final class PlayerModel {
             }
             player.volume = volume
             self.player = player
-            if case .url(let url) = source, !url.isFileURL, !isRecovery { recoverableStream = url }
+            if case .url(let url) = source, !url.isFileURL {
+                currentStream = url
+                if !isRecovery { recoverableStream = url }
+            }
             pendingStartPosition = position > 0 ? position : nil
             let generation = playbackGeneration
             player.positionChanged = { [weak self] seconds in
@@ -426,6 +435,7 @@ public final class PlayerModel {
         pendingStartPosition = nil
         recoverySeekInFlight = false
         recoverableStream = nil
+        currentStream = nil
         pendingStreamFailure = nil
         if nowPlayingArtwork == nil { artworkAlbumID = nil }
         stopTicker()
@@ -462,9 +472,13 @@ public final class PlayerModel {
                 player.seek(to: target) { [weak self] finished in
                     guard let self, playbackGeneration == generation, seekGeneration == seek else { return }
                     recoverySeekInFlight = false
-                    // The item failed under the seek and a fresh address is being made: that recovery
-                    // reloads at this same position, or shows the failure, so the request stands.
-                    if !finished, pendingStreamFailure != nil { return }
+                    // The item failed under the seek, whichever of the two AVFoundation reported first:
+                    // its failure path decides, starting a recovery while the request still stands or
+                    // leaving one already under way to reload at this same position.
+                    if !finished, let status = self.player?.status, case .failed = status {
+                        playWhenReady()
+                        return
+                    }
                     if finished {
                         pendingStartPosition = nil
                         playWhenReady()
