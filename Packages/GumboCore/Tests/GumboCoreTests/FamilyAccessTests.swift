@@ -29,7 +29,7 @@ import Testing
         defaults.set(3, forKey: "coverCacheVersion")
         makeModel()
         cloud = CloudSync(services: CloudServices(
-            identity: { self.identity }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
+            identity: { self.identity.map(CloudIdentity.available) ?? .noAccount }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
             changes: { _, token in CloudChangePage(records: [], token: token) },
             modify: { _, records, ids in
                 guard !ids.isEmpty else { return .init(saved: Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .success($0)) })) }
@@ -164,6 +164,25 @@ import Testing
     #expect(await f.model.removeFamilyAccess() == nil)
     #expect(f.model.familyAccess == nil)
     #expect(f.deletes == 2)
+}
+
+@Test @MainActor func familyCredentialsRevisionChangesOnlyWhenThisDeviceSavesCredentials() async throws {
+    let f = FamilyFixture()
+    defer { f.cleanUp() }
+    await f.connect()
+    #expect(f.model.familyInfo?.credentialsRevision == nil)
+    await f.configureFamily()
+    let first = try #require(f.model.familyInfo?.credentialsRevision)
+    f.makeModel()
+    await f.connect()
+    #expect(f.model.familyInfo?.credentialsRevision == first)
+    #expect(await f.model.rotateFamilyAccess() == nil)
+    let rotated = try #require(f.model.familyInfo?.credentialsRevision)
+    #expect(rotated != first)
+    #expect(f.model.familyInfo?.familyPassword == f.model.familyAccess?.password)
+    #expect(await f.model.removeFamilyAccess() == nil)
+    #expect(f.model.familyInfo?.familyAccount == nil)
+    #expect(f.model.familyInfo?.credentialsRevision == nil)
 }
 
 @Test @MainActor func failedOrUnacknowledgedShareRemovalNeverRotatesNASPassword() async {

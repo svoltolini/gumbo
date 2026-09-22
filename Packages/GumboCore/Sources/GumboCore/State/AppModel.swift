@@ -1160,7 +1160,8 @@ public final class AppModel {
             name: "\(connection.name) family", serverName: connection.name,
             serverAccount: connection.account, musicPath: connection.musicPath, updatedAt: .distantPast,
             familyAccount: access?.account, familyPassword: access?.password,
-            address: connection.baseURL.absoluteString, provider: connection.provider
+            address: connection.baseURL.absoluteString, provider: connection.provider,
+            credentialsRevision: access.flatMap { familyAccessRecords[$0.sourceID]?.revision }
         )
     }
 
@@ -1198,7 +1199,8 @@ public final class AppModel {
         if let access {
             guard access.sourceID == sourceID else { throw CancellationError() }
             let record = FamilyAccessRecord(account: access.account, sourceID: sourceID,
-                                            pendingRevocationScope: previous?.pendingRevocationScope)
+                                            pendingRevocationScope: previous?.pendingRevocationScope,
+                                            revision: UUID().uuidString)
             services.savePassword(access.password, record.keychainAccount)
             guard services.password(record.keychainAccount) == access.password else {
                 throw CocoaError(.fileWriteNoPermission)

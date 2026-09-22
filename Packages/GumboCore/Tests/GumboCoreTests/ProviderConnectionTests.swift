@@ -136,7 +136,7 @@ private func withPath(_ track: Track, _ path: String) throws -> Track {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         var rejectRemoval = true
-        let cloud = CloudSync(services: CloudServices(identity: { "owner" }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
+        let cloud = CloudSync(services: CloudServices(identity: { .available("owner") }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
             changes: { _, token in CloudChangePage(records: [], token: token) },
             modify: { _, records, ids in
                 if !ids.isEmpty && rejectRemoval { throw CKError(.networkUnavailable) }
@@ -172,7 +172,7 @@ private func withPath(_ track: Track, _ path: String) throws -> Track {
         record["name"] = "Home"
         record["serverName"] = "NAS"
         record["updatedAt"] = Date(timeIntervalSince1970: 100)
-        let cloud = CloudSync(services: CloudServices(identity: { "owner" }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
+        let cloud = CloudSync(services: CloudServices(identity: { .available("owner") }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
             changes: { _, _ in .init(records: [.success(record)], token: nil) },
             modify: { _, records, _ in .init(saved: Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, .success($0)) })) }),
             persistence: CloudPersistence(directory: directory))

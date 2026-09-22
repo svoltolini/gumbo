@@ -55,7 +55,7 @@ struct GumboTVApp: App {
             let directory = FileManager.default.temporaryDirectory.appending(path: "GumboTVPreview-" + UUID().uuidString)
             let defaults = UserDefaults(suiteName: "Gumbo.TVPreview." + UUID().uuidString)!
             profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults)
-            cloud = CloudSync(services: CloudServices(identity: { nil }, sharedZones: { [] }, createZone: { _ in },
+            cloud = CloudSync(services: CloudServices(identity: { .noAccount }, sharedZones: { [] }, createZone: { _ in },
                 subscribe: {}, changes: { _, _ in CloudChangePage(records: []) }, modify: { _, _, _ in CloudModifyResult() }),
                 persistence: CloudPersistence(directory: directory.appending(path: "cloud")))
             model = AppModel(library: library, defaults: defaults, services: ConnectionServices(), restoresSession: false)

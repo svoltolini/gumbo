@@ -60,6 +60,8 @@ public final class CloudSync {
     /// `updatedAt` of every record as last seen in the cloud, so only newer local data is pushed.
     private var remoteStamps: [String: Date]
     private var remoteStateDigests: [String: String] = [:]
+    /// The Family record being sent by this refresh. It counts as uploaded only once CloudKit accepts it.
+    private var familyInFlight: FamilyRecordPlan?
     private var uploads: [String: Task<Void, Never>] = [:]
     private var isStarted = false
     private var isRefreshing = false
@@ -148,12 +150,21 @@ public final class CloudSync {
     }
 
     private func verifyIdentity(_ expected: UUID) async throws {
-        let identity = try await services.identity()
+        let reported = try await services.identity()
         try check(expected)
-        guard let identity else {
-            accountChanged()
+        let identity: String
+        switch reported {
+        case .available(let account):
+            identity = account
+        case .noAccount:
+            // Signed out since this session verified an account: revoke it like any account change.
+            // With no account before either, there is nothing to revoke; the open profile keeps playing.
+            if currentUserRecordName != nil { accountChanged() }
             status = .noAccount
             throw CancellationError()
+        case .unavailable:
+            // No evidence of another account: keep the account, its sync state and the open profile.
+            throw SyncFailure.message("iCloud is temporarily unavailable. Gumbo will try again.")
         }
         guard currentUserRecordName != identity else { return }
         if currentUserRecordName != nil {
@@ -535,6 +546,7 @@ public final class CloudSync {
 
     private func pushLocal() async throws {
         guard let profiles else { return }
+        defer { familyInFlight = nil }
         let expected = generation
         var toSave: [CKRecord] = []
         var newProfiles = 0
@@ -560,11 +572,22 @@ public final class CloudSync {
             }
         }
         if membership == .owner, let active = profiles.active, accountState?.profileIDs.contains(active.id) == true,
-           let info = familyInfoProvider?(), remoteStamps["family"] == nil || family.map({ !$0.describesSameServer(as: info) }) ?? true {
-            var current = info
-            current.updatedAt = .now
-            toSave.append(record(for: current))
-            family = current
+           let intent = familyInfoProvider?() {
+            // Only what this device changed since its own last upload is sent, never merely what differs
+            // from iCloud's copy, so the owner's devices do not answer each other's Family uploads.
+            let uploaded = accountState?.zones[zoneOwnerName]?.familyUpload
+            // A record sent before whose revision is gone was found missing: create it again in full.
+            var plan = FamilyRecordPlan(intent: intent, lastUpload: uploaded, server: family,
+                                        recreating: uploaded != nil && systemFields["family"] == nil)
+            if plan.needsSave {
+                plan.info.updatedAt = .now
+                toSave.append(record(for: plan))
+                familyInFlight = plan
+            } else if plan.upload != uploaded {
+                // iCloud already holds this intent.
+                recordFamilyUpload(plan.upload)
+                try persistState()
+            }
         }
         if let user = currentUserRecordName, !profiles.profiles.contains(where: { $0.userRecordName == user }), let active = profiles.active,
            accountState?.profileIDs.contains(active.id) == true, active.userRecordName == nil {
@@ -837,6 +860,11 @@ public final class CloudSync {
                 remember(saved)
                 if let stamp = saved["updatedAt"] as? Date { remoteStamps[id.recordName] = stamp }
                 if let digest = acknowledgedDigests[id] { remoteStateDigests[id.recordName] = digest }
+                if record.recordType == "Family", let plan = familyInFlight {
+                    familyInFlight = nil
+                    recordFamilyUpload(plan.upload)
+                    family = plan.info
+                }
             case .failure(let error):
                 guard let ours = records.first(where: { $0.recordID == id }) else { throw error }
                 let ckError = error as? CKError
@@ -950,10 +978,15 @@ public final class CloudSync {
                 if let record = record(for: prepared, profileID: id) { rebuilt[record.recordID] = record }
             case "Family":
                 guard isOwner, let profiles, let active = profiles.active,
-                      containsProfileInCurrentAccount(active.id), var info = familyInfoProvider?() else { continue }
-                info.updatedAt = .now
-                let record = record(for: info)
+                      containsProfileInCurrentAccount(active.id), let intent = familyInfoProvider?() else { continue }
+                // Still missing after the pull: created again in full. Returned by it: planned against it.
+                var plan = FamilyRecordPlan(intent: intent, lastUpload: accountState?.zones[zoneOwnerName]?.familyUpload,
+                                            server: family, recreating: systemFields[name] == nil)
+                guard plan.needsSave else { continue }
+                plan.info.updatedAt = .now
+                let record = record(for: plan)
                 rebuilt[record.recordID] = record
+                familyInFlight = plan
             default:
                 throw SaveFailure(record: missingRecord, underlying: CKError(.unknownItem))
             }
@@ -1017,20 +1050,32 @@ public final class CloudSync {
         return record
     }
 
-    private func record(for info: FamilyInfo) -> CKRecord {
+    /// Sets only the fields the plan writes. CloudKit sends only the fields set on a record, so the
+    /// others keep what iCloud has, in an ordinary save and in a conflict retry built from this record.
+    private func record(for plan: FamilyRecordPlan) -> CKRecord {
+        let info = plan.info
         let record = baseRecord(named: "family", type: "Family")
-        record["name"] = info.name
-        record["address"] = info.provider?.kind == .synology || info.provider == nil ? info.address : nil
-        let providerData: Data? = info.provider.flatMap { try? JSONEncoder().encode($0) }
-        record["providerConnection"] = providerData as CKRecordValue?
-        record["serverName"] = info.serverName
-        record["serverAccount"] = info.serverAccount
-        record["musicPath"] = info.musicPath
         record["updatedAt"] = info.updatedAt
-        record["familyAccount"] = info.familyAccount
-        // End-to-end encrypted; the key is shared only with the family's participants.
-        record.encryptedValues["familyPassword"] = info.familyPassword
+        if plan.writesDetails {
+            record["name"] = info.name
+            record["address"] = info.provider?.kind == .synology || info.provider == nil ? info.address : nil
+            let providerData: Data? = info.provider.flatMap { try? JSONEncoder().encode($0) }
+            record["providerConnection"] = providerData as CKRecordValue?
+            record["serverName"] = info.serverName
+            record["serverAccount"] = info.serverAccount
+            record["musicPath"] = info.musicPath
+        }
+        if plan.writesCredentials {
+            record["familyAccount"] = info.familyAccount
+            // End-to-end encrypted; the key is shared only with the family's participants.
+            record.encryptedValues["familyPassword"] = info.familyPassword
+        }
         return record
+    }
+
+    private func recordFamilyUpload(_ upload: FamilyRecordUpload) {
+        if accountState?.zones[zoneOwnerName] == nil { accountState?.zones[zoneOwnerName] = .init() }
+        accountState?.zones[zoneOwnerName]?.familyUpload = upload
     }
 
     private static func profile(from record: CKRecord) -> Profile? {

@@ -11,6 +11,9 @@ struct CloudAccountState: Codable {
         var remoteStateDigests: [String: String]? = nil
         /// Kept after acknowledgement too: delayed pages must never resurrect a deleted profile.
         var deletions: [String: Set<String>] = [:]
+        /// What this device last sent in the Family record (or found iCloud already holding), recorded
+        /// only once CloudKit has accepted it, so a failed upload is sent again.
+        var familyUpload: FamilyRecordUpload? = nil
     }
 
     var account: String
