@@ -114,10 +114,109 @@ import Testing
         #expect(harness.played.isEmpty)
     }
 
+    @Test func savedAlbumResolvesFreshMetadataAfterStartupLibraryUpdate() async throws {
+        let harness = Harness()
+        harness.connected = true
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        harness.reads = 0
+        harness.duringRead = {
+            guard harness.reads == 1 else { return }
+            harness.albums[0].title = "Updated album"
+            harness.albums[0].tracks = makeAlbum("updated", artist: "First Artist").tracks
+            harness.change(.content)
+        }
+        let selection = try #require(try await harness.controller.selections(for: [id]).first)
+        #expect(selection.title == "Updated album")
+        #expect(harness.reads == 2)
+        #expect(harness.controller.isCurrent(selection))
+        try await harness.controller.play(selection)
+        #expect(harness.played == ["updated-song"])
+    }
+
+    @Test func namedLookupResolvesAgainInsteadOfReturningRemovedTitle() async throws {
+        let harness = Harness()
+        harness.duringRead = {
+            guard harness.reads == 1 else { return }
+            harness.albums[0].title = "Updated album"
+            harness.change(.content)
+        }
+        #expect(try await harness.controller.resolve(.init(kind: .album, name: "one")).isEmpty)
+        #expect(harness.reads == 2)
+    }
+
+    @Test func manualPlaybackStillWinsWhenIdentifierLookupRetries() async throws {
+        let harness = Harness()
+        harness.connected = true
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        let command = harness.controller.beginRequest()
+        harness.reads = 0
+        harness.duringRead = {
+            guard harness.reads == 1 else { return }
+            harness.command = UUID()
+            harness.change(.content)
+        }
+        let selection = try #require(try await harness.controller.selections(for: [id]).first)
+        await #expect(throws: VoicePlaybackError.cancelled) { try await harness.controller.play(selection, command: command) }
+        #expect(harness.played.isEmpty)
+    }
+
+    @Test func deletedAlbumIsNotReturnedFromAStaleSavedIdentifierLookup() async throws {
+        let harness = Harness()
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        harness.reads = 0
+        harness.duringRead = {
+            guard harness.reads == 1 else { return }
+            harness.albums = []
+            harness.change(.content)
+        }
+        #expect(try await harness.controller.selections(for: [id]).isEmpty)
+        #expect(harness.reads == 2)
+    }
+
+    @Test(arguments: LookupRoute.allCases, ContextChange.allCases.filter { $0 != .content })
+    func lookupNeverRetriesAcrossAccessChanges(_ route: LookupRoute, _ change: ContextChange) async throws {
+        let harness = Harness()
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        harness.reads = 0
+        // Even after a permitted content retry, a changed access scope must end the request.
+        harness.duringRead = { harness.change(harness.reads == 1 ? .content : change) }
+        await #expect(throws: VoicePlaybackError.changed) {
+            _ = try await harness.lookup(route, id: id)
+        }
+        #expect(harness.reads == 2)
+        #expect(harness.played.isEmpty)
+    }
+
+    @Test(arguments: LookupRoute.allCases)
+    func continuouslyChangingLibraryHasBoundedLookupRetries(_ route: LookupRoute) async throws {
+        let harness = Harness()
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        harness.reads = 0
+        harness.duringRead = { harness.change(.content) }
+        await #expect(throws: VoicePlaybackError.changed) { _ = try await harness.lookup(route, id: id) }
+        #expect(harness.reads == 3)
+    }
+
+    @Test(arguments: LookupRoute.allCases)
+    func cancellationDuringLookupDoesNotRetry(_ route: LookupRoute) async throws {
+        let harness = Harness()
+        let id = try #require(try await harness.controller.resolve(.init(kind: .album, name: "one")).first?.id)
+        harness.reads = 0
+        harness.duringRead = {
+            harness.change(.content)
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+        let task = Task { try await harness.lookup(route, id: id) }
+        await #expect(throws: VoicePlaybackError.cancelled) { _ = try await task.value }
+        #expect(harness.reads == 1)
+        #expect(harness.played.isEmpty)
+    }
+
     private func album(_ title: String, artist: String) -> Album { makeAlbum(title, artist: artist) }
 }
 
 nonisolated enum ContextChange: CaseIterable, Sendable { case source, root, profile, session, connection, content, lock }
+nonisolated enum LookupRoute: CaseIterable, Sendable { case named, saved }
 
 private final class Harness {
     var context: VoicePlaybackContext? = .init(sourceID: "nas", rootPath: "/music", profileID: "profile", sessionID: UUID(), connectionToken: UUID())
@@ -126,18 +225,32 @@ private final class Harness {
     var downloaded = false
     var command = UUID()
     var duringWait: (() -> Void)?
+    var duringRead: (() -> Void)?
+    var reads = 0
     var waits = 0
     var played: [String] = []
     var shuffle: Bool?
     var repeatMode: PlayerModel.RepeatMode?
     var playSucceeds = true
-    lazy var controller = VoicePlaybackController(context: { [unowned self] in context }, content: { [unowned self] in (albums, []) },
+    lazy var controller = VoicePlaybackController(context: { [unowned self] in context }, content: { [unowned self] in
+        let snapshot = albums
+        reads += 1
+        duringRead?()
+        return (snapshot, [])
+    },
         isDownloaded: { [unowned self] _ in downloaded }, isConnected: { [unowned self] in connected },
         waitForConnection: { [unowned self] in waits += 1; duringWait?() },
         beginCommand: { [unowned self] in command = UUID(); return command }, currentCommand: { [unowned self] in command },
         play: { [unowned self] tracks, _, requestedShuffle, requestedRepeat in
             played = tracks.map(\.id); shuffle = requestedShuffle; repeatMode = requestedRepeat; return playSucceeds
         })
+
+    func lookup(_ route: LookupRoute, id: String) async throws -> [VoiceMediaSelection] {
+        switch route {
+        case .named: try await controller.resolve(.init(kind: .album, name: "one"))
+        case .saved: try await controller.selections(for: [id])
+        }
+    }
 
     func change(_ change: ContextChange) {
         guard let previous = context else { return }

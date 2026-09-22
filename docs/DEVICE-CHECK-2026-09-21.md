@@ -2,6 +2,8 @@
 
 This records observed checks for #123 and #189. It is not a TestFlight upload or full platform acceptance.
 
+The [22 September follow-up](DEVICE-CHECK-2026-09-22.md) supersedes the installed-Mac and Mac Shortcuts limitations below.
+
 ## Source and installation
 
 - Maintenance source `ee19a071e1e9d217a6ddd94d546d63e0a9a95a5f` has the same tree as merged main `2ba92ad3816cc41ca3770a0be2553575263455e8` (PR #212).
