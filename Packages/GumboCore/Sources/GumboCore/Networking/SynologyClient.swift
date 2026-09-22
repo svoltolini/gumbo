@@ -228,6 +228,15 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
         }
     }
 
+    /// DSM turned the sign-in itself down, with one of SYNO.API.Auth's own codes: besides a wrong
+    /// password, two-factor authentication still to set up (406), a blocked address (407) or a
+    /// password to change first (408-410). Only the person can put these right; signing in again
+    /// unasked repeats a refusal that DSM counts towards blocking the device.
+    public var refusesSignIn: Bool {
+        if case .api(let code, let api) = self { return api == "SYNO.API.Auth" && (400..<500).contains(code) }
+        return false
+    }
+
     /// DSM no longer accepts the session a request carried: it timed out (106), a later sign-in
     /// replaced it (107), or the server no longer knows it (119), for example after a restart.
     /// The saved password still works; signing in again is enough.
@@ -250,6 +259,10 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
             case ("SYNO.API.Auth", 401): "This account is disabled."
             case ("SYNO.API.Auth", 402): "This account isn't allowed to sign in."
             case ("SYNO.API.Auth", 403), ("SYNO.API.Auth", 404): "A two-factor code is required."
+            case ("SYNO.API.Auth", 406): "DSM requires two-factor authentication for this account. Set it up in DSM, then sign in again."
+            case ("SYNO.API.Auth", 407): "DSM has blocked sign-ins from this address. Unblock it in DSM's security settings, then sign in again."
+            case ("SYNO.API.Auth", 408), ("SYNO.API.Auth", 409), ("SYNO.API.Auth", 410):
+                "The password for this account has expired. Change it in DSM, then sign in again."
             case (_, 106), (_, 107), (_, 119): "The session has expired. Sign in again."
             case ("SYNO.FileStation.List", 408), ("SYNO.FileStation.List", 407): "This account can't open that folder."
             case ("SYNO.FileStation.Upload", 1805), (_, 414): "A file with that name already exists on the server."

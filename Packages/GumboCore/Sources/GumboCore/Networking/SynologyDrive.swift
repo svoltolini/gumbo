@@ -4,6 +4,9 @@ import Foundation
 public nonisolated final class SynologyDrive: RemoteDrive {
     /// Signs in again after DSM ends `expired` and returns the new session. Throws when that needs
     /// the person, such as a one-time code or a changed password, or when the server can't answer.
+    /// `CancellationError` means the app doesn't want this session renewed now, for example while
+    /// its connection changes: the request fails with DSM's refusal, and since no sign-in was
+    /// refused, a later request may ask again.
     public typealias SessionRenewal = @Sendable (_ expired: DSMSession) async throws -> DSMSession
 
     // Protocol support is separate from NAS ACLs: File Station enforces the signed-in account's
@@ -24,11 +27,12 @@ public nonisolated final class SynologyDrive: RemoteDrive {
         })
     }
 
-    /// The listing and file transports can be replaced in tests without sending requests to a NAS.
+    /// The listing and file transports, and the spacing of sign-ins, can be replaced in tests
+    /// without sending requests to a NAS.
     init(session: DSMSession, displayName: String, renewal: SessionRenewal?,
-         configuration: URLSessionConfiguration = .default,
+         configuration: URLSessionConfiguration = .default, renewalInterval: Duration = .seconds(30),
          listingRequest: @escaping @Sendable (URL) async throws -> SynologyFileList) {
-        state = DSMSessionState(session)
+        state = DSMSessionState(session, renewalInterval: renewalInterval)
         // Fixed for the drive's life: a renewed session belongs to the same server and account.
         id = NASSource.identifier(baseURL: session.baseURL, account: session.account ?? "")
         self.displayName = displayName
@@ -56,7 +60,14 @@ public nonisolated final class SynologyDrive: RemoteDrive {
             guard let renewal else { throw error }
             try Task.checkCancellation()
             diagnostics("DSM refused the session (\(error.localizedDescription)); signing in again")
-            let renewed = try await state.renewed(after: session, cause: error, using: renewal)
+            let renewed: DSMSession
+            do {
+                renewed = try await state.renewed(after: session, cause: error, using: renewal)
+            } catch is CancellationError {
+                // The app declined to renew for now; the request itself wasn't cancelled.
+                try Task.checkCancellation()
+                throw error
+            }
             let value = try await request(renewed)
             state.recordResponse()
             return value
@@ -274,8 +285,6 @@ nonisolated enum SynologyListingError: LocalizedError, Equatable {
 /// and stream addresses carry the new one. Requests that find the same session ended share one
 /// sign-in, and sign-ins are spaced out, because DSM counts repeated ones towards blocking the device.
 private nonisolated final class DSMSessionState: @unchecked Sendable {
-    static let renewalInterval: Duration = .seconds(30)
-
     private nonisolated enum Step {
         case retry(DSMSession)
         case wait(Task<DSMSession, any Error>)
@@ -283,12 +292,16 @@ private nonisolated final class DSMSessionState: @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let renewalInterval: Duration
     private var session: DSMSession
     private var renewal: Task<DSMSession, any Error>?
     private var lastRenewal: (at: ContinuousClock.Instant, failure: (any Error)?)?
     private var lastResponse = ContinuousClock.now
 
-    init(_ session: DSMSession) { self.session = session }
+    init(_ session: DSMSession, renewalInterval: Duration) {
+        self.session = session
+        self.renewalInterval = renewalInterval
+    }
 
     var current: DSMSession { lock.withLock { session } }
     var timeSinceLastResponse: Duration { lock.withLock { ContinuousClock.now - lastResponse } }
@@ -301,7 +314,7 @@ private nonisolated final class DSMSessionState: @unchecked Sendable {
         let step: Step = lock.withLock {
             if session.sid != expired.sid { return .retry(session) }
             if let renewal { return .wait(renewal) }
-            if let lastRenewal, ContinuousClock.now < lastRenewal.at + Self.renewalInterval {
+            if let lastRenewal, ContinuousClock.now < lastRenewal.at + renewalInterval {
                 return .fail(lastRenewal.failure ?? cause)
             }
             let task = Task { try await renew(expired) }
@@ -325,7 +338,8 @@ private nonisolated final class DSMSessionState: @unchecked Sendable {
                         lastResponse = .now
                         lastRenewal = (.now, nil)
                     case .failure(let error):
-                        lastRenewal = (.now, error)
+                        // A renewal the app turned down reached no server, so it doesn't hold off the next one.
+                        if !(error is CancellationError) { lastRenewal = (.now, error) }
                     }
                 }
                 return try result.get()

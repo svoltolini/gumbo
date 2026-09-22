@@ -94,6 +94,16 @@ private nonisolated func refusal(_ code: Int) -> DSMDownloadFixture.Reply {
         #expect(!SynologyError.unreachable("offline").isSessionExpired)
     }
 
+    @Test func signInRefusalsAreTheAuthAPIsOwnCodes() {
+        for code in [400, 402, 406, 407, 408, 409, 410] {
+            #expect(SynologyError.api(code: code, api: "SYNO.API.Auth").refusesSignIn)
+        }
+        #expect(!SynologyError.api(code: 119, api: "SYNO.API.Auth").refusesSignIn)
+        #expect(!SynologyError.api(code: 407, api: "SYNO.FileStation.List").refusesSignIn)
+        #expect(!SynologyError.unreachable("offline").refusesSignIn)
+        #expect(SynologyError.api(code: 409, api: "SYNO.API.Auth").errorDescription?.contains("expired") == true)
+    }
+
     @Test func endedSessionSignsInOnceAndRepeatsTheRequest() async throws {
         let ledger = RenewalLedger()
         let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: { expired in
@@ -178,6 +188,46 @@ private nonisolated func refusal(_ code: Int) -> DSMDownloadFixture.Reply {
         #expect(drive.session.sid == "expired")
     }
 
+    @Test func renewalIsTriedAgainOnceTheIntervalHasPassed() async throws {
+        let ledger = RenewalLedger()
+        let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: { _ in
+            guard await ledger.login() > 1 else { throw SynologyError.unreachable("offline") }
+            return renewalSession("renewed")
+        }, renewalInterval: .milliseconds(200)) { url in
+            guard await ledger.request(url) == "renewed" else { throw expiredListing() }
+            return renewalPage([])
+        }
+        await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+        // Within the interval the failure stands without another sign-in.
+        await #expect(throws: SynologyError.self) { try await drive.checkSession(folder: "/music") }
+        #expect(await ledger.logins == 1)
+        try await Task.sleep(for: .milliseconds(300))
+        try await drive.checkSession(folder: "/music")
+        #expect(await ledger.logins == 2)
+        #expect(drive.session.sid == "renewed")
+    }
+
+    @Test func aRenewalTheAppDeclinesDoesNotHoldOffTheNext() async throws {
+        let ledger = RenewalLedger()
+        let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: { _ in
+            // The first time the app's connection is changing; the second time it signs in.
+            guard await ledger.login() > 1 else { throw CancellationError() }
+            return renewalSession("renewed")
+        }) { url in
+            guard await ledger.request(url) == "renewed" else { throw expiredListing() }
+            return renewalPage([])
+        }
+        do {
+            try await drive.checkSession(folder: "/music")
+            Issue.record("A declined renewal leaves DSM's refusal standing")
+        } catch let error as SynologyError {
+            #expect(error.isSessionExpired)
+        }
+        try await drive.checkSession(folder: "/music")
+        #expect(await ledger.logins == 2)
+        #expect(drive.session.sid == "renewed")
+    }
+
     @Test func withoutRenewalTheRefusalStands() async throws {
         let ledger = RenewalLedger()
         let drive = SynologyDrive(session: renewalSession("expired"), displayName: "NAS", renewal: nil) { url in
@@ -213,6 +263,40 @@ private nonisolated func refusal(_ code: Int) -> DSMDownloadFixture.Reply {
         }, configuration: configuration) { _ in renewalPage([]) }
         #expect(try await drive.read("/music/a.flac", range: 0..<4) == Data("fLaC".utf8))
         #expect(try await drive.download("/music/cover.jpg", maxBytes: 1024) == audio)
+        #expect(await ledger.logins == 1)
+    }
+
+    /// Tag write-back rewrites the song this saves; a refusal must never stand in for it on disk.
+    @Test func fileDownloadWritesOnlyTheFileFromTheRenewedSession() async throws {
+        let host = "renewal-file-\(UUID().uuidString.lowercased()).invalid"
+        let audio = Data("fLaC-audio".utf8)
+        DSMDownloadFixture.respond(host: host) { request in
+            guard let url = request.url, url.lastPathComponent != "gone.flac" else { return refusal(408) }
+            guard renewalSID(of: url) == "renewed" else { return refusal(119) }
+            return DSMDownloadFixture.Reply(status: 200, type: "audio/flac", body: audio)
+        }
+        let ledger = RenewalLedger()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DSMDownloadFixture.self]
+        let drive = SynologyDrive(session: renewalSession("expired", host: host), displayName: "NAS", renewal: { _ in
+            _ = await ledger.login()
+            return renewalSession("renewed", host: host)
+        }, configuration: configuration) { _ in renewalPage([]) }
+        let folder = FileManager.default.temporaryDirectory.appending(path: "gumbo-renewal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let song = folder.appending(path: "a.flac")
+        try await drive.downloadFile("/music/a.flac", to: song, maxBytes: 1024)
+        #expect(try Data(contentsOf: song) == audio)
+        #expect(await ledger.logins == 1)
+        let gone = folder.appending(path: "gone.flac")
+        do {
+            try await drive.downloadFile("/music/gone.flac", to: gone, maxBytes: 1024)
+            Issue.record("A refusal must not be saved as the file")
+        } catch {
+            #expect(error.isMissingPath)
+        }
+        #expect(!FileManager.default.fileExists(atPath: gone.path))
         #expect(await ledger.logins == 1)
     }
 

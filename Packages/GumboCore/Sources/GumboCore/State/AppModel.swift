@@ -283,8 +283,18 @@ public final class AppModel {
 
     /// Signs in again at the saved address, keeping the current library.
     public func reconnect() async {
+        await reconnect(within: nil)
+    }
+
+    /// Asking to reconnect is a new connection intent, so work tied to the old one stops. An automatic
+    /// attempt stays `within` the connection generation it was started in and only retries the saved
+    /// sign-in of an offline library: what waits for the server carries on, such as a voice request,
+    /// an album link or a paused download, and anything the person starts meanwhile supersedes it.
+    private func reconnect(within current: UUID?) async {
         guard let saved = connection else { return }
-        let generation = beginConnectionChange()
+        if let current, !isCurrent(current) || isReconnecting { return }
+        let automatic = current != nil
+        let generation = current ?? beginConnectionChange()
         guard let password = storedPassword(for: saved) else {
             requestReauthentication(saved, needsOTP: false)
             return
@@ -294,7 +304,10 @@ public final class AppModel {
         let connection = saved
         do {
             let opened = try await openConnection(connection, password: password)
-            guard isCurrent(generation) else { if let session = opened.session { await services.logout(session) }; return }
+            guard isCurrent(generation), !automatic || (self.connection == saved && library.drive == nil) else {
+                if let session = opened.session { await services.logout(session) }
+                return
+            }
             self.session = opened.session
             self.connection = connection
             if credentialSyncEnabled(for: connection) { services.savePassword(password, connection.keychainAccount) }
@@ -311,7 +324,7 @@ public final class AppModel {
             guard isCurrent(generation) else { return }
             pendingReconnectPassword = password
             requestReauthentication(connection, needsOTP: true)
-        } catch let error as SynologyError where error.requiresNewCredentials {
+        } catch let error as SynologyError where error.requiresNewCredentials || error.refusesSignIn {
             guard isCurrent(generation) else { return }
             requestReauthentication(saved, needsOTP: false)
             signInError = error.localizedDescription
@@ -373,7 +386,8 @@ public final class AppModel {
             session?.sid == expired.sid && connection?.sourceID == sourceID
                 && !isSigningIn && !isReconnecting && !isRestoring && !isJoiningFamily
         }
-        guard stillCurrent(), let saved = connection else { throw SynologyError.notSignedIn }
+        // Not now rather than refused: the drive may ask again once the connection has settled.
+        guard stillCurrent(), let saved = connection else { throw CancellationError() }
         guard let password = storedPassword(for: saved) else {
             sessionNeedsSignIn(expired, saved, needsOTP: false)
             throw SynologyError.notSignedIn
@@ -388,7 +402,7 @@ public final class AppModel {
                 sessionNeedsSignIn(expired, saved, needsOTP: true)
             }
             throw SynologyError.twoFactorRequired
-        } catch let error as SynologyError where error.requiresNewCredentials {
+        } catch let error as SynologyError where error.requiresNewCredentials || error.refusesSignIn {
             if stillCurrent() {
                 sessionNeedsSignIn(expired, saved, needsOTP: false)
                 signInError = error.localizedDescription
@@ -586,9 +600,11 @@ public final class AppModel {
     /// Automatic attempts are at least this far apart, however often the app returns or the network changes.
     var automaticReconnectInterval: Duration = .seconds(20)
     private var lastAutomaticReconnect: ContinuousClock.Instant?
-    private var pendingAutomaticReconnect: Task<Void, Never>?
+    /// The one attempt waiting for the interval to end.
+    private(set) var pendingAutomaticReconnect: Task<Void, Never>?
     /// Set while only the person can put the sign-in right (a one-time code, a rejected or missing
-    /// password). Trying again unasked would repeat a refusal that DSM counts towards blocking the device.
+    /// password, an account DSM won't let in). Trying again unasked would repeat a refusal that DSM
+    /// counts towards blocking the device.
     private var awaitsSignIn = false
     private var stopObservingNetwork: (() -> Void)?
 
@@ -612,7 +628,8 @@ public final class AppModel {
         }
         lastAutomaticReconnect = now
         services.log("\(saved.name) is offline; reconnecting")
-        Task { await reconnect() }
+        let generation = connectionGeneration
+        Task { await reconnect(within: generation) }
     }
 
     /// Watches for network changes only while there is a saved server to go back to.
@@ -821,7 +838,7 @@ public final class AppModel {
                 guard isCurrent(generation) else { return }
                 pendingReconnectPassword = password
                 requestReauthentication(saved, needsOTP: true)
-            } catch let error as SynologyError where error.requiresNewCredentials {
+            } catch let error as SynologyError where error.requiresNewCredentials || error.refusesSignIn {
                 guard isCurrent(generation) else { return }
                 requestReauthentication(saved, needsOTP: false)
                 signInError = error.localizedDescription
