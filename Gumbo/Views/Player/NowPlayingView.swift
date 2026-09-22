@@ -55,8 +55,8 @@ struct NowPlayingView: View {
                 .animation(.easeInOut(duration: 0.35), value: player.album?.id)
                 .frame(maxWidth: artworkWidth)
                 .shadow(color: .black.opacity(0.45), radius: 36, y: 24)
-                .scaleEffect(player.isPlaying || reduceMotion ? 1 : 0.86)
-                .animation(reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.8), value: player.isPlaying)
+                .scaleEffect(player.isPlaybackRequested || reduceMotion ? 1 : 0.86)
+                .animation(reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.8), value: player.isPlaybackRequested)
                 .padding(.horizontal, 4)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: openAlbum)
@@ -143,13 +143,13 @@ struct NowPlayingView: View {
                         playPauseTaps += 1
                         player.togglePlayPause()
                     } label: {
-                        PlayPauseGlyph(isPlaying: player.isPlaying, size: 28)
+                        PlayPauseGlyph(isPlaying: player.isPlaybackRequested, size: 28)
                             .frame(width: 68, height: 68)
                     }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
                     .sensoryFeedback(.impact(weight: .medium), trigger: playPauseTaps)
-                    .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                    .accessibilityLabel(player.isPlaybackRequested ? "Pause" : "Play")
 
                     Button {
                         nextTaps += 1

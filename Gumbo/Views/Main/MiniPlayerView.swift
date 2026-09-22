@@ -41,13 +41,13 @@ struct MiniPlayerView: View {
                     playPauseTaps += 1
                     player.togglePlayPause()
                 } label: {
-                    PlayPauseGlyph(isPlaying: player.isPlaying, size: 18)
+                    PlayPauseGlyph(isPlaying: player.isPlaybackRequested, size: 18)
                         .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(TransportButtonStyle())
                 .sensoryFeedback(.impact(weight: .light), trigger: playPauseTaps)
-                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(player.isPlaybackRequested ? "Pause" : "Play")
                 if !isInline {
                     Button {
                         nextTaps += 1

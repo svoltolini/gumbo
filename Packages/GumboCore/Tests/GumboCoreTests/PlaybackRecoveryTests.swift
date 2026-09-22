@@ -1,5 +1,7 @@
 import Foundation
 import MediaPlayer
+import Observation
+import Synchronization
 import Testing
 @testable import GumboCore
 
@@ -698,6 +700,136 @@ import Testing
         fixture.model.togglePlayback(of: [], sourceID: "source-a")
         #expect(fixture.model.commandRevision == revision)
         #expect(fixture.model.isPlaying)
+    }
+
+    @Test func playbackRequestShowsPauseWhileTheSongLoadsAndPauseCancelsTheStart() {
+        let fixture = PlaybackFixture()
+        #expect(!fixture.model.isPlaybackRequested)
+        fixture.model.play(queue: [track("first")], title: nil)
+        #expect(fixture.model.isPlaybackRequested, "A loading song shows Pause")
+        #expect(!fixture.model.isPlaying)
+        #expect(fixture.rate == 0)
+        fixture.model.togglePlayPause()
+        #expect(!fixture.model.isPlaybackRequested)
+        fixture.transports[0].status = .ready
+        #expect(fixture.transports[0].playCount == 0)
+        #expect(!fixture.model.isPlaying)
+        fixture.model.togglePlayPause()
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports[0].playCount == 1)
+    }
+
+    @Test func seekingWhilePlayingKeepsThePlaybackRequestSteady() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first")], title: nil)
+        let transport = fixture.transports[0]
+        transport.positionChanged?(30)
+        let changes = Mutex(0)
+        withObservationTracking {
+            _ = fixture.model.isPlaybackRequested
+        } onChange: {
+            changes.withLock { $0 += 1 }
+        }
+        fixture.model.seek(toFraction: 0.5)
+        #expect(!fixture.model.isPlaying)
+        #expect(fixture.rate == 0)
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(transport.seeks.map(\.seconds) == [60])
+        transport.seeks[0].completion(true)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(changes.withLock { $0 == 0 }, "Play/Pause and the artwork must not flicker on every scrub")
+        fixture.model.pause()
+        #expect(changes.withLock { $0 == 1 }, "Controls observe the request")
+        #expect(!fixture.model.isPlaybackRequested)
+    }
+
+    @Test func pauseDuringASeekKeepsTheSongPausedWhenTheSeekCompletes() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first")], title: nil)
+        let transport = fixture.transports[0]
+        fixture.model.seek(toFraction: 0.25)
+        fixture.model.togglePlayPause()
+        #expect(!fixture.model.isPlaybackRequested)
+        transport.seeks[0].completion(true)
+        #expect(!fixture.model.isPlaying)
+        #expect(!fixture.model.isPlaybackRequested)
+        #expect(transport.playCount == 1)
+        #expect(fixture.model.position == 30)
+        fixture.model.togglePlayPause()
+        #expect(fixture.model.isPlaying)
+        #expect(transport.playCount == 2)
+    }
+
+    @Test func failuresAndTheEndOfTheQueueClearThePlaybackRequest() {
+        let fixture = PlaybackFixture()
+        fixture.model.play(queue: [track("first"), track("last")], startingAt: 1, title: nil)
+        #expect(fixture.model.isPlaybackRequested)
+        fixture.transports[0].status = .failed("Connection lost")
+        #expect(!fixture.model.isPlaybackRequested, "A failed song offers Play, which retries")
+        #expect(fixture.model.lastError == "Connection lost")
+        fixture.nextStatus = .ready
+        fixture.model.togglePlayPause()
+        #expect(fixture.transports.count == 2)
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.model.isPlaying)
+        fixture.transports[1].ended?()
+        #expect(fixture.model.index == 1)
+        #expect(!fixture.model.isPlaybackRequested, "The last song ending with repeat off shows Play")
+        #expect(!fixture.model.isPlaying)
+        fixture.model.stop()
+        #expect(!fixture.model.isPlaybackRequested)
+    }
+
+    @Test func recoverySeekHoldsTheRequestUntilItFails() {
+        let fixture = preparedRecovery()
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(!fixture.model.isPlaying)
+        fixture.transports[1].seeks[0].completion(false)
+        #expect(!fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError != nil)
+    }
+
+    @Test func retryingAFailedSeekShowsPauseOnEveryControl() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.sourceIDProvider = { "source-a" }
+        let songs = [track("first")]
+        fixture.model.play(queue: songs, title: nil)
+        let transport = fixture.transports[0]
+        fixture.model.seek(toFraction: 0.5)
+        transport.seeks[0].completion(false)
+        #expect(!fixture.model.isPlaybackRequested)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .failed)
+        fixture.model.togglePlayPause()
+        #expect(transport.seeks.map(\.seconds) == [60, 60])
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError == nil, "The retry replaces the old error")
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .loading)
+        transport.seeks[1].completion(true)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.model.playbackState(for: songs, sourceID: "source-a") == .playing)
+    }
+
+    @Test func missingSourceDoesNotClaimAPlaybackRequest() {
+        let fixture = PlaybackFixture()
+        fixture.model.streamURLProvider = { _ in nil }
+        fixture.model.play(queue: [track("first")], title: nil)
+        #expect(!fixture.model.isPlaybackRequested)
+        #expect(fixture.model.lastError != nil)
+    }
+
+    @Test func widgetsShowPauseWhileTheRequestedSongLoads() {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-widget-request-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let library = LibraryStore()
+        let downloads = DownloadManager(directory: directory, configuration: .ephemeral, restoreTasks: { _, completion in completion([]) })
+        let fixture = PlaybackFixture()
+        fixture.model.play(queue: [track("first")], title: nil)
+        #expect(!fixture.model.isPlaying)
+        #expect(WidgetFeed.Signature(library: library, player: fixture.model, downloads: downloads).isPlaying)
+        fixture.model.pause()
+        #expect(!WidgetFeed.Signature(library: library, player: fixture.model, downloads: downloads).isPlaying)
     }
 
     private func preparedRecovery() -> PlaybackFixture {

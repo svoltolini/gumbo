@@ -83,7 +83,7 @@ struct MacCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Playback") {
-            Button(player.isPlaying ? "Pause" : "Play", systemImage: "playpause.fill") { player.togglePlayPause() }
+            Button(player.isPlaybackRequested ? "Pause" : "Play", systemImage: "playpause.fill") { player.togglePlayPause() }
                 .keyboardShortcut("p", modifiers: [.command, .option])
                 .disabled(!player.hasTrack)
             Button("Next", systemImage: "forward.fill") { player.next() }

@@ -28,7 +28,8 @@ public final class WidgetFeed {
         public init(library: LibraryStore, player: PlayerModel, downloads: DownloadManager) {
             nowPlayingID = player.album?.id
             trackTitle = player.track?.title
-            isPlaying = player.isPlaying
+            // The widget's Play/Pause toggles the request; buffering and seeks must not flip it or reload widgets.
+            isPlaying = player.isPlaybackRequested
             let played = Array(library.recentlyPlayed.prefix(8))
             let added = Array(library.recentlyAdded.prefix(8))
             recentlyPlayed = played.map(\.id)
@@ -130,7 +131,7 @@ public final class WidgetFeed {
         let snapshot = WidgetSnapshot(
             nowPlaying: lead.map(describe),
             trackTitle: player.track?.title,
-            isPlaying: player.isPlaying,
+            isPlaying: player.isPlaybackRequested,
             recentlyPlayed: played.map(describe),
             recentlyAdded: added.map(describe),
             downloads: kept.map(describe),

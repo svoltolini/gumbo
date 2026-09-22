@@ -60,6 +60,8 @@ public final class PlayerModel {
         artworkAlbumID = nil
         updateNowPlayingInfo()
     }
+    /// Audio is actually rolling: false while a song loads or a seek settles. The lock screen's rate
+    /// follows this; Play/Pause controls follow `isPlaybackRequested`.
     public private(set) var isPlaying = false
     public private(set) var position: TimeInterval = 0
     public private(set) var album: Album?
@@ -120,6 +122,10 @@ public final class PlayerModel {
 
     public var track: Track? { queue.indices.contains(index) ? queue[index] : nil }
     public var hasTrack: Bool { track != nil }
+    /// The listener asked for music, so Play/Pause shows Pause and the Now Playing cover stays full size.
+    /// Unlike `isPlaying` it holds while a song loads, a seek settles or the next song starts, so slow
+    /// servers and scrubbing do not flash Play; a pause, a failure or the end of the queue clears it.
+    public var isPlaybackRequested: Bool { wantsToPlay }
 
     public var duration: TimeInterval {
         if let duration = player?.duration { return duration }
@@ -199,8 +205,9 @@ public final class PlayerModel {
         }
     }
 
+    /// Does what the Play/Pause glyph shows: Pause during loading or a seek cancels the pending start.
     public func togglePlayPause() {
-        wantsToPlay ? pause() : resume()
+        isPlaybackRequested ? pause() : resume()
     }
 
     public func resume() {
@@ -223,6 +230,9 @@ public final class PlayerModel {
             // A reconnect or a completed download may now provide a URL. Resolve it again.
             load(index: index, autoplay: true, resumingAt: position, isRetry: true)
         } else {
+            // Resumes in place. After a failed seek this is the retry, which replaces the old error as a
+            // reload would, so album and playlist controls show Pause alongside the transport.
+            lastError = nil
             playWhenReady()
         }
         updateNowPlayingInfo()
