@@ -873,6 +873,7 @@ public final class AppModel {
 
     // MARK: Optional NAS-side metadata
 
+    private var tagServiceSetupGeneration = UUID()
     public var tagServiceConfiguration: TagServiceConfiguration? { library.tagServiceConfiguration }
 
     private func restoreTagServiceConfiguration() {
@@ -887,6 +888,7 @@ public final class AppModel {
     }
 
     public func configureTagService(address: String, token: String, allowsReviewedDeletion: Bool = false) async throws {
+        try Task.checkCancellation()
         guard profiles?.canManageProfiles == true, let connection, let root = connection.musicPath, isConnected,
               !library.metadataWriter.isWriting, !library.isDeletingFiles,
               library.catalogue.driveID == connection.sourceID, library.contentSourceID == connection.sourceID,
@@ -894,9 +896,19 @@ public final class AppModel {
               let endpoint = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw ProviderError.invalidConfiguration }
         let generation = connectionGeneration
         let profileSession = profiles?.sessionID
+        let setup = UUID()
+        tagServiceSetupGeneration = setup
+        func checkCurrent() throws {
+            try Task.checkCancellation()
+            guard tagServiceSetupGeneration == setup, isCurrent(generation),
+                  profiles?.sessionID == profileSession, profiles?.canManageProfiles == true,
+                  self.connection?.sourceID == connection.sourceID, self.connection?.musicPath == root,
+                  !library.metadataWriter.isWriting, !library.isDeletingFiles else { throw CancellationError() }
+        }
         let value = TagServiceConfiguration(endpoint: endpoint, sourceID: connection.sourceID, libraryRoot: root, allowsReviewedDeletion: allowsReviewedDeletion)
-        let client = try RemoteTagService(endpoint: endpoint, token: token)
+        let client = try services.tagService(endpoint, token)
         let capabilities = try await client.capabilities()
+        try checkCurrent()
         guard !allowsReviewedDeletion || (capabilities.supportsReviewedDeletion == true && capabilities.supportsVerifiedInspection == true) else {
             throw RemoteTagService.Error.service(code: "deletion_disabled", message: "Enable reviewed deletion in the helper's server settings before enabling it here.")
         }
@@ -914,18 +926,17 @@ public final class AppModel {
             let state = try await client.stat(path: value.relativePath(path))
             guard sample.fileSize == nil || sample.fileSize == state.expected.size else { throw ProviderError.changed }
         }
-        guard isCurrent(generation), profiles?.sessionID == profileSession, profiles?.canManageProfiles == true,
-              self.connection?.sourceID == connection.sourceID, self.connection?.musicPath == root,
-              !library.metadataWriter.isWriting, !library.isDeletingFiles else { throw CancellationError() }
-        KeychainStore.save(password: token, for: value.keychainAccount)
-        guard KeychainStore.password(for: value.keychainAccount) == token else { throw RemoteTagService.Error.invalidToken }
+        try checkCurrent()
+        services.savePassword(token, value.keychainAccount)
+        guard services.password(value.keychainAccount) == token else { throw RemoteTagService.Error.invalidToken }
         defaults.set(try JSONEncoder().encode(value), forKey: "tagHelper." + connection.sourceID)
         library.tagServiceConfiguration = value
     }
 
     public func disableTagService() {
         guard profiles?.canManageProfiles == true, let connection, !library.metadataWriter.isWriting, !library.isDeletingFiles else { return }
-        if let value = library.tagServiceConfiguration { KeychainStore.delete(account: value.keychainAccount) }
+        tagServiceSetupGeneration = UUID()
+        if let value = library.tagServiceConfiguration { services.deletePassword(value.keychainAccount) }
         defaults.removeObject(forKey: "tagHelper." + connection.sourceID)
         library.tagServiceConfiguration = nil
     }

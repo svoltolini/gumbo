@@ -109,6 +109,18 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The tests exercise generated MP3/FLAC/M4A audio, unrelated tags, permissions, dry run, conflict/low-disk rejection, traversal/symlink/hard-link refusal, rollback, missing-genre protection, durable replay/restart, lost acknowledgements, cancellation and authentication. Deletion tests also cover same-size/same-time changes, path replacement, cancellation after capture, recovery without overwriting a new file, empty audio, disabled permissions and durable acknowledgement loss. They do not install a service, access real credentials or contact a NAS. Container/Linux filesystem and real-device integration acceptance remain separate.
+The tests exercise generated MP3/FLAC/M4A audio, unrelated tags, permissions, dry run, conflict/low-disk rejection, traversal/symlink/hard-link refusal, rollback, missing-genre protection, durable replay/restart, lost acknowledgements, cancellation and authentication. Deletion tests also cover same-size/same-time changes, path replacement, cancellation after capture, recovery without overwriting a new file, empty audio, disabled permissions and durable acknowledgement loss. They do not install a service, access real credentials or contact a NAS.
+
+Run the filesystem tests as a non-root user on Linux, including named-user POSIX ACL and extended-attribute preservation:
+
+```sh
+docker build -t gumbo-tag-service:local .
+docker build -t gumbo-tag-service:linux-validation tests
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --mount type=volume,dst=/validation \
+  gumbo-tag-service:linux-validation
+```
+
+The test-only image adds ACL tools; the shipping image is unchanged. The anonymous Docker volume holds only disposable fixtures and is removed with the container. Use this Linux volume rather than a macOS bind mount or tmpfs: those may not support Linux named-user ACLs. All 28 tests passed in this configuration on 22 September 2026, including preservation of extended attributes, UID/GID and ACLs, and rejection of a write to a non-writable parent without modifying the original. These checks establish Docker Linux behavior, not Synology ACL compatibility or real-device acceptance. See [the engineering checkpoint](../../docs/ENGINEERING-CHECK-2026-09-22.md).
 
 The opt-in [transfer benchmark](../../docs/METADATA-HELPER-BENCHMARK-2026-09-21.md) compares actual helper JSON traffic against whole-file download/edit/upload using generated files. On the recorded loopback run the helper saved more than 99.97% of body bytes but took longer; no real-NAS speed claim is made.

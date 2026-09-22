@@ -23,7 +23,7 @@ No real NAS tags or files were edited/deleted. Playback observations establish t
 
 ## Still pending
 
-Spoken Siri and its full request/denial/offline matrix, physical direct-touch scrolling and software keyboard, the original reported genre-save process exit, paired Watch and CarPlay, additional NAS hardware, multi-account family convergence, physical background-transfer tests and real-NAS helper measurements remain separate acceptance gates. France encryption and final App Store review requirements remain tracked in their own issues.
+Spoken Siri and its full request/denial/offline matrix, physical direct-touch scrolling and software keyboard, paired Watch and CarPlay, additional NAS hardware, multi-account family convergence, physical background-transfer tests and real-NAS helper measurements remain separate acceptance gates. The reported Mac genre-save freeze is now corroborated by an installed-app CPU diagnostic and a native disposable-file regression; see the [engineering checkpoint](ENGINEERING-CHECK-2026-09-22.md). No separate process-exit report was found. France encryption and final App Store review requirements remain tracked in their own issues.
 
 ## Download freshness update
 
