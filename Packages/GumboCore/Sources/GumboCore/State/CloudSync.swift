@@ -175,8 +175,10 @@ public final class CloudSync {
             identity = account
         case .noAccount:
             // Signed out since this session verified an account: revoke it like any account change.
-            // With no account before either, there is nothing to revoke: the open profile keeps playing,
-            // and the Watch keeps its downloads (#219).
+            // Otherwise the open profile keeps playing and the Watch keeps its downloads (#219, #221),
+            // even when an account verified in an earlier launch has since signed out: a launch that
+            // finds no account can't tell that from a moment without one. The account saved as last
+            // verified stays, so whichever different account signs in next revokes what it granted.
             if currentUserRecordName != nil { accountChanged() }
             status = .noAccount
             throw CancellationError()
@@ -194,6 +196,9 @@ public final class CloudSync {
             // still held under it, such as a Watch grant kept across a relaunch, ends too (#219).
             accountChanged()
         }
+        // Recorded before the sync state loads, so even when that fails the next launch still knows
+        // which account this device last verified.
+        try? persistence.saveVerifiedAccount(identity)
         let snapshot: CloudAccountState
         do {
             let isNew = !persistence.hasSnapshot(account: identity)
@@ -208,7 +213,6 @@ public final class CloudSync {
                 }
             }
             try persistence.save(loaded)
-            try persistence.saveVerifiedAccount(identity)
             snapshot = loaded
         } catch {
             status = .failed("The iCloud account's sync state could not be read or saved on this device.")

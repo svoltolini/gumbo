@@ -1138,6 +1138,16 @@ private func seededMissingRecordFixture() async throws -> (CloudFixture, String)
     await f.sync.refresh(reason: "foreground without an account")
     #expect(!f.profiles.isLocked)
     #expect(deactivations == 1)
+    #expect(f.persistence.verifiedAccount() == nil, "The revoked account is no longer the one to compare with")
+
+    // Signing in to another account from no account is not a second revocation.
+    f.account = "B"
+    f.sync.accountChangeNotified()
+    await f.sync.refresh(reason: "signed in to B")
+    #expect(!f.profiles.isLocked)
+    #expect(deactivations == 1)
+    #expect(f.sync.currentUserRecordName == "B")
+    #expect(f.persistence.verifiedAccount() == "B")
 }
 
 @Test @MainActor func cloudTemporarilyUnavailableAccountNeitherLocksNorResetsSyncState() async throws {

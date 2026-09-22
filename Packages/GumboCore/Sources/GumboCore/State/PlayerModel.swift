@@ -462,6 +462,9 @@ public final class PlayerModel {
                 player.seek(to: target) { [weak self] finished in
                     guard let self, playbackGeneration == generation, seekGeneration == seek else { return }
                     recoverySeekInFlight = false
+                    // The item failed under the seek and a fresh address is being made: that recovery
+                    // reloads at this same position, or shows the failure, so the request stands.
+                    if !finished, pendingStreamFailure != nil { return }
                     if finished {
                         pendingStartPosition = nil
                         playWhenReady()
@@ -495,20 +498,37 @@ public final class PlayerModel {
         let resumeAt = position
         Task { [weak self] in
             let recovered = await self?.streamFailureRecovery?(url) ?? false
-            // A pause, stop or another song has already settled what the controls show.
+            // A pause, stop, another song or the deadline has already settled what the controls show.
             guard let self, playbackGeneration == generation, let failure = pendingStreamFailure else { return }
-            pendingStreamFailure = nil
             if recovered, commandRevision == command {
+                pendingStreamFailure = nil
                 load(index: index, autoplay: true, resumingAt: resumeAt, isRetry: true, isRecovery: true)
             } else {
                 // Not recoverable, or a seek or a widget, CarPlay or Siri request took over without
                 // starting a song: report the failure, and Play loads the song again.
-                wantsToPlay = false
-                lastError = failure
-                updateNowPlayingInfo()
+                settleStreamFailure(failure)
             }
         }
+        // A server that doesn't answer, rather than one that ended the session, must not leave Pause
+        // showing with nothing playing for as long as its requests take to time out.
+        let deadline = streamRecoveryDeadline
+        Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard let self, playbackGeneration == generation, let failure = pendingStreamFailure else { return }
+            settleStreamFailure(failure)
+        }
         return true
+    }
+
+    /// How long a refused stream may wait for a fresh address before its failure shows. Play then
+    /// loads the song again, with the renewed session if the renewal finished meanwhile.
+    var streamRecoveryDeadline: Duration = .seconds(10)
+
+    private func settleStreamFailure(_ failure: String) {
+        pendingStreamFailure = nil
+        wantsToPlay = false
+        lastError = failure
+        updateNowPlayingInfo()
     }
 
     private func recordTrackStart() {
