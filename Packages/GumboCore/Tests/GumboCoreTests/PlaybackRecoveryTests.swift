@@ -227,8 +227,10 @@ import Testing
         fixture.model.play(queue: [track("first")], title: nil)
         fixture.transports[0].positionChanged?(20)
         fixture.model.interruptionBegan()
+        #expect(!fixture.model.isPlaybackRequested, "An interrupted song shows Play")
         fixture.model.interruptionEnded(shouldResume: true)
         #expect(fixture.model.isPlaying)
+        #expect(fixture.model.isPlaybackRequested)
         #expect(fixture.model.position == 20)
         #expect(fixture.transports.count == 1)
         #expect(fixture.transports[0].playCount == 2)
@@ -782,6 +784,24 @@ import Testing
         #expect(!fixture.model.isPlaybackRequested)
     }
 
+    @Test func trackChangesKeepThePlaybackRequestWhileTheNextSongLoads() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first"), track("second"), track("third")], title: nil)
+        fixture.nextStatus = .loading
+        fixture.transports[0].ended?()
+        #expect(fixture.model.index == 1)
+        #expect(!fixture.model.isPlaying)
+        #expect(fixture.model.isPlaybackRequested, "A natural advance keeps Pause while the next song loads")
+        fixture.model.next()
+        #expect(fixture.model.index == 2)
+        #expect(fixture.model.isPlaybackRequested, "Skipping keeps Pause while the next song loads")
+        fixture.model.togglePlayPause()
+        #expect(!fixture.model.isPlaybackRequested)
+        fixture.transports[2].status = .ready
+        #expect(fixture.transports[2].playCount == 0)
+        #expect(!fixture.model.isPlaying)
+    }
+
     @Test func recoverySeekHoldsTheRequestUntilItFails() {
         let fixture = preparedRecovery()
         #expect(fixture.model.isPlaybackRequested)
@@ -819,7 +839,7 @@ import Testing
         #expect(fixture.model.lastError != nil)
     }
 
-    @Test func widgetsShowPauseWhileTheRequestedSongLoads() {
+    @Test func widgetSignatureFollowsThePlaybackRequest() {
         let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-widget-request-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let library = LibraryStore()
