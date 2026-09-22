@@ -133,6 +133,12 @@ public nonisolated struct VoicePlaybackContext: Equatable, Sendable {
         let data = (try? JSONEncoder().encode([sourceID, rootPath, profileID, match.id])) ?? Data()
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Catalogue updates may settle during launch; authentication and connection changes must not.
+    func hasSameAccess(as other: Self) -> Bool {
+        sourceID == other.sourceID && rootPath == other.rootPath && profileID == other.profileID
+            && sessionID == other.sessionID && connectionToken == other.connectionToken
+    }
 }
 
 public nonisolated struct VoiceMediaSelection: Identifiable, Sendable {
@@ -170,28 +176,38 @@ public nonisolated struct VoiceMediaSelection: Identifiable, Sendable {
     }
 
     public func resolve(_ query: VoiceMediaQuery) async throws -> [VoiceMediaSelection] {
-        guard let context = context() else { throw VoicePlaybackError.openApp }
-        let content = content()
-        let result = await Task.detached(priority: .userInitiated) {
-            VoiceMediaResolver.matches(query, albums: content.albums, playlists: content.playlists)
+        try await selections { albums, playlists, context in
+            VoiceMediaResolver.matches(query, albums: albums, playlists: playlists)
                 .map { VoiceMediaSelection($0, context: context) }
-        }.value
-        guard !Task.isCancelled else { throw VoicePlaybackError.cancelled }
-        guard self.context() == context else { throw VoicePlaybackError.changed }
-        return result
+        }
     }
 
     public func selections(for identifiers: [String]) async throws -> [VoiceMediaSelection] {
-        guard let context = context() else { throw VoicePlaybackError.openApp }
-        let content = content()
         let wanted = Set(identifiers)
-        let result = await Task.detached(priority: .userInitiated) {
-            VoiceMediaResolver.all(albums: content.albums, playlists: content.playlists)
+        return try await selections { albums, playlists, context in
+            VoiceMediaResolver.all(albums: albums, playlists: playlists)
                 .map { VoiceMediaSelection($0, context: context) }.filter { wanted.contains($0.id) }
-        }.value
-        guard !Task.isCancelled else { throw VoicePlaybackError.cancelled }
-        guard self.context() == context else { throw VoicePlaybackError.changed }
-        return result
+        }
+    }
+
+    private func selections(matching lookup: @escaping @Sendable ([Album], [Playlist], VoicePlaybackContext) -> [VoiceMediaSelection]) async throws -> [VoiceMediaSelection] {
+        guard let access = context() else { throw VoicePlaybackError.openApp }
+        // First-launch artwork/profile derivation or a scan can replace the snapshot while lookup
+        // runs off-main. Resolve again, never return stale matches or reuse an old revision. Keep
+        // retries bounded and pinned to the original access, including its transient session/token.
+        for attempt in 0..<3 {
+            guard !Task.isCancelled else { throw VoicePlaybackError.cancelled }
+            guard let snapshot = context(), snapshot.hasSameAccess(as: access) else { throw VoicePlaybackError.changed }
+            let content = content()
+            let result = await Task.detached(priority: .userInitiated) {
+                lookup(content.albums, content.playlists, snapshot)
+            }.value
+            guard !Task.isCancelled else { throw VoicePlaybackError.cancelled }
+            guard let current = context(), current.hasSameAccess(as: access) else { throw VoicePlaybackError.changed }
+            if current == snapshot { return result }
+            if attempt < 2 { diagnostics("Voice lookup refreshed after library update") }
+        }
+        throw VoicePlaybackError.changed
     }
 
     /// Reserve at execution entry, before an adapter awaits identifier resolution.
