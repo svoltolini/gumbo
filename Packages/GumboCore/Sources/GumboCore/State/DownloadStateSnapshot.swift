@@ -20,6 +20,7 @@ nonisolated struct DownloadStateSnapshot: Sendable {
         var done = 0
         var inFlight = 0.0
         var hasPending = false
+        var hasOutdated = false
         // Repeated playlist occurrences count separately, but need only one file check per read.
         var available: [String: Bool] = [:]
         if !records.isEmpty || !pending.isEmpty {
@@ -30,7 +31,9 @@ nonisolated struct DownloadStateSnapshot: Sendable {
                 if let cached = available[key] {
                     exists = cached
                 } else if let record = records[key], record.owners.contains(owner.id) {
-                    exists = record.fileName.isEmpty ? simulatedKeys.contains(key) : fileExists(directory.appending(path: record.fileName))
+                    let current = record.matches(track)
+                    if !record.fileName.isEmpty && !current { hasOutdated = true }
+                    exists = record.fileName.isEmpty ? simulatedKeys.contains(key) : current && fileExists(directory.appending(path: record.fileName))
                     available[key] = exists
                 } else {
                     exists = false
@@ -48,6 +51,7 @@ nonisolated struct DownloadStateSnapshot: Sendable {
         if hasPending { return .downloading(fraction: (Double(done) + inFlight) / Double(total), done: done, total: total) }
         if cancelled { return .cancelled(done: done, total: total) }
         let error = errors.min(by: { $0.key < $1.key })?.value
+            ?? (hasOutdated ? "Music changed on your server. Download again to update your saved copy." : nil)
         if done > 0 { return .partial(done: done, total: total, message: error) }
         if let error { return .failed(message: error) }
         if restored { return .partial(done: 0, total: total, message: nil) }

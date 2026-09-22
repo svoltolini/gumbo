@@ -20,6 +20,8 @@ Each request carries the playlist identity and `WatchDownloadJob`, including sou
 
 The Watch stages incoming files away from the catalogue. It accepts them only for the current authorization, playlist membership, source/profile, active generation and expected size. A cancelled/retried/deleted file cannot revive an old manifest. Server deletion is still reflected when a device receives the updated catalogue, not by an instant remote wipe.
 
+File revisions also detect same-size NAS edits in completed copies and reject old direct/relay completions. Optional fields preserve legacy decoding; existing files adopt a baseline without certifying their historical bytes. See [download freshness](DOWNLOAD-FRESHNESS.md) for the comparison and migration limits.
+
 ## Validation
 
 `WatchProviderTests` covers legacy compatibility, unsupported payloads, exact WebDAV identity/root/redirect boundaries, secret-free SMB descriptors, source/profile ownership, malformed filenames, removed tracks, changed file sizes, cancellation and retries. The signed iOS + Watch Release build passed on 2026-09-21; iOS links and embeds a signed GumboSMB framework, Watch does neither. Full phone-to-physical-Watch delivery, reachability loss, background preparation cancellation and post-relaunch completion remain device acceptance checks; unit/build success is not that evidence.

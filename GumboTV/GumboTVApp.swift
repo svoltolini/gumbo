@@ -79,6 +79,10 @@ struct GumboTVApp: App {
         let downloads = DownloadManager()
         downloads.driveIDProvider = { [library] in library.catalogue.driveID }
         downloads.remoteSourceProvider = { [model] in model.downloadSource(for: $0) }
+        downloads.fileRevisionProvider = { [library] source, id in
+            guard library.catalogue.driveID == source else { return nil }
+            return library.track(id: id).map(DownloadFileRevision.init)
+        }
         model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
         downloads.activeProfileID = profiles.lastActiveID ?? profiles.owner?.id ?? "default"
         // Persist download membership changes to iCloud via the profile state (TV doesn't keep files, but membership syncs).

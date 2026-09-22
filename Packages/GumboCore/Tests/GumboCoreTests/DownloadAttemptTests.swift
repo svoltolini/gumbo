@@ -97,6 +97,121 @@ private func transferAlbum(count: Int = 1) -> Album {
 
 @Suite(.serialized) @MainActor
 struct DownloadAttemptTests {
+    @Test(arguments: ["etag", "mtime", "genre"])
+    func changedSavedFileNeedsAnExplicitRetryAndKeepsAllOwners(_ change: String) async throws {
+        let harness = try TransferHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        var album = transferAlbum()
+        album.tracks[0].sourceVersion = "first"
+        album.tracks[0].sourceModifiedAt = 1_000
+        album.tracks[0].isEnriched = true
+        album.tracks[0].genreTag = "Rock"
+        let first = DownloadOwner(album: album, profileID: "listener")
+        let second = DownloadOwner(album: album, profileID: "second")
+        harness.queue(first)
+        harness.queue(second)
+        let old = try harness.startedJob(0)
+        try harness.deliver(old)
+        try await drain()
+        let previousURL = try #require(harness.manager.localURL(for: album.tracks[0]))
+        switch change {
+        case "etag": album.tracks[0].sourceVersion = "second"
+        case "mtime": album.tracks[0].sourceModifiedAt = 2_000
+        default: album.tracks[0].genreTag = "Jazz"
+        }
+        let current = DownloadOwner(album: album, profileID: "listener")
+        let report = harness.manager.reconcile(albums: [album.id], playlists: [], driveID: "nas-a", album: { _ in album }, playlist: { _ in nil })
+        #expect(report.missingSongs == 1)
+        #expect(report.attachedFiles == 0)
+        #expect(harness.started.count == 1) // Sync never initiates a replacement download.
+        #expect(!harness.manager.isDownloaded(album.tracks[0]))
+        #expect(harness.manager.localURL(for: album.tracks[0]) == nil)
+        #expect(harness.manager.missingCount(for: current) == 1)
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").albums == [album.id])
+        #expect(FileManager.default.fileExists(atPath: previousURL.path))
+        if case .failed(let message) = harness.manager.state(for: current) {
+            #expect(message.contains("changed"))
+        } else { Issue.record("An outdated offline copy should offer an update") }
+        #expect(try await harness.manager.readState(for: current) == harness.manager.state(for: current))
+
+        // Persisted revision survives restart; a same-size old file is not adopted as current.
+        harness.stop()
+        harness.open()
+        try await harness.restore()
+        #expect(harness.manager.localURL(for: album.tracks[0]) == nil)
+        harness.queue(current)
+        let replacement = try harness.startedJob(0)
+        #expect(replacement.attemptID != old.attemptID)
+        try harness.deliver(replacement)
+        try await drain()
+        #expect(harness.manager.isDownloaded(album.tracks[0]))
+        #expect(harness.manager.records[old.cacheKey]?.owners == [first.id, second.id])
+        #expect(!FileManager.default.fileExists(atPath: previousURL.path))
+        #expect(harness.manager.state(for: current) == .downloaded)
+    }
+
+    @Test func failedReplacementKeepsPreviousFileAndMembership() async throws {
+        let harness = try TransferHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        var album = transferAlbum()
+        album.tracks[0].sourceVersion = "first"
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        let original = try harness.startedJob(0)
+        try harness.deliver(original)
+        try await drain()
+        let previousURL = try #require(harness.manager.localURL(for: album.tracks[0]))
+        album.tracks[0].sourceVersion = "second"
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        let replacement = try harness.startedJob(1)
+        harness.fail(replacement)
+        try await drain()
+        #expect(FileManager.default.fileExists(atPath: previousURL.path))
+        #expect(harness.manager.records[original.cacheKey]?.fileName == original.fileName)
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").albums == [album.id])
+        #expect(harness.manager.localURL(for: album.tracks[0]) == nil)
+    }
+
+    @Test func sameSizeFileChangedDuringTransferCannotPublish() async throws {
+        let harness = try TransferHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        var album = transferAlbum()
+        album.tracks[0].sourceVersion = "first"
+        harness.manager.fileRevisionProvider = { source, id in
+            guard source == "nas-a", id == album.tracks[0].id else { return nil }
+            return DownloadFileRevision(track: album.tracks[0])
+        }
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        let first = try harness.startedJob(0)
+        album.tracks[0].sourceVersion = "second"
+        try harness.deliver(first)
+        try await drain()
+        #expect(harness.manager.records[first.cacheKey] == nil)
+        #expect(harness.manager.lastError?.contains("changed") == true)
+        #expect(harness.manager.pendingByOwner.isEmpty)
+    }
+
+    @Test func changedFileRetryRetiresTheOlderLiveAttempt() async throws {
+        let harness = try TransferHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        var album = transferAlbum()
+        album.tracks[0].sourceVersion = "first"
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        let first = try harness.startedJob(0)
+        album.tracks[0].sourceVersion = "second"
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        let second = try harness.startedJob(1)
+        try harness.deliver(first)
+        try await drain()
+        #expect(harness.manager.records[first.cacheKey] == nil)
+        try harness.deliver(second)
+        try await drain()
+        #expect(harness.manager.isDownloaded(album.tracks[0]))
+    }
+
     @Test func HTTPApprovalRevokedBetweenSongsStopsQueuedTransfersAndKeepsSharedRetry() async throws {
         let suite = "gumbo.download.transport.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

@@ -15,8 +15,9 @@ public nonisolated struct WatchTrack: Codable, Hashable, Sendable, Identifiable 
     public var fileSize: Int64
     public var format: String
     public var isLossless: Bool
+    public var fileRevision: DownloadFileRevision?
 
-    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, path: String, fileSize: Int64, format: String, isLossless: Bool, albumID: String? = nil) {
+    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, path: String, fileSize: Int64, format: String, isLossless: Bool, albumID: String? = nil, fileRevision: DownloadFileRevision? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
@@ -27,6 +28,7 @@ public nonisolated struct WatchTrack: Codable, Hashable, Sendable, Identifiable 
         self.fileSize = fileSize
         self.format = format
         self.isLossless = isLossless
+        self.fileRevision = fileRevision
     }
 
     public var fileExtension: String {
@@ -93,6 +95,7 @@ public nonisolated struct WatchDownloadJob: Codable, Equatable, Sendable {
     public let fileName: String
     public let generation: UUID
     public let expectedBytes: Int64?
+    public let fileRevision: DownloadFileRevision?
 
     public init?(playlist: WatchPlaylist, track: WatchTrack, generation: UUID) {
         guard let key = playlist.cacheID, let driveID = playlist.driveID else { return nil }
@@ -101,6 +104,7 @@ public nonisolated struct WatchDownloadJob: Codable, Equatable, Sendable {
         fileName = DownloadManager.cacheKey(trackID: track.id, driveID: driveID) + "." + DownloadManager.safeExtension(track.fileExtension)
         self.generation = generation
         expectedBytes = track.fileSize > 0 ? track.fileSize : nil
+        fileRevision = track.fileRevision
     }
 
     public var encoded: String? { (try? JSONEncoder().encode(self)).map { $0.base64EncodedString() } }
@@ -158,10 +162,32 @@ public nonisolated enum WatchDownloadValidation {
 /// Desired songs are persisted separately from available files, so a partial transfer stays partial.
 public nonisolated struct WatchDownloadManifest: Codable, Sendable {
     public var files: [String: String] = [:]
+    public var fileRevisions: [String: DownloadFileRevision] = [:]
     public var desired: Set<String> = []
     public var generation: UUID?
 
     public init() {}
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        files = try values.decode([String: String].self, forKey: .files)
+        desired = try values.decode(Set<String>.self, forKey: .desired)
+        generation = try values.decodeIfPresent(UUID.self, forKey: .generation)
+        fileRevisions = try values.decodeIfPresent([String: DownloadFileRevision].self, forKey: .fileRevisions) ?? [:]
+    }
+
+    /// Preserve existing offline files on upgrade, then remember the last known catalogue so
+    /// subsequent same-size edits are detected. This does not certify old files against the NAS.
+    public mutating func adoptFileRevisions(from playlist: WatchPlaylist) {
+        for track in playlist.tracks where files[track.id] != nil && fileRevisions[track.id] == nil {
+            fileRevisions[track.id] = track.fileRevision
+        }
+    }
+
+    private func matches(_ track: WatchTrack) -> Bool {
+        guard let saved = fileRevisions[track.id], let current = track.fileRevision else { return true }
+        return saved.matches(current)
+    }
 
     /// Returns only safe relative paths belonging to confirmed source-scoped deletions.
     /// A playlist edit alone never calls this. Retiring its generation rejects late downloads.
@@ -175,6 +201,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
                   deletedCacheKeys.contains((String(parts[1]) as NSString).deletingPathExtension) else { continue }
             paths.append(path)
             files[id] = nil
+            fileRevisions[id] = nil
             desired.remove(id)
             affected = true
         }
@@ -188,7 +215,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
     public func availableFiles(for playlist: WatchPlaylist, root: URL) -> [(track: WatchTrack, url: URL)] {
         guard let key = playlist.cacheID else { return [] }
         return playlist.tracks.compactMap { track in
-            guard let path = files[track.id] else { return nil }
+            guard let path = files[track.id], matches(track) else { return nil }
             guard validateFilePath(path, trackID: track.id, key: key, root: root, expectedBytes: track.fileSize) else { return nil }
             let url = root.appending(path: key).appending(path: path)
             return (track, url)
@@ -211,7 +238,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
         let tracksByID = Dictionary(playlist.tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID],
-                  let track = tracksByID[trackID] else { return false }
+                  let track = tracksByID[trackID], matches(track) else { return false }
             return validateFilePath(path, trackID: trackID, key: key, root: root, expectedBytes: track.fileSize)
         })
     }
@@ -224,6 +251,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID] else { return false }
             let track = tracksByID[trackID]
+            if let track, !matches(track) { return true }
             return !validateFilePath(path, trackID: trackID, key: key, root: root, expectedBytes: track?.fileSize)
         })
     }
@@ -240,6 +268,7 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
         let invalid = invalidFileIDs(for: playlist, root: root)
         for trackID in invalid {
             files.removeValue(forKey: trackID)
+            fileRevisions.removeValue(forKey: trackID)
         }
         return invalid
     }
@@ -441,7 +470,8 @@ extension LibraryStore {
                 return WatchTrack(
                     id: track.id, title: track.title, artist: track.artist ?? album?.artist ?? "",
                     album: album?.title ?? "", duration: track.duration, path: path,
-                    fileSize: track.fileSize ?? 0, format: track.format, isLossless: track.isLossless, albumID: track.albumID
+                    fileSize: track.fileSize ?? 0, format: track.format, isLossless: track.isLossless, albumID: track.albumID,
+                    fileRevision: DownloadFileRevision(track: track)
                 )
             }
             guard !tracks.isEmpty else { return nil }

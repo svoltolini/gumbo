@@ -28,6 +28,7 @@ struct DownloadsView: View {
 
     private struct MissingRequest: Equatable {
         let revision: UInt64
+        let contentRevision: Int
         let ownerIDs: [String]
     }
 
@@ -88,7 +89,7 @@ struct DownloadsView: View {
         // The folder is read again each time the screen opens, so the figure matches what is there now.
         .task { downloads.refreshUnusedStorage() }
         // Manifest-only arithmetic, kept out of the body and redone when download state moves.
-        .task(id: MissingRequest(revision: downloads.stateRevision, ownerIDs: owners.map(\.id))) {
+        .task(id: MissingRequest(revision: downloads.stateRevision, contentRevision: library.contentRevision, ownerIDs: owners.map(\.id))) {
             missing = owners.filter { downloads.missingCount(for: $0) > 0 }
         }
     }
@@ -152,8 +153,8 @@ private struct DownloadsStorageCard: View {
             }
             if !missing.isEmpty {
                 row(symbol: "icloud.and.arrow.down", tint: .blue,
-                    title: missing.count == 1 ? "1 download is missing songs" : "\(missing.count) downloads are missing songs",
-                    detail: "Restored from iCloud. Songs already on this \(Device.noun) are kept; only the rest come down.") {
+                    title: missing.count == 1 ? "1 download needs updating" : "\(missing.count) downloads need updating",
+                    detail: "Download missing songs and update files that changed on your server. Other saved songs are kept.") {
                     Button("Download") { downloadMissing() }
                 }
             }

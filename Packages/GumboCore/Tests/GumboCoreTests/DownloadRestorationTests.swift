@@ -65,6 +65,7 @@ private final class DownloadRestorationHarness {
 private func restorationAlbum() -> Album {
     var album = SampleLibrary.catalogue.albums[0]
     album.tracks = Array(album.tracks.prefix(1))
+    album.tracks[0].fileSize = 8192
     return album
 }
 
