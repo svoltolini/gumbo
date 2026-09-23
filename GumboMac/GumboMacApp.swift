@@ -191,7 +191,7 @@ struct GumboMacApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {
-            MacCommands(navigation: navigation, player: player, model: model)
+            MacCommands(navigation: navigation, player: player, model: model, profiles: profiles)
         }
 
         Settings {
