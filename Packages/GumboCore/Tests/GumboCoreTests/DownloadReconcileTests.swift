@@ -415,4 +415,115 @@ struct DownloadReconcileTests {
         #expect(!harness.exists(live.incomingFileName))
         #expect(report.missingSongs == 1)
     }
+
+    @Test func deletingADownloadedPlaylistFreesOnlyTheSongsNothingElseKeeps() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        let album = reconcileAlbum(sizes: [8192, 4096])
+        var single = album
+        single.tracks = [album.tracks[0]]
+        let playlist = Playlist(id: "road-trip", name: "Road trip", summary: "", covers: [], tracks: album.tracks)
+        let albumOwner = DownloadOwner(album: single, profileID: "listener")
+        let playlistOwner = DownloadOwner(playlist: playlist, profileID: "listener")
+        let shared = try harness.writeFile(for: album.tracks[0], contents: bytes(8192))
+        let only = try harness.writeFile(for: album.tracks[1], contents: bytes(4096))
+        harness.reconcile(albums: [single], playlists: [playlist])
+        #expect(harness.manager.state(for: playlistOwner) == .downloaded)
+        #expect(harness.manager.state(for: albumOwner) == .downloaded)
+        var reported: [(albums: [String], playlists: [String])] = []
+        harness.manager.onMembershipChanged = { _, albums, playlists in reported.append((albums, playlists)) }
+
+        harness.manager.removeDeleted(playlistOwner)
+        #expect(harness.exists(shared))
+        #expect(!harness.exists(only))
+        #expect(harness.manager.state(for: albumOwner) == .downloaded)
+        #expect(harness.manager.totalBytes == 8192)
+        #expect(!harness.manager.listedOwnerIDs.contains(playlistOwner.id))
+        #expect(reported.last?.albums == [single.id])
+        #expect(reported.last?.playlists == [])
+        #expect(try harness.savedManifest().map(\.owners) == [[albumOwner.id]])
+
+        // A playlist that was never downloaded here leaves the saved membership alone.
+        reported.removeAll()
+        let other = Playlist(id: "never", name: "Never", summary: "", covers: [], tracks: [album.tracks[0]])
+        harness.manager.removeDeleted(DownloadOwner(playlist: other, profileID: "listener"))
+        #expect(reported.isEmpty)
+        #expect(harness.exists(shared))
+    }
+
+    @Test func songsTakenOutOfAPlaylistStopBeingKeptForIt() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        let album = reconcileAlbum(sizes: [8192, 4096, 2048])
+        var single = album
+        single.tracks = [album.tracks[0]]
+        let playlist = Playlist(id: "road-trip", name: "Road trip", summary: "", covers: [], tracks: album.tracks)
+        let albumOwner = DownloadOwner(album: single, profileID: "listener")
+        let first = try harness.writeFile(for: album.tracks[0], contents: bytes(8192))
+        let second = try harness.writeFile(for: album.tracks[1], contents: bytes(4096))
+        let third = try harness.writeFile(for: album.tracks[2], contents: bytes(2048))
+        harness.reconcile(albums: [single], playlists: [playlist])
+        #expect(harness.manager.state(for: DownloadOwner(playlist: playlist, profileID: "listener")) == .downloaded)
+
+        // The second song is still listed, only not in the catalogue at the moment: it stays.
+        var trimmed = playlist
+        trimmed.tracks = [album.tracks[2]]
+        let trimmedOwner = DownloadOwner(playlist: trimmed, profileID: "listener")
+        harness.manager.releaseRemovedSongs(of: trimmedOwner, keeping: [album.tracks[1].id, album.tracks[2].id])
+        #expect(harness.exists(first) && harness.exists(second) && harness.exists(third))
+        let firstKey = DownloadManager.cacheKey(trackID: album.tracks[0].id, driveID: "nas-a")
+        #expect(harness.manager.records[firstKey]?.owners == [albumOwner.id])
+        #expect(harness.manager.state(for: albumOwner) == .downloaded)
+
+        harness.manager.releaseRemovedSongs(of: trimmedOwner, keeping: [album.tracks[2].id])
+        #expect(!harness.exists(second))
+        #expect(harness.exists(first) && harness.exists(third))
+        #expect(harness.manager.state(for: trimmedOwner) == .downloaded)
+        #expect(harness.manager.totalBytes == 8192 + 2048)
+        #expect(harness.manager.unusedStorage.isEmpty)
+    }
+
+    @Test func songsOfAPlaylistThatNoLongerExistsAreSurfacedAsUnused() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        let album = reconcileAlbum(sizes: [8192, 4096, 2048])
+        var single = album
+        single.tracks = [album.tracks[0]]
+        let playlist = Playlist(id: "road-trip", name: "Road trip", summary: "", covers: [], tracks: Array(album.tracks.prefix(2)))
+        let albumOwner = DownloadOwner(album: single, profileID: "listener")
+        let playlistOwner = DownloadOwner(playlist: playlist, profileID: "listener")
+        let elsewhere = "profile:second|" + DownloadOwner.playlistPrefix + "not-loaded-here"
+        let first = try harness.writeFile(for: album.tracks[0], contents: bytes(8192))
+        let second = try harness.writeFile(for: album.tracks[1], contents: bytes(4096))
+        let third = try harness.writeFile(for: album.tracks[2], contents: bytes(2048))
+        try harness.writeManifest([
+            DownloadRecord(trackID: album.tracks[0].id, driveID: "nas-a", fileName: first, bytes: 8192, owners: [albumOwner.id, playlistOwner.id]),
+            DownloadRecord(trackID: album.tracks[1].id, driveID: "nas-a", fileName: second, bytes: 4096, owners: [playlistOwner.id]),
+            DownloadRecord(trackID: album.tracks[2].id, driveID: "nas-a", fileName: third, bytes: 2048, owners: [elsewhere]),
+        ])
+        harness.stop()
+        harness.open()
+        harness.manager.knownProfileIDsProvider = { ["listener", "second"] }
+        try await harness.restore()
+
+        var report = harness.reconcile(albums: [single], playlists: [playlist])
+        #expect(report.unused.isEmpty)
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").playlists == [playlist.id])
+
+        // The playlist was deleted on another device: iCloud no longer lists it or its membership.
+        report = harness.reconcile(albums: [single])
+        #expect(report.unused.fileCount == 1)
+        #expect(report.unused.bytes == 4096)
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").playlists == [])
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").albums == [single.id])
+        // Nothing is deleted until asked; then only the song no remaining download uses goes.
+        #expect(harness.exists(second))
+        harness.manager.removeUnused()
+        #expect(!harness.exists(second))
+        #expect(harness.exists(first) && harness.exists(third))
+        #expect(harness.manager.state(for: albumOwner) == .downloaded)
+        #expect(harness.manager.unusedStorage.isEmpty)
+    }
 }

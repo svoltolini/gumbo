@@ -55,11 +55,15 @@ public nonisolated struct DownloadActivityAttributes: ActivityAttributes {
     /// Where a tap on the activity lands: the player for the song playing now, otherwise the album or
     /// playlist being saved. Optional so activities started by an earlier build still decode.
     public var link: URL?
+    /// The download request the activity reports on, so a relaunched app can pick the activity back
+    /// up instead of starting a second one. Nil for activities started by an earlier build.
+    public var requestKey: String?
 
-    public init(title: String, subtitle: String, link: URL? = nil) {
+    public init(title: String, subtitle: String, link: URL? = nil, requestKey: String? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.link = link
+        self.requestKey = requestKey
     }
 
     /// The link to open, with the plain player link for activities from before links were carried.

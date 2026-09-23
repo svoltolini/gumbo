@@ -173,6 +173,11 @@ struct GumboApp: App {
         }
         // An album renamed in its files keeps its downloads under its new identity.
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        // A deleted playlist takes its download with it; songs taken out of one stop being kept for it.
+        library.onPlaylistWillBeDeleted = { [downloads] playlist in downloads.removeDeleted(downloads.owner(for: playlist)) }
+        library.onPlaylistSongsRemoved = { [downloads] playlist, trackIDs in
+            downloads.releaseRemovedSongs(of: downloads.owner(for: playlist), keeping: trackIDs)
+        }
         library.onServerTracksDeleted = { [library, downloads, player, watchBridge] sourceID, trackIDs in
             downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
             if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {

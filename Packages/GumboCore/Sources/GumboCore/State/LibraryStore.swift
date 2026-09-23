@@ -106,6 +106,11 @@ public final class LibraryStore {
     /// Called after `contentRevision` moves, for work that needs the albums and their songs, such as
     /// matching restored download membership against the files on this device.
     public var onContentChanged: (() -> Void)?
+    /// Called with a playlist as it is just before it is deleted, so its download can go with it.
+    public var onPlaylistWillBeDeleted: ((Playlist) -> Void)?
+    /// Called after songs are taken out of a playlist, with the playlist as it is now and every song id
+    /// it still lists, so songs downloaded only for it can go.
+    public var onPlaylistSongsRemoved: ((Playlist, Set<String>) -> Void)?
     /// The NAS whose derived rows are on screen. A replacement catalogue can be waiting for its
     /// background derivation, so its source must not be assigned to the preceding source's rows.
     public private(set) var contentRootPath = ""
@@ -1150,8 +1155,11 @@ public final class LibraryStore {
 
     public func remove(_ track: Track, fromPlaylist id: String) {
         guard let index = localPlaylists.firstIndex(where: { $0.id == id }) else { return }
+        let before = localPlaylists[index].trackIDs.count
         localPlaylists[index].trackIDs.removeAll { $0 == track.id }
+        let remaining = localPlaylists[index].trackIDs
         saveLocalPlaylists()
+        if remaining.count != before { songsRemoved(fromPlaylist: id, remaining: remaining) }
     }
 
     /// Removes selected visible occurrences, including when the same song appears more than once.
@@ -1167,12 +1175,29 @@ public final class LibraryStore {
             if positions.contains(visiblePosition) { changed = true; return false }
             return true
         }
-        if changed { saveLocalPlaylists() }
+        guard changed else { return }
+        let remaining = localPlaylists[index].trackIDs
+        saveLocalPlaylists()
+        songsRemoved(fromPlaylist: id, remaining: remaining)
     }
 
+    private func songsRemoved(fromPlaylist id: String, remaining: [String]) {
+        guard let playlist = playlists.first(where: { $0.id == id }) else { return }
+        onPlaylistSongsRemoved?(playlist, Set(remaining))
+    }
+
+    /// Deletes a playlist and, since it no longer exists, its place among the profile's downloads.
+    /// Its download goes first, while the playlist can still be described.
     public func deletePlaylist(id: String) {
+        if isLocalPlaylist(id), let playlist = playlists.first(where: { $0.id == id }) {
+            onPlaylistWillBeDeleted?(playlist)
+        }
         localPlaylists.removeAll { $0.id == id }
-        saveLocalPlaylists()
+        profiles?.updateLibrary(catalogue.driveID) { state in
+            state.playlists = localPlaylists
+            state.downloadedPlaylists.removeAll { $0 == id }
+        }
+        rebuildLocalPlaylists()
     }
 
     public func isLocalPlaylist(_ id: String) -> Bool { localPlaylists.contains { $0.id == id } }

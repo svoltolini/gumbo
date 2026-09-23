@@ -50,3 +50,49 @@ import Testing
     defaults.removePersistentDomain(forName: suite)
     try FileManager.default.removeItem(at: directory)
 }
+
+@Test @MainActor func deletingAPlaylistDropsItsDownloadMembershipAndReportsRemovedSongs() async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-playlist-delete-\(UUID().uuidString)")
+    let suite = "gumbo.playlist.delete.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    let profiles = ProfileStore(directory: directory, defaults: defaults)
+    #expect(profiles.activate(try #require(profiles.owner)))
+    var catalogue = SampleLibrary.catalogue
+    catalogue.driveID = "delete-source"
+    let a = catalogue.albums[0].tracks[0]
+    let b = catalogue.albums[0].tracks[1]
+    profiles.updateLibrary(catalogue.driveID) {
+        $0.playlists = [
+            LocalPlaylist(id: "trip", name: "Trip", trackIDs: ["unavailable", a.id, b.id], created: .now),
+            LocalPlaylist(id: "keep", name: "Keep", trackIDs: [a.id], created: .now),
+        ]
+        $0.downloadedPlaylists = ["trip", "keep"]
+    }
+    let library = LibraryStore()
+    library.profiles = profiles
+    library.replace(with: catalogue, drive: nil)
+    var released: [(id: String, trackIDs: Set<String>)] = []
+    var deleted: [Playlist] = []
+    library.onPlaylistSongsRemoved = { playlist, trackIDs in released.append((playlist.id, trackIDs)) }
+    library.onPlaylistWillBeDeleted = { deleted.append($0) }
+
+    // Songs the catalogue does not show are still listed, so their downloads are not released.
+    library.remove(b, fromPlaylist: "trip")
+    #expect(released.count == 1)
+    #expect(released.first?.id == "trip")
+    #expect(released.first?.trackIDs == ["unavailable", a.id])
+    library.remove(b, fromPlaylist: "trip")
+    #expect(released.count == 1)
+
+    library.deletePlaylist(id: "trip")
+    #expect(deleted.map(\.id) == ["trip"])
+    #expect(deleted.first?.tracks.map(\.id) == [a.id])
+    #expect(library.playlist(id: "trip") == nil)
+    let state = profiles.libraryState(for: catalogue.driveID)
+    #expect(state.playlists.map(\.id) == ["keep"])
+    #expect(state.downloadedPlaylists == ["keep"])
+    profiles.lock()
+    await profiles.drainPersistence()
+    defaults.removePersistentDomain(forName: suite)
+    try FileManager.default.removeItem(at: directory)
+}
