@@ -225,7 +225,8 @@ private nonisolated func cachedMetadata(_ files: [RemoteEntry]) -> Catalogue {
             #expect(track.title == "Last good title")
             #expect(track.duration == 180)
             #expect(track.tagVersion == nil)
-            #expect(track.enrichAttempts == 1)
+            // A timeout says nothing about the file: it is read again next time without counting towards the rest.
+            #expect(track.enrichAttempts == nil)
             #expect(await failedDrive.reads > 0)
             let retried = try await runMetadataScan(indexer, drive: MetadataFixtureDrive(files: [listed], media: media), existing: failed)
             #expect(retried.albums[0].tracks[0].tagVersion == Track.currentTagVersion)

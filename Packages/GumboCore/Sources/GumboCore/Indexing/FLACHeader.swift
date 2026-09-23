@@ -11,6 +11,9 @@ public nonisolated struct FLACInfo: Sendable {
     public var picture: Data?
     public var pictureMIME: String?
     public var isComplete = false
+    /// Whether STREAMINFO and a VORBIS_COMMENT block were parsed; enough for the library without the rest.
+    public var hasStreamInfo = false
+    public var hasComments = false
     /// The prefix length needed for the next incomplete block or header.
     public var neededPrefix: Int?
 
@@ -41,11 +44,18 @@ public nonisolated enum FLACHeader {
     public static let initialRead: Int64 = 256 * 1024
     public static let maximumRead: Int64 = 8 * 1024 * 1024
 
+    /// Offsets, including `neededPrefix`, count from the start of the file, before any ID3v2 tag.
     public static func parse(_ data: Data) -> FLACInfo? {
         let bytes = [UInt8](data)
-        guard bytes.count >= 8, bytes[0] == 0x66, bytes[1] == 0x4C, bytes[2] == 0x61, bytes[3] == 0x43 else { return nil }
+        guard let streamStart = streamStart(in: bytes) else { return nil }
         var info = FLACInfo()
-        var offset = 4
+        if streamStart > 0, streamStart + 8 > bytes.count {
+            // A long ID3v2 tag in front: the stream begins beyond this prefix.
+            info.neededPrefix = streamStart + 8
+            return info
+        }
+        guard streamStart + 8 <= bytes.count, bytes[streamStart] == 0x66, bytes[streamStart + 1] == 0x4C, bytes[streamStart + 2] == 0x61, bytes[streamStart + 3] == 0x43 else { return nil }
+        var offset = streamStart + 4
         var pictureType: Int?
         while offset + 4 <= bytes.count {
             let header = bytes[offset]
@@ -65,8 +75,10 @@ public nonisolated enum FLACHeader {
                 info.channels = Int((block[12] >> 1) & 0x07) + 1
                 info.bitsPerSample = Int((block[12] & 0x01) << 4 | (block[13] >> 4)) + 1
                 info.totalSamples = Int64(block[13] & 0x0F) << 32 | Int64(block[14]) << 24 | Int64(block[15]) << 16 | Int64(block[16]) << 8 | Int64(block[17])
+                info.hasStreamInfo = true
             case 4:
                 info.tags.merge(parseVorbisComments(block)) { _, new in new }
+                info.hasComments = true
             case 6:
                 if let (kind, mime, picture) = parsePicture(block) {
                     // Prefer the front cover (type 3) over any other picture.
@@ -86,22 +98,41 @@ public nonisolated enum FLACHeader {
         return info
     }
 
-    /// Read complete metadata with bounded, monotonically increasing prefixes. A partial header
-    /// must not become a successful enrichment or tag-write verification.
-    public static func read(read: (Range<Int64>) async throws -> Data) async throws -> FLACInfo? {
+    /// Where the FLAC stream starts: after any ID3v2 tags some taggers put in front of it, which
+    /// players skip. Nil when an ID3v2 header is malformed.
+    private static func streamStart(in bytes: [UInt8]) -> Int? {
+        var offset = 0
+        while offset + 10 <= bytes.count, bytes[offset] == 0x49, bytes[offset + 1] == 0x44, bytes[offset + 2] == 0x33 {
+            let size = bytes[(offset + 6)..<(offset + 10)]
+            guard size.allSatisfy({ $0 < 0x80 }) else { return nil }
+            let length = size.reduce(0) { $0 << 7 | Int($1) }
+            // Flag 0x10: a 10-byte footer follows the tag (ID3v2.4).
+            let footer = bytes[offset + 5] & 0x10 != 0 ? 10 : 0
+            offset += 10 + length + footer
+        }
+        return offset
+    }
+
+    /// Read metadata with bounded, monotonically increasing prefixes. By default every block must be
+    /// read: a partial header must not become a tag-write verification. `requireAllBlocks: false` is
+    /// for indexing, which needs only STREAMINFO and the comments: a picture too large for the bounded
+    /// prefix, or a file cut short after them, then leaves out the rest instead of discarding both.
+    public static func read(requireAllBlocks: Bool = true, read: (Range<Int64>) async throws -> Data) async throws -> FLACInfo? {
         var length = initialRead
         var previousCount = 0
+        var usable: FLACInfo?
         while length <= maximumRead {
             try Task.checkCancellation()
             let data = try await read(0..<length)
-            guard data.count > previousCount, let info = parse(data) else { return nil }
+            guard data.count > previousCount, let info = parse(data) else { return usable }
             if info.isComplete { return info }
-            guard let needed = info.neededPrefix, needed > data.count, Int64(needed) <= maximumRead else { return nil }
+            if !requireAllBlocks, info.hasStreamInfo, info.hasComments { usable = info }
+            guard let needed = info.neededPrefix, needed > data.count, Int64(needed) <= maximumRead else { return usable }
             previousCount = data.count
             // Include space for following blocks, rather than making a request per tiny header.
             length = min(maximumRead, max(Int64(needed), min(maximumRead, length * 2)))
         }
-        return nil
+        return usable
     }
 
     private static func parseVorbisComments(_ block: [UInt8]) -> [String: String] {

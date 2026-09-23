@@ -79,6 +79,42 @@ import CGumboSMB
         await #expect(throws: SMBDriveError.invalidResponse) { try await makeDrive(session).list("/") }
     }
 
+    /// libsmb2 reports STATUS_BAD_NETWORK_NAME and STATUS_NO_SUCH_DEVICE as ENOENT. At the share's
+    /// root that is a detached or not yet mounted volume, never a deleted music folder.
+    @Test func missingShareRootIsUnavailableNotDeleted() async throws {
+        let session = FakeSMBReadSession()
+        await session.setFailure(.missingPath)
+        let drive = try makeDrive(session)
+        await #expect(throws: SMBDriveError.shareUnavailable) { try await drive.list("/") }
+        await #expect(throws: SMBDriveError.shareUnavailable) { try await drive.info("/") }
+        await #expect(throws: SMBDriveError.missingPath) { try await drive.list("/Music") }
+        await #expect(throws: SMBDriveError.missingPath) { try await drive.info("/Music/Song.flac") }
+        #expect(!SMBDriveError.shareUnavailable.isMissingPath)
+        #expect(SMBDriveError.missingPath.atShareRoot == .shareUnavailable)
+        #expect(SMBDriveError.timedOut.atShareRoot == .timedOut)
+        await session.setFailure(.disconnected)
+        await #expect(throws: SMBDriveError.disconnected) { try await drive.list("/") }
+    }
+
+    @Test @MainActor func unavailableShareKeepsTheSavedLibrary() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-smb-share-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try await CoverStore.$directoryOverride.withValue(directory) {
+            let session = FakeSMBReadSession()
+            await session.setFailure(.missingPath)
+            let drive = try makeDrive(session)
+            let song = RemoteEntry(path: "/Album/Song.flac", name: "Song.flac", isDirectory: false, size: 10, modified: nil)
+            let saved = Catalogue.build(folders: [ScannedFolder(path: "/Album", audio: [song], cover: nil)], rootPath: "/",
+                                        serverName: "NAS", driveID: drive.id, existing: nil)
+            let indexer = LibraryIndexer(recordDiagnostics: { _ in })
+            var published: [Catalogue] = []
+            indexer.start(drive: drive, rootPath: "/", serverName: "NAS", existing: saved, onCatalogue: { published.append($0) })
+            for _ in 0..<500 where indexer.isRunning { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(published.isEmpty, "The saved library must not be replaced by an empty one")
+            #expect(indexer.phase == .failed(.other(SMBDriveError.shareUnavailable.localizedDescription)))
+        }
+    }
+
     @Test func duplicateDirectoryPageNeverBecomesACompleteListing() async throws {
         let session = FakeSMBReadSession()
         let entry = SMBFileInfo(name: "song.flac", isDirectory: false, isSymbolicLink: false, size: 123, modified: nil)
@@ -170,6 +206,7 @@ private actor FakeSMBReadSession: SMBReadSession {
     private var changingMetadata = false
     private var metadataReads = 0
     private var suspended = false
+    private var failure: SMBDriveError?
     private var waiter: CheckedContinuation<Void, Never>?
     var isWaiting: Bool { waiter != nil }
     func setEntries(_ entries: [SMBFileInfo]) { self.entries = entries }
@@ -178,12 +215,18 @@ private actor FakeSMBReadSession: SMBReadSession {
     func setReportedSize(_ size: Int64?) { reportedSize = size }
     func setChangingMetadata(_ value: Bool) { changingMetadata = value }
     func setSuspended(_ value: Bool) { suspended = value }
+    func setFailure(_ error: SMBDriveError?) { failure = error }
     func resumeRead() { waiter?.resume(); waiter = nil }
     func connect() async throws {}
     func disconnect() async {}
-    func list(_ path: String) async throws -> [SMBFileInfo] { paths.append(path); return entries }
+    func list(_ path: String) async throws -> [SMBFileInfo] {
+        paths.append(path)
+        if let failure { throw failure }
+        return entries
+    }
     func info(_ path: String) async throws -> SMBFileInfo {
         paths.append(path)
+        if let failure { throw failure }
         metadataReads += 1
         return .init(name: path, isDirectory: false, isSymbolicLink: false, size: reportedSize ?? Int64(data.count),
                      modified: Date(timeIntervalSince1970: changingMetadata ? Double(metadataReads) : 1))

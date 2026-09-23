@@ -6,6 +6,9 @@ public nonisolated struct ScannedFolder: Sendable, Hashable {
     public let path: String
     public let audio: [RemoteEntry]
     public let cover: RemoteEntry?
+    /// The cover image in the folder above, which is the album's own folder when this is a disc
+    /// folder such as "CD1". That folder holds no music itself, so the scan keeps nothing else of it.
+    public var parentCover: RemoteEntry? = nil
 }
 
 /// The indexed music library: albums with their tracks, plus where they came from.
@@ -87,7 +90,11 @@ public nonisolated struct Catalogue: Codable, Sendable {
                 drafts[id] = Draft(guess: guess, folderPath: albumFolder.isEmpty ? folder.path : albumFolder)
                 order.append(id)
             }
-            if drafts[id]!.coverPath == nil || guess.disc == nil, let cover = folder.cover {
+            if guess.hasDiscFolder, let albumCover = folder.parentCover {
+                // The album folder's image beside "CD1" and "CD2" covers the whole album; it wins over
+                // a picture inside one disc folder, as a folder without discs does below.
+                drafts[id]!.coverPath = albumCover.path
+            } else if drafts[id]!.coverPath == nil || guess.disc == nil, let cover = folder.cover {
                 drafts[id]!.coverPath = cover.path
             }
             for file in folder.audio {

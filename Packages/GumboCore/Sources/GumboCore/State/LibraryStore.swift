@@ -945,11 +945,11 @@ public final class LibraryStore {
         CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.remove(for: album.id) }
         coveredAlbumIDs.remove(album.id)
         palettes[album.id] = nil
-        let chosen = await LibraryIndexer.fetchCover(for: album, drive: drive)
+        let lookup = await LibraryIndexer.lookUpCover(for: album, drive: drive)
         guard !Task.isCancelled, catalogue.driveID == sourceID, artworkDirectory == coverDirectory, self.drive?.id == drive.id else {
             return "The library changed before the cover finished loading."
         }
-        if let (data, source) = chosen {
+        if case .found(let data, let source) = lookup {
             CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.save(data, for: album.id) }
             coveredAlbumIDs.insert(album.id)
             palettes[album.id] = CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.palette(for: album.id) }
@@ -960,6 +960,10 @@ public final class LibraryStore {
         }
         coverVersions[album.id, default: 0] += 1
         rebuildDerived()
+        if case .failed(let reason) = lookup {
+            DiagnosticsLog.shared.record("Refreshing the cover for “\(album.title)” was interrupted: \(reason)")
+            return "Couldn't reach the server to look for the cover. Try again."
+        }
         DiagnosticsLog.shared.record("Refreshed cover for “\(album.title)”: nothing found")
         return "No folder image or embedded art was found for this album."
     }
