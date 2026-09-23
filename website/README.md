@@ -42,7 +42,7 @@ The standalone `privacy/index.html` and `film/index.html` use relative links to 
 
 ## Vercel (current host)
 
-The **`gumbo`** project in **`svoltolinis-projects`** is connected to **`svoltolini/gumbo`**. Its production branch is **`main`**, root directory is **`website`**, framework preset is **Other**, and output directory is **`.`**. `vercel.json` explicitly disables install and build commands; Vercel serves these static files directly.
+The **`gumbo`** project in **`svoltolinis-projects`** is connected to **`svoltolini/gumbo`**. Its production branch is **`main`**, root directory is **`website`**, framework preset is **Other**, and output directory is **`.`**. `vercel.json` explicitly disables install and build commands; Vercel serves these static files directly. It also sets `trailingSlash`, so `/privacy` redirects (308) to `/privacy/` like Netlify and GitHub Pages do; the pages' relative links, such as the Privacy page's own `./` link, depend on that slash.
 
 Merge website changes into `main` to update production through the Git integration. Check the deployment is **Ready** in Vercel before verifying the public page. For a new import, select the same repository and settings above. [Vercel Git deployment guide](https://vercel.com/docs/git).
 
