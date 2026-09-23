@@ -60,6 +60,8 @@ public final class PlayerModel {
         artworkAlbumID = nil
         updateNowPlayingInfo()
     }
+    /// Audio is actually rolling: false while a song loads or a seek settles. The lock screen's rate
+    /// follows this; Play/Pause controls follow `isPlaybackRequested`.
     public private(set) var isPlaying = false
     public private(set) var position: TimeInterval = 0
     public private(set) var album: Album?
@@ -75,6 +77,10 @@ public final class PlayerModel {
     /// Resolves a stream URL for a track; nil means the file is not reachable right now.
     public var streamURLProvider: ((Track) -> URL?)?
     public var mediaSourceProvider: ((Track) -> RemoteMediaSource?)?
+    /// Asked once when a song streaming from the server fails, with the address it used; true when
+    /// a fresh address can be made, for example because the server session has been renewed, and
+    /// the song then loads again from where it stopped.
+    public var streamFailureRecovery: ((URL) async -> Bool)?
     public var sourceIDProvider: (() -> String)?
     /// Whether a track without a URL may pretend to play (the sample library) instead of reporting an error.
     public var allowsSimulation: (() -> Bool)?
@@ -94,6 +100,14 @@ public final class PlayerModel {
     private var seekGeneration = UUID()
     private var pendingStartPosition: TimeInterval?
     private var recoverySeekInFlight = false
+    /// The server address the current song streams from, until its one recovery attempt is used.
+    private var recoverableStream: URL?
+    /// The server address the loaded song streams from, kept so that a new request to play it in
+    /// place, such as Play after a long pause, gets its own recovery attempt.
+    private var currentStream: URL?
+    /// Why the current song's stream failed, held back while that attempt runs: the request to play
+    /// stands meanwhile, and the failure shows only if the song cannot load again.
+    private var pendingStreamFailure: String?
     private var hasRecordedTrackStart = false
     private var ticker: Task<Void, Never>?
     private var anchorDate: Date?
@@ -120,6 +134,11 @@ public final class PlayerModel {
 
     public var track: Track? { queue.indices.contains(index) ? queue[index] : nil }
     public var hasTrack: Bool { track != nil }
+    /// The listener asked for music, so Play/Pause shows Pause and the Now Playing cover stays full size.
+    /// Unlike `isPlaying` it holds while a song loads, a seek settles, the next song starts or a refused
+    /// stream gets a fresh address, so slow servers, scrubbing and session renewal do not flash Play;
+    /// a pause, a failure that cannot be recovered or the end of the queue clears it.
+    public var isPlaybackRequested: Bool { wantsToPlay }
 
     public var duration: TimeInterval {
         if let duration = player?.duration { return duration }
@@ -199,8 +218,9 @@ public final class PlayerModel {
         }
     }
 
+    /// Does what the Play/Pause glyph shows: Pause during loading or a seek cancels the pending start.
     public func togglePlayPause() {
-        wantsToPlay ? pause() : resume()
+        isPlaybackRequested ? pause() : resume()
     }
 
     public func resume() {
@@ -223,6 +243,12 @@ public final class PlayerModel {
             // A reconnect or a completed download may now provide a URL. Resolve it again.
             load(index: index, autoplay: true, resumingAt: position, isRetry: true)
         } else {
+            // Resumes in place. After a failed seek this is the retry, which replaces the old error as a
+            // reload would, so album and playlist controls show Pause alongside the transport.
+            lastError = nil
+            // A new request to play: if DSM ended the session during a long pause, this one may renew
+            // it too, even for a song that was itself reloaded by a recovery.
+            if recoverableStream == nil { recoverableStream = currentStream }
             playWhenReady()
         }
         updateNowPlayingInfo()
@@ -236,6 +262,7 @@ public final class PlayerModel {
     /// The interruption path uses this without discarding its conditional resume token.
     private func pausePlayback() {
         wantsToPlay = false
+        pendingStreamFailure = nil
         if isSimulated {
             syncSimulatedPosition()
             stopTicker()
@@ -331,7 +358,7 @@ public final class PlayerModel {
         }
     }
 
-    private func load(index: Int, autoplay: Bool, resumingAt savedPosition: TimeInterval = 0, isRetry: Bool = false) {
+    private func load(index: Int, autoplay: Bool, resumingAt savedPosition: TimeInterval = 0, isRetry: Bool = false, isRecovery: Bool = false) {
         let alreadyRecordedStart = isRetry && hasRecordedTrackStart
         teardown()
         self.index = index
@@ -356,6 +383,10 @@ public final class PlayerModel {
             }
             player.volume = volume
             self.player = player
+            if case .url(let url) = source, !url.isFileURL {
+                currentStream = url
+                if !isRecovery { recoverableStream = url }
+            }
             pendingStartPosition = position > 0 ? position : nil
             let generation = playbackGeneration
             player.positionChanged = { [weak self] seconds in
@@ -403,6 +434,9 @@ public final class PlayerModel {
         isSimulated = false
         pendingStartPosition = nil
         recoverySeekInFlight = false
+        recoverableStream = nil
+        currentStream = nil
+        pendingStreamFailure = nil
         if nowPlayingArtwork == nil { artworkAlbumID = nil }
         stopTicker()
         anchorDate = nil
@@ -417,10 +451,15 @@ public final class PlayerModel {
         case .loading:
             isPlaying = false
         case .failed(let message):
-            wantsToPlay = false
             isPlaying = false
-            lastError = message
             player.pause()
+            // While a refused stream gets a fresh address the request stands, so controls keep
+            // showing Pause and a tap pauses; the failure shows only once that attempt settles.
+            let recovering = pendingStreamFailure != nil || (wantsToPlay && recoverStream(failure: message))
+            if !recovering {
+                wantsToPlay = false
+                lastError = message
+            }
         case .ready:
             if let requestedPosition = pendingStartPosition, !recoverySeekInFlight {
                 let target = player.duration.map { min(requestedPosition, $0) } ?? requestedPosition
@@ -433,6 +472,13 @@ public final class PlayerModel {
                 player.seek(to: target) { [weak self] finished in
                     guard let self, playbackGeneration == generation, seekGeneration == seek else { return }
                     recoverySeekInFlight = false
+                    // The item failed under the seek, whichever of the two AVFoundation reported first:
+                    // its failure path decides, starting a recovery while the request still stands or
+                    // leaving one already under way to reload at this same position.
+                    if !finished, let status = self.player?.status, case .failed = status {
+                        playWhenReady()
+                        return
+                    }
                     if finished {
                         pendingStartPosition = nil
                         playWhenReady()
@@ -450,6 +496,52 @@ public final class PlayerModel {
                 recordTrackStart()
             }
         }
+        updateNowPlayingInfo()
+    }
+
+    /// A streamed song may have failed only because its address went out of date, as when the
+    /// server ended the session it carried. Ask once; when a fresh address can be made, load the
+    /// song again from the same place, unless the listener has asked for something else meanwhile.
+    /// Returns false when there is nothing to ask, and the failure is reported straight away.
+    private func recoverStream(failure: String) -> Bool {
+        guard let url = recoverableStream, streamFailureRecovery != nil else { return false }
+        recoverableStream = nil
+        pendingStreamFailure = failure
+        let generation = playbackGeneration
+        let command = commandRevision
+        let resumeAt = position
+        Task { [weak self] in
+            let recovered = await self?.streamFailureRecovery?(url) ?? false
+            // A pause, stop, another song or the deadline has already settled what the controls show.
+            guard let self, playbackGeneration == generation, let failure = pendingStreamFailure else { return }
+            if recovered, commandRevision == command {
+                pendingStreamFailure = nil
+                load(index: index, autoplay: true, resumingAt: resumeAt, isRetry: true, isRecovery: true)
+            } else {
+                // Not recoverable, or a seek or a widget, CarPlay or Siri request took over without
+                // starting a song: report the failure, and Play loads the song again.
+                settleStreamFailure(failure)
+            }
+        }
+        // A server that doesn't answer, rather than one that ended the session, must not leave Pause
+        // showing with nothing playing for as long as its requests take to time out.
+        let deadline = streamRecoveryDeadline
+        Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard let self, playbackGeneration == generation, let failure = pendingStreamFailure else { return }
+            settleStreamFailure(failure)
+        }
+        return true
+    }
+
+    /// How long a refused stream may wait for a fresh address before its failure shows. Play then
+    /// loads the song again, with the renewed session if the renewal finished meanwhile.
+    var streamRecoveryDeadline: Duration = .seconds(10)
+
+    private func settleStreamFailure(_ failure: String) {
+        pendingStreamFailure = nil
+        wantsToPlay = false
+        lastError = failure
         updateNowPlayingInfo()
     }
 

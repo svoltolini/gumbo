@@ -17,8 +17,9 @@ public nonisolated struct RemoteEntry: Hashable, Sendable, Identifiable {
 
     public var id: String { path }
     public var fileExtension: String { (name as NSString).pathExtension.lowercased() }
-    public var isAudio: Bool { !isDirectory && RemoteDriveSupport.audioExtensions.contains(fileExtension) }
-    public var isImage: Bool { !isDirectory && RemoteDriveSupport.imageExtensions.contains(fileExtension) }
+    public var isHidden: Bool { RemoteDriveSupport.isHidden(name) }
+    public var isAudio: Bool { !isDirectory && !isHidden && RemoteDriveSupport.audioExtensions.contains(fileExtension) }
+    public var isImage: Bool { !isDirectory && !isHidden && RemoteDriveSupport.imageExtensions.contains(fileExtension) }
 }
 
 /// A remote file system the app can index and stream music from.
@@ -104,6 +105,11 @@ public nonisolated enum RemoteDriveSupport {
     public static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "heic"]
     /// Image file names that conventionally hold album art, in order of preference.
     public static let coverNames = ["cover", "folder", "front", "album", "albumart", "artwork", "thumb"]
+
+    /// Names starting with "." are hidden, and never music or covers. Among them are the "._"
+    /// AppleDouble files macOS writes beside everything it copies to SMB, WebDAV or exFAT volumes:
+    /// "._01 - Song.flac" keeps the song's name and extension but holds only Finder metadata.
+    public static func isHidden(_ name: String) -> Bool { name.hasPrefix(".") }
 
     /// Picks the image most likely to be the album cover from a folder listing.
     public static func coverImage(in entries: [RemoteEntry]) -> RemoteEntry? {

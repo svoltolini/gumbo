@@ -60,6 +60,7 @@ struct NowPlayingLinkTests {
         profiles = ProfileStore(directory: directory, defaults: defaults)
         #expect(profiles.activate(try #require(profiles.owner)))
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.password = { _ in nil }
         services.loadCatalogue = { nil }
         services.deleteCatalogue = {}

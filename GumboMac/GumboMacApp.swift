@@ -102,6 +102,8 @@ struct GumboMacApp: App {
         player.mediaSourceProvider = { [library, downloads] track in
             downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track)
         }
+        // A stream refused because the NAS ended its session plays again once the session is renewed.
+        player.streamFailureRecovery = { [model] url in await model.recoverStream(from: url) }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }

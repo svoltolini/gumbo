@@ -15,6 +15,9 @@ nonisolated struct FamilyAccessRecord: Codable, Equatable {
     var account: String
     var sourceID: String
     var pendingRevocationScope: String?
+    /// New for every password saved on this device, so iCloud sync can tell a local change from
+    /// another device's copy. Nil for records saved before it existed.
+    var revision: String? = nil
 
     var keychainAccount: String { "family-v2|" + sourceID + "|" + account }
 }

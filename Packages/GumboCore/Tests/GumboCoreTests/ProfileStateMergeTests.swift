@@ -261,7 +261,7 @@ private func metadataBeforeDownloadMembership(_ state: ProfileState) throws -> D
     }
 
     func makeSync() -> CloudSync {
-        CloudSync(services: CloudServices(identity: { "account" }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
+        CloudSync(services: CloudServices(identity: { .available("account") }, sharedZones: { [] }, createZone: { _ in }, subscribe: {},
             changes: { _, token in
                 self.tokens.append(token)
                 self.duringChanges?()

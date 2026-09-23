@@ -393,6 +393,27 @@ public nonisolated struct Catalogue: Codable, Sendable {
         }
     }
 
+    /// Whether a scan made before hidden files were ignored saved this catalogue: it lists a "._"
+    /// twin as a song or as an album's cover, which no scan does now.
+    var listsHiddenFiles: Bool {
+        albums.contains { album in
+            (album.coverPath.map { RemoteDriveSupport.isHidden(($0 as NSString).lastPathComponent) } ?? false)
+                || album.tracks.contains(where: \.isHiddenFile)
+        }
+    }
+
+    /// Such scans could save "._Cover (Front).jpg", which holds only Finder metadata, as a cover:
+    /// the folder's album's, then the albums regrouping copied it to, or a song's picture its album
+    /// adopted. An album with a cover never looks for one again, so forget those by their content,
+    /// before regrouping can copy them on, and the cover pass fetches the real picture. Only needed
+    /// after such a catalogue, or with none of this folder to tell (covers outlive a switch to another
+    /// folder and back), so a healed library is not looked through on every refresh.
+    nonisolated static func discardFinderMetadataCovers(previous: Catalogue?, driveID: String, rootPath: String) {
+        if let previous, previous.driveID == driveID, previous.rootPath == rootPath, !previous.listsHiddenFiles { return }
+        let removed = CoverStore.removeFinderMetadata()
+        if removed > 0 { diagnostics("Discarded \(removed) covers read from hidden files; they are looked up again") }
+    }
+
     /// Longest directory prefix shared by every path.
     public nonisolated static func commonDirectory(of paths: [String]) -> String? {
         guard var common = paths.first.map({ Array($0.split(separator: "/").dropLast()) }) else { return nil }
@@ -409,6 +430,13 @@ public nonisolated struct Catalogue: Codable, Sendable {
     /// The album that currently holds a track, wherever regrouping has moved it.
     public func album(containing trackID: String) -> Album? {
         albums.first { album in album.tracks.contains { $0.id == trackID } }
+    }
+
+    /// Songs this catalogue lists that a newer complete listing no longer has. Hidden "._" files kept
+    /// by a catalogue saved before scans ignored them were not deleted from the server: reported as
+    /// deletions, they would stop playback and add a lasting download and Watch marker for each one.
+    func removedTrackIDs(present: Set<String>) -> Set<String> {
+        Set(albums.flatMap(\.tracks).filter { !$0.isHiddenFile }.map(\.id)).subtracting(present)
     }
 
     /// Replaces one track with its enriched version and refreshes its album's tags. The track is

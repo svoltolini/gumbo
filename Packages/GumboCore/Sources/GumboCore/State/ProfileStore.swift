@@ -54,6 +54,9 @@ public final class ProfileStore {
     public var onDeactivate: (() -> Void)?
     /// Set by the app: the active profile's document changed on another device; reload it.
     public var onRemoteState: (() -> Void)?
+    /// Set by the app: profiles left this device, deleted or retired from the family, open or not.
+    /// Access a closed one still held, such as a Watch grant, must end with it.
+    public var onProfilesRemoved: (() -> Void)?
     /// Keeps these files in step with iCloud when there is an account.
     public var sync: CloudSync?
 
@@ -217,14 +220,21 @@ public final class ProfileStore {
     }
 
     /// Back to "Who's listening?": playback stops and the next person picks themselves.
-    public func lock() {
+    /// `onDeactivate` runs only when a profile was open: with none, there is nothing to stop, and
+    /// its Watch revocation would clear the downloads a relaunch is meant to keep.
+    public func lock() { lock(deactivatingWhenClosed: false) }
+
+    /// An Apple Account change deactivates even with no profile open, so access still held for a
+    /// closed profile, such as a Watch grant kept across a background relaunch, ends with the account.
+    func lock(deactivatingWhenClosed: Bool) {
+        let wasOpen = activeID != nil || sessionID != nil
         flushSave()
         authenticationGeneration = UUID()
         unreadableOpening = nil
         activeID = nil
         sessionID = nil
         state = ProfileState()
-        onDeactivate?()
+        if wasOpen || deactivatingWhenClosed { onDeactivate?() }
     }
 
     // MARK: Editing
@@ -290,8 +300,10 @@ public final class ProfileStore {
     func retireFamilyProfiles(_ ids: Set<String>) -> Bool {
         guard isProfileIndexReadable else { return false }
         let remaining = profiles.filter { !ids.contains($0.id) }
+        let removesAny = remaining.count != profiles.count
         if let activeID, ids.contains(activeID) { lock() }
         profiles = remaining
+        if removesAny { onProfilesRemoved?() }
         let retirementURL = storageDirectory.appending(path: "family-retirement.json")
         do {
             // A separate durable exclusion also protects relaunch if replacing profiles.json fails.
@@ -339,6 +351,7 @@ public final class ProfileStore {
         guard saveProfiles(remaining) else { return false }
         if activeID == profile.id { lock() }
         profiles = remaining
+        onProfilesRemoved?()
         do { try persistence.retire(id: profile.id) }
         catch {
             persistenceFailure = PersistenceFailure(

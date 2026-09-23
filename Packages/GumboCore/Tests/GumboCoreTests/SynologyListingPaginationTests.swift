@@ -29,7 +29,7 @@ private nonisolated func listingDrive(_ transport: ListingPageTransport) -> Syno
         baseURL: URL(string: "https://pagination-test.invalid")!, sid: "fixture",
         apis: ["SYNO.FileStation.List": SynologyAPIDescriptor(path: "entry.cgi", minVersion: 1, maxVersion: 2)]
     )
-    return SynologyDrive(session: session, displayName: "Pagination fixture") { url in
+    return SynologyDrive(session: session, displayName: "Pagination fixture", renewal: nil) { url in
         try await transport.request(url)
     }
 }

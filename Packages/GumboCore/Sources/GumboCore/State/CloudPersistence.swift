@@ -11,6 +11,9 @@ struct CloudAccountState: Codable {
         var remoteStateDigests: [String: String]? = nil
         /// Kept after acknowledgement too: delayed pages must never resurrect a deleted profile.
         var deletions: [String: Set<String>] = [:]
+        /// What this device last sent in the Family record (or found iCloud already holding), recorded
+        /// only once CloudKit has accepted it, so a failed upload is sent again.
+        var familyUpload: FamilyRecordUpload? = nil
     }
 
     var account: String
@@ -85,6 +88,25 @@ struct CloudPersistence {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(state).write(to: file(account: state.account), options: .atomic)
     }
+
+    /// The account last verified on this device, until an account change revokes what it granted. A
+    /// launch that first verifies another one learns that it was replaced while Gumbo was not running.
+    func verifiedAccount() -> String? {
+        guard let data = try? Data(contentsOf: verifiedAccountFile) else { return nil }
+        return try? JSONDecoder().decode(String.self, from: data)
+    }
+
+    func saveVerifiedAccount(_ account: String?) throws {
+        guard let account else {
+            guard FileManager.default.fileExists(atPath: verifiedAccountFile.path) else { return }
+            try FileManager.default.removeItem(at: verifiedAccountFile)
+            return
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(account).write(to: verifiedAccountFile, options: .atomic)
+    }
+
+    private var verifiedAccountFile: URL { directory.appending(path: "verified-account.json") }
 
     private func file(account: String) -> URL {
         let key = SHA256.hash(data: Data(account.utf8)).map { String(format: "%02x", $0) }.joined()

@@ -56,8 +56,11 @@ public nonisolated struct FamilyInfo: Codable, Sendable, Equatable {
     /// The server's URL as the owner reaches it: a DDNS name, or an address on the home network.
     public var address: String? = nil
     public var provider: ProviderConfiguration? = nil
+    /// Local only, never uploaded: changes whenever this device saves new family credentials, so
+    /// sync sends them after a change made here rather than over another device's newer copy.
+    public var credentialsRevision: String? = nil
 
-    public init(name: String, serverName: String, serverAccount: String, musicPath: String?, updatedAt: Date, familyAccount: String? = nil, familyPassword: String? = nil, address: String? = nil, provider: ProviderConfiguration? = nil) {
+    public init(name: String, serverName: String, serverAccount: String, musicPath: String?, updatedAt: Date, familyAccount: String? = nil, familyPassword: String? = nil, address: String? = nil, provider: ProviderConfiguration? = nil, credentialsRevision: String? = nil) {
         self.name = name
         self.serverName = serverName
         self.serverAccount = serverAccount
@@ -67,6 +70,7 @@ public nonisolated struct FamilyInfo: Codable, Sendable, Equatable {
         self.familyPassword = familyPassword
         self.address = provider?.kind == .synology || provider == nil ? address : nil
         self.provider = provider
+        self.credentialsRevision = credentialsRevision
     }
 
     /// Whether members have a way to reach the server at all.
@@ -77,11 +81,10 @@ public nonisolated struct FamilyInfo: Codable, Sendable, Equatable {
         return ServerConnection(name: serverName, baseURL: endpoint, account: account, musicPath: musicPath, provider: provider)
     }
 
-    /// The same server details, whatever the timestamps say.
-    public func describesSameServer(as other: FamilyInfo) -> Bool {
+    /// The same server details, whatever the timestamps and credentials say.
+    public func hasSameServerDetails(as other: FamilyInfo) -> Bool {
         name == other.name && provider == other.provider && address == other.address && serverName == other.serverName
             && serverAccount == other.serverAccount && musicPath == other.musicPath
-            && familyAccount == other.familyAccount && familyPassword == other.familyPassword
     }
 }
 

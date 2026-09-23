@@ -58,6 +58,8 @@ public nonisolated struct WidgetSnapshot: Codable, Sendable {
     /// The album of the song playing or paused right now.
     public var nowPlaying: Album?
     public var trackTitle: String?
+    /// Playback was requested, including while the song still loads, so the cover's Play/Pause
+    /// matches what tapping it does in the app.
     public var isPlaying: Bool
     /// Most recent first, up to eight each.
     public var recentlyPlayed: [Album]

@@ -55,7 +55,7 @@ struct GumboTVApp: App {
             let directory = FileManager.default.temporaryDirectory.appending(path: "GumboTVPreview-" + UUID().uuidString)
             let defaults = UserDefaults(suiteName: "Gumbo.TVPreview." + UUID().uuidString)!
             profiles = ProfileStore(directory: directory.appending(path: "profiles"), defaults: defaults)
-            cloud = CloudSync(services: CloudServices(identity: { nil }, sharedZones: { [] }, createZone: { _ in },
+            cloud = CloudSync(services: CloudServices(identity: { .noAccount }, sharedZones: { [] }, createZone: { _ in },
                 subscribe: {}, changes: { _, _ in CloudChangePage(records: []) }, modify: { _, _, _ in CloudModifyResult() }),
                 persistence: CloudPersistence(directory: directory.appending(path: "cloud")))
             model = AppModel(library: library, defaults: defaults, services: ConnectionServices(), restoresSession: false)
@@ -101,6 +101,8 @@ struct GumboTVApp: App {
         }
 
         player.mediaSourceProvider = { [library, downloads] track in downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track) }
+        // A stream refused because the NAS ended its session plays again once the session is renewed.
+        player.streamFailureRecovery = { [model] url in await model.recoverStream(from: url) }
         player.artworkProvider = { [library] album in
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }

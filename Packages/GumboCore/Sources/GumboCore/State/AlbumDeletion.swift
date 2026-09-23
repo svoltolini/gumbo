@@ -56,6 +56,9 @@ nonisolated enum AlbumDeletionPaths {
         let rootParts = root.split(separator: "/")
         guard !parts.contains("."), !parts.contains(".."), !rootParts.contains("."), !rootParts.contains(".."),
               parts.count > rootParts.count, parts.starts(with: rootParts) else { return false }
+        // A catalogue saved before hidden files were ignored can still list "._01 - Song.flac". It is
+        // not a song: never rewrite, review or delete it, and never count it with an album's files.
+        guard let name = parts.last, !RemoteDriveSupport.isHidden(String(name)) else { return false }
         return RemoteDriveSupport.audioExtensions.contains((path as NSString).pathExtension.lowercased())
     }
 }

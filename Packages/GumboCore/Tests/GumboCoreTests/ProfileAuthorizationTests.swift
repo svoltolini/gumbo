@@ -149,6 +149,47 @@ private final class ProfileFixture {
     #expect(store.libraryState(for: "test-drive").favourites == ["saved-song"])
 }
 
+/// Deactivation revokes the Watch grant, so it must mean a profile was open (#219).
+@Test @MainActor func lockingWithNoProfileOpenDeactivatesNothing() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    var deactivations = 0
+    store.onDeactivate = { deactivations += 1 }
+    store.lock()
+    #expect(deactivations == 0)
+    _ = try fixture.owner()
+    store.lock()
+    #expect(deactivations == 1)
+    store.lock()
+    #expect(deactivations == 1)
+    #expect(store.isLocked)
+}
+
+/// A profile can leave while closed, deleted on another device or retired from the family. What it
+/// still held, such as the Watch grant kept across a background relaunch, must end with it (#219).
+@Test @MainActor func removingAClosedProfileIsReportedWithoutDeactivating() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    _ = try fixture.owner()
+    let deleted = try fixture.member()
+    let retired = try fixture.member()
+    store.lock()
+    var removals = 0
+    var deactivations = 0
+    store.onProfilesRemoved = { removals += 1 }
+    store.onDeactivate = { deactivations += 1 }
+    #expect(store.removeRemote(id: deleted.id))
+    #expect(removals == 1)
+    #expect(store.retireFamilyProfiles([retired.id]))
+    #expect(removals == 2)
+    #expect(store.retireFamilyProfiles([retired.id]))
+    #expect(removals == 2)
+    #expect(deactivations == 0)
+    #expect(!store.profiles.contains { $0.id == deleted.id || $0.id == retired.id })
+}
+
 @Test @MainActor func aRemotePINChangeRequiresANewOpeningAndResetsBiometricEnrollment() throws {
     let fixture = try ProfileFixture()
     defer { fixture.cleanUp() }

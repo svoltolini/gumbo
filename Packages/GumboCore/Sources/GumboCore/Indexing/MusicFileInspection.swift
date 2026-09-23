@@ -34,8 +34,10 @@ public nonisolated struct MusicFileDeletionReport: Sendable {
 
 /// Conservative structural checks. A failed request or unfamiliar codec is never proof of damage.
 public nonisolated enum MusicFileInspector {
+    /// Hidden "._" companions left in an older catalogue never have a duration, but they are not
+    /// songs, let alone damaged ones; the next library update removes them instead.
     public static func needsInspection(_ track: Track) -> Bool {
-        track.path != nil && (track.duration <= 0 || (!track.isEnriched && (track.enrichAttempts ?? 0) >= 3))
+        track.path != nil && !track.isHiddenFile && (track.duration <= 0 || (!track.isEnriched && (track.enrichAttempts ?? 0) >= 3))
     }
 
     @concurrent public static func inspect(_ track: Track, drive: any RemoteFileDrive, now: Date = .now) async -> MusicFileInspection {

@@ -191,6 +191,36 @@ public nonisolated enum CoverStore {
         }
     }
 
+    // MARK: Finder metadata saved as artwork
+
+    /// How every AppleDouble file ("._Cover.jpg" beside "Cover.jpg") starts; no picture format does.
+    private static let appleDoubleSignature = Data([0x00, 0x05, 0x16, 0x07])
+
+    /// Scans before hidden files were ignored could save a "._" twin as an album's cover or a song's
+    /// picture, under whichever album it reached. Finds those by their content, removes them and
+    /// returns how many album covers went; nothing is written when there are none.
+    static func removeFinderMetadata() -> Int {
+        func finderMetadata(in folder: URL) -> [URL] {
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            return files.filter { url in
+                guard url.pathExtension == "img", let handle = try? FileHandle(forReadingFrom: url) else { return false }
+                defer { try? handle.close() }
+                return (try? handle.read(upToCount: appleDoubleSignature.count)) == appleDoubleSignature
+            }
+        }
+        let covers = finderMetadata(in: directory)
+        let songs = finderMetadata(in: trackDirectory)
+        guard !covers.isEmpty || !songs.isEmpty else { return 0 }
+        mutate("remove artwork read from hidden files") {
+            for url in covers {
+                try removeIfPresent(url)
+                try removeIfPresent(url.deletingPathExtension().appendingPathExtension("palette"))
+            }
+            for url in songs { try removeIfPresent(url) }
+        }
+        return covers.count
+    }
+
     /// Album ids that already have a cover on disk.
     public static func coveredAlbumIDs(among albums: [Album]) -> Set<String> {
         Set(albums.filter { hasCover(for: $0.id) }.map(\.id))

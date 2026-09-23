@@ -124,14 +124,14 @@ struct MacPlayerBar: View {
             .help("Previous")
             .accessibilityLabel("Previous Song")
             Button { player.togglePlayPause() } label: {
-                PlayPauseGlyph(isPlaying: player.isPlaying, size: 24)
+                PlayPauseGlyph(isPlaying: player.isPlaybackRequested, size: 24)
                     .frame(width: 36, height: 36)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(!player.hasTrack)
-            .help(player.isPlaying ? "Pause" : "Play")
-            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            .help(player.isPlaybackRequested ? "Pause" : "Play")
+            .accessibilityLabel(player.isPlaybackRequested ? "Pause" : "Play")
             Button { player.next() } label: {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 17, weight: .semibold))

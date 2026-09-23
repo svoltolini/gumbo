@@ -15,7 +15,7 @@ struct Permissions {
         isSelf = active?.userRecordName != nil && active?.userRecordName == cloud.currentUserRecordName
     }
 
-    /// Music folder, reconnect, sign out.
+    /// The music folder. Reconnecting is open to everyone: it only restores the saved sign-in.
     var canManageServer: Bool { isHost }
     /// Invite people, stop sharing.
     var canManageFamily: Bool { isHost }

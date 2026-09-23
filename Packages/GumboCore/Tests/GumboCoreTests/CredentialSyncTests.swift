@@ -49,6 +49,7 @@ import Testing
 
     func makeModel(restore: Bool = false) -> AppModel {
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.supportsCredentialSync = { self.supported }
         services.syncedPassword = {
             self.cloudReads.append($0)

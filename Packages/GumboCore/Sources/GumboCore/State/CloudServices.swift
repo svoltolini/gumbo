@@ -25,9 +25,20 @@ struct CloudModifyResult {
     var deleted: [CKRecord.ID: Result<Void, any Error>] = [:]
 }
 
+/// The iCloud account CloudKit reports for this device. Only an answer that names no account is
+/// evidence of a sign-out; an undetermined status says nothing about which account is signed in.
+enum CloudIdentity: Equatable {
+    /// Signed in; the user record name identifies the Apple Account.
+    case available(String)
+    /// Signed out, or iCloud is restricted on this device.
+    case noAccount
+    /// Temporarily unavailable or not determined; ask again later.
+    case unavailable
+}
+
 /// Tests supply ordinary in-memory pages; they never instantiate a CloudKit container or make requests.
 struct CloudServices {
-    var identity: () async throws -> String?
+    var identity: () async throws -> CloudIdentity
     var sharedZones: () async throws -> [String]
     var createZone: (CloudScope) async throws -> Void
     var subscribe: () async throws -> Void
@@ -44,8 +55,12 @@ struct CloudServices {
         }
         return CloudServices(
             identity: {
-                guard try await container.accountStatus() == .available else { return nil }
-                return try await container.userRecordID().recordName
+                switch try await container.accountStatus() {
+                case .available: return .available(try await container.userRecordID().recordName)
+                case .noAccount, .restricted: return .noAccount
+                case .couldNotDetermine, .temporarilyUnavailable: return .unavailable
+                @unknown default: return .unavailable
+                }
             },
             sharedZones: {
                 try await container.sharedCloudDatabase.allRecordZones()

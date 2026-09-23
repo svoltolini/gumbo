@@ -2,40 +2,111 @@ import Foundation
 
 /// File Station on a DiskStation, reached through a signed-in DSM session.
 public nonisolated final class SynologyDrive: RemoteDrive {
+    /// Signs in again after DSM ends `expired` and returns the new session. Throws when that needs
+    /// the person, such as a one-time code or a changed password, or when the server can't answer.
+    /// `CancellationError` means the app doesn't want this session renewed now, for example while
+    /// its connection changes: the request fails with DSM's refusal, and since no sign-in was
+    /// refused, a later request may ask again.
+    public typealias SessionRenewal = @Sendable (_ expired: DSMSession) async throws -> DSMSession
+
     // Protocol support is separate from NAS ACLs: File Station enforces the signed-in account's
     // rights for each operation. It offers no atomic conditional replacement primitive.
     public var capabilities: RemoteCapabilities { [.read, .ranges, .backgroundDownload, .upload, .rename, .delete, .replace, .manageAccounts] }
-    public let session: DSMSession
+    /// The session requests are signed with now. Renewal replaces it without replacing the drive.
+    public var session: DSMSession { state.current }
     public let displayName: String
+    public let id: String
+    private let state: DSMSessionState
+    private let renewal: SessionRenewal?
     private let urlSession: URLSession
     private let listingRequest: @Sendable (URL) async throws -> SynologyFileList
 
-    public convenience init(session: DSMSession, displayName: String) {
-        self.init(session: session, displayName: displayName, listingRequest: { url in
+    public convenience init(session: DSMSession, displayName: String, renewal: SessionRenewal? = nil) {
+        self.init(session: session, displayName: displayName, renewal: renewal, listingRequest: { url in
             try await SynologyClient.request(url, as: SynologyFileList.self, api: "SYNO.FileStation.List")
         })
     }
 
-    /// The listing transport can be replaced in tests without sending requests to a NAS.
-    init(session: DSMSession, displayName: String,
+    /// The listing and file transports, and the spacing of sign-ins, can be replaced in tests
+    /// without sending requests to a NAS.
+    init(session: DSMSession, displayName: String, renewal: SessionRenewal?,
+         configuration: URLSessionConfiguration = .default, renewalInterval: Duration = .seconds(30),
          listingRequest: @escaping @Sendable (URL) async throws -> SynologyFileList) {
-        self.session = session
+        state = DSMSessionState(session, renewalInterval: renewalInterval)
+        // Fixed for the drive's life: a renewed session belongs to the same server and account.
+        id = NASSource.identifier(baseURL: session.baseURL, account: session.account ?? "")
         self.displayName = displayName
+        self.renewal = renewal
         self.listingRequest = listingRequest
-        let configuration = URLSessionConfiguration.default
+        let configuration = configuration.copy() as! URLSessionConfiguration
         configuration.timeoutIntervalForRequest = 40
         configuration.httpMaximumConnectionsPerHost = 6
         urlSession = URLSession(configuration: configuration, delegate: NASRedirectDelegate.shared, delegateQueue: nil)
     }
 
-    public var id: String { NASSource.identifier(baseURL: session.baseURL, account: session.account ?? "") }
+    /// How long ago DSM last answered one of this drive's requests.
+    public var timeSinceLastResponse: Duration { state.timeSinceLastResponse }
+
+    /// Runs a request with the current session. When DSM answers that the session has ended, the
+    /// drive signs in again, once for all the requests that noticed together, and repeats the
+    /// request with the new session. A second refusal is reported as it is, and so is the ended
+    /// session when DSM turns the sign-in down.
+    private func withSession<T>(_ request: (DSMSession) async throws -> T) async throws -> T {
+        let session = state.current
+        do {
+            let value = try await request(session)
+            state.recordResponse()
+            return value
+        } catch let error as SynologyError where error.isSessionExpired {
+            guard let renewal else { throw error }
+            try Task.checkCancellation()
+            diagnostics("DSM refused the session (\(error.localizedDescription)); signing in again")
+            let renewed: DSMSession
+            do {
+                renewed = try await state.renewed(after: session, cause: error, using: renewal)
+            } catch is CancellationError {
+                // The app declined to renew for now; the request itself wasn't cancelled.
+                try Task.checkCancellation()
+                throw error
+            } catch let refusal as SynologyError where refusal.refusesSignIn {
+                // Why DSM refused is for the sign-in to show. As this request's own error, a password
+                // to change (Auth 408) would read as a missing folder, a blocked address (407) as a
+                // read-only file.
+                throw error
+            }
+            let value = try await request(renewed)
+            state.recordResponse()
+            return value
+        }
+    }
+
+    /// Lists one entry of `folder`, about the cheapest request that proves the session still works,
+    /// renewing an ended session on the way. A player fetches a song's stream address on its own,
+    /// where a refused session only reads as a broken track, so this runs first after a pause.
+    public func checkSession(folder: String) async throws {
+        let _: SynologyFileList = try await withSession { session in
+            guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list", params: [
+                "folder_path": .string(folder), "offset": .int(0), "limit": .int(1),
+            ]) else { throw RemoteDriveError.notSignedIn }
+            return try await listingRequest(url)
+        }
+    }
+
+    /// The session one of this drive's addresses was made with, such as a stream URL a player
+    /// holds, or nil for any other address. It differs from `session` once that has been renewed.
+    public func sessionID(of url: URL) -> String? {
+        guard let origin = NASOrigin(url: url), origin == NASOrigin(url: session.baseURL) else { return nil }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "_sid" }?.value
+    }
 
     public func roots() async throws -> [RemoteEntry] {
-        guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list_share", params: [
-            "offset": .int(0), "limit": .int(500), "sort_by": .string("name"), "sort_direction": .string("asc"),
-            "onlywritable": .bool(false),
-        ]) else { throw RemoteDriveError.notSignedIn }
-        return try await SynologyClient.request(url, as: SynologyShareList.self, api: "SYNO.FileStation.List").shares.map(\.entry)
+        try await withSession { session in
+            guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list_share", params: [
+                "offset": .int(0), "limit": .int(500), "sort_by": .string("name"), "sort_direction": .string("asc"),
+                "onlywritable": .bool(false),
+            ]) else { throw RemoteDriveError.notSignedIn }
+            return try await SynologyClient.request(url, as: SynologyShareList.self, api: "SYNO.FileStation.List").shares.map(\.entry)
+        }
     }
 
     public func list(_ path: String) async throws -> [RemoteEntry] {
@@ -43,7 +114,7 @@ public nonisolated final class SynologyDrive: RemoteDrive {
             return try await list(path, minimal: false, rawPath: false)
         } catch {
             try Task.checkCancellation()
-            guard !(error is SynologyListingError), !(error is CancellationError) else { throw error }
+            guard Self.mayRetryListing(after: error) else { throw error }
             diagnostics("List failed for \(path): \(error.localizedDescription). Retrying with minimal parameters.")
             do {
                 let entries = try await list(path, minimal: true, rawPath: false)
@@ -51,7 +122,7 @@ public nonisolated final class SynologyDrive: RemoteDrive {
                 return entries
             } catch {
                 try Task.checkCancellation()
-                guard !(error is SynologyListingError), !(error is CancellationError) else { throw error }
+                guard Self.mayRetryListing(after: error) else { throw error }
                 do {
                     let entries = try await list(path, minimal: true, rawPath: true)
                     diagnostics("Unquoted listing worked for \(path): \(entries.count) entries.")
@@ -62,6 +133,15 @@ public nonisolated final class SynologyDrive: RemoteDrive {
                 }
             }
         }
+    }
+
+    /// Weaker parameters help a server that rejects some of them. They can't mend an incomplete
+    /// listing, a cancelled scan, or a session that ended and could not be renewed.
+    private static func mayRetryListing(after error: any Error) -> Bool {
+        if error is SynologyListingError || error is CancellationError { return false }
+        guard let error = error as? SynologyError else { return true }
+        if case .twoFactorRequired = error { return false }
+        return !error.isSessionExpired && !error.requiresNewCredentials
     }
 
     private func list(_ path: String, minimal: Bool, rawPath: Bool) async throws -> [RemoteEntry] {
@@ -81,10 +161,14 @@ public nonisolated final class SynologyDrive: RemoteDrive {
                 params["filetype"] = .string("all")
                 params["additional"] = .strings(["size", "time"])
             }
-            guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list", params: params) else {
-                throw RemoteDriveError.notSignedIn
+            // A renewed session repeats only this page; the pages already read stay valid.
+            let pageParams = params
+            let page: SynologyFileList = try await withSession { session in
+                guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "list", params: pageParams) else {
+                    throw RemoteDriveError.notSignedIn
+                }
+                return try await listingRequest(url)
             }
-            let page = try await listingRequest(url)
             try Task.checkCancellation()
             // A partial listing must never become evidence that previously indexed files vanished.
             // Detect changed/ignored pagination rather than publishing an incomplete catalogue.
@@ -118,54 +202,80 @@ public nonisolated final class SynologyDrive: RemoteDrive {
     @concurrent public func read(_ path: String, range: Range<Int64>) async throws -> Data {
         guard range.lowerBound >= 0, !range.isEmpty,
               let wanted = Int(exactly: range.upperBound - range.lowerBound) else { throw RemoteDriveError.tooLarge }
-        guard let url = streamURL(for: path) else { throw RemoteDriveError.notSignedIn }
-        var request = URLRequest(url: url)
-        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
-        let (bytes, response) = try await urlSession.bytes(for: request)
-        defer { bytes.task.cancel() }
-        guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
-        guard http.statusCode == 206 || http.statusCode == 200 else { throw RemoteDriveError.http(http.statusCode) }
-        // Read only the window we asked for, even if the server ignored the Range header.
-        return try await withTaskCancellationHandler {
-            var remainingSkip = http.statusCode == 200 ? range.lowerBound : 0
-            var data = Data()
-            data.reserveCapacity(min(wanted, 64 * 1024))
-            for try await byte in bytes {
+        return try await withSession { session in
+            guard let url = Self.streamURL(for: path, on: session) else { throw RemoteDriveError.notSignedIn }
+            var request = URLRequest(url: url)
+            request.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
+            let (bytes, response) = try await urlSession.bytes(for: request)
+            defer { bytes.task.cancel() }
+            guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
+            guard http.statusCode == 206 || http.statusCode == 200 else { throw RemoteDriveError.http(http.statusCode) }
+            try await Self.rejectRefusal(http, bytes)
+            // Read only the window we asked for, even if the server ignored the Range header.
+            return try await withTaskCancellationHandler {
+                var remainingSkip = http.statusCode == 200 ? range.lowerBound : 0
+                var data = Data()
+                data.reserveCapacity(min(wanted, 64 * 1024))
+                for try await byte in bytes {
+                    try Task.checkCancellation()
+                    if remainingSkip > 0 { remainingSkip -= 1 }
+                    else { data.append(byte) }
+                    if data.count == wanted { break }
+                }
                 try Task.checkCancellation()
-                if remainingSkip > 0 { remainingSkip -= 1 }
-                else { data.append(byte) }
-                if data.count == wanted { break }
+                return data
+            } onCancel: {
+                bytes.task.cancel()
             }
-            try Task.checkCancellation()
-            return data
-        } onCancel: {
-            bytes.task.cancel()
         }
     }
 
     @concurrent public func download(_ path: String, maxBytes: Int64) async throws -> Data {
         guard maxBytes >= 0 else { throw RemoteDriveError.tooLarge }
-        guard let url = streamURL(for: path) else { throw RemoteDriveError.notSignedIn }
-        let (bytes, response) = try await urlSession.bytes(from: url)
-        defer { bytes.task.cancel() }
-        guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
-        guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
-        return try await withTaskCancellationHandler {
-            try await BoundedBytes.collect(bytes, maximum: maxBytes, expectedLength: response.expectedContentLength)
-        } onCancel: {
-            bytes.task.cancel()
+        return try await withSession { session in
+            guard let url = Self.streamURL(for: path, on: session) else { throw RemoteDriveError.notSignedIn }
+            let (bytes, response) = try await urlSession.bytes(from: url)
+            defer { bytes.task.cancel() }
+            guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
+            guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
+            try await Self.rejectRefusal(http, bytes)
+            return try await withTaskCancellationHandler {
+                try await BoundedBytes.collect(bytes, maximum: maxBytes, expectedLength: response.expectedContentLength)
+            } onCancel: {
+                bytes.task.cancel()
+            }
         }
     }
 
     /// File Station's download endpoint with the file name appended, the form DSM's own UI uses,
-    /// so players and caches see a sensible extension.
+    /// so players and caches see a sensible extension. It carries the current session, so an
+    /// address made after a renewal plays where an older one was refused.
     public func streamURL(for path: String) -> URL? {
+        Self.streamURL(for: path, on: session)
+    }
+
+    private static func streamURL(for path: String, on session: DSMSession) -> URL? {
         guard let url = session.url(api: "SYNO.FileStation.Download", version: 2, method: "download", params: [
             "path": .strings([path]), "mode": .string("open"),
         ]), var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         let name = path.split(separator: "/").last.map(String.init) ?? "file"
         components.path += "/" + name
         return components.url
+    }
+
+    /// DSM answers a download it refuses, for example on an ended session, with HTTP 200 and a
+    /// short JSON error in place of the file. Songs and covers are never served as text, so such an
+    /// answer is read as DSM's error instead of being taken for the file's bytes.
+    private static func rejectRefusal(_ response: HTTPURLResponse, _ bytes: URLSession.AsyncBytes) async throws {
+        let type = response.mimeType?.lowercased() ?? ""
+        guard type.hasPrefix("text/") || type.contains("json") || type.contains("xml") else { return }
+        var body = Data()
+        for try await byte in bytes {
+            body.append(byte)
+            if body.count >= 64 * 1024 { break }
+        }
+        _ = try SynologyClient.decode(body, as: SynologyEmpty.self, api: "SYNO.FileStation.Download")
+        throw ProviderError.invalidResponse
     }
 }
 
@@ -177,50 +287,122 @@ nonisolated enum SynologyListingError: LocalizedError, Equatable {
     }
 }
 
+/// The session a drive signs its requests with. Renewal replaces it in place, so later requests
+/// and stream addresses carry the new one. Requests that find the same session ended share one
+/// sign-in, and sign-ins are spaced out, because DSM counts repeated ones towards blocking the device.
+private nonisolated final class DSMSessionState: @unchecked Sendable {
+    private nonisolated enum Step {
+        case retry(DSMSession)
+        case wait(Task<DSMSession, any Error>)
+        case fail(any Error)
+    }
+
+    private let lock = NSLock()
+    private let renewalInterval: Duration
+    private var session: DSMSession
+    private var renewal: Task<DSMSession, any Error>?
+    private var lastRenewal: (at: ContinuousClock.Instant, failure: (any Error)?)?
+    private var lastResponse = ContinuousClock.now
+
+    init(_ session: DSMSession, renewalInterval: Duration) {
+        self.session = session
+        self.renewalInterval = renewalInterval
+    }
+
+    var current: DSMSession { lock.withLock { session } }
+    var timeSinceLastResponse: Duration { lock.withLock { ContinuousClock.now - lastResponse } }
+    func recordResponse() { lock.withLock { lastResponse = .now } }
+
+    /// The session to repeat a request with once DSM has refused `expired`: the one another request
+    /// already renewed it to, or the result of a sign-in shared by every request waiting for it.
+    /// Within the interval after a renewal, a session refused again is not renewed again.
+    func renewed(after expired: DSMSession, cause: any Error, using renew: @escaping SynologyDrive.SessionRenewal) async throws -> DSMSession {
+        let step: Step = lock.withLock {
+            if session.sid != expired.sid { return .retry(session) }
+            if let renewal { return .wait(renewal) }
+            if let lastRenewal, ContinuousClock.now < lastRenewal.at + renewalInterval {
+                return .fail(lastRenewal.failure ?? cause)
+            }
+            let task = Task { try await renew(expired) }
+            renewal = task
+            return .wait(task)
+        }
+        switch step {
+        case .retry(let current):
+            return current
+        case .fail(let error):
+            throw error
+        case .wait(let task):
+            let result = await task.result
+            return try lock.withLock {
+                // The first request back installs the outcome; the others share it.
+                if renewal == task {
+                    renewal = nil
+                    switch result {
+                    case .success(let fresh):
+                        session = fresh
+                        lastResponse = .now
+                        lastRenewal = (.now, nil)
+                    case .failure(let error):
+                        // A renewal the app turned down reached no server, so it doesn't hold off the next one.
+                        if !(error is CancellationError) { lastRenewal = (.now, error) }
+                    }
+                }
+                return try result.get()
+            }
+        }
+    }
+}
+
 // MARK: - Writing
 
 extension SynologyDrive: WritableRemoteDrive {
     public func info(_ path: String) async throws -> RemoteEntry {
-        guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "getinfo", params: [
-            "path": .strings([path]), "additional": .strings(["size", "time"]),
-        ]) else { throw RemoteDriveError.notSignedIn }
-        let list = try await SynologyClient.request(url, as: SynologyFileInfoList.self, api: "SYNO.FileStation.List")
-        guard let file = list.files.first else { throw RemoteWriteError.missing }
-        if let code = file.code { throw SynologyError.api(code: code, api: "SYNO.FileStation.List") }
-        return file.entry
+        try await withSession { session in
+            guard let url = session.url(api: "SYNO.FileStation.List", version: 2, method: "getinfo", params: [
+                "path": .strings([path]), "additional": .strings(["size", "time"]),
+            ]) else { throw RemoteDriveError.notSignedIn }
+            let list = try await SynologyClient.request(url, as: SynologyFileInfoList.self, api: "SYNO.FileStation.List")
+            guard let file = list.files.first else { throw RemoteWriteError.missing }
+            if let code = file.code { throw SynologyError.api(code: code, api: "SYNO.FileStation.List") }
+            return file.entry
+        }
     }
 
     /// Streams the file straight to disk, so a whole song is never held in memory, and stops at `maxBytes`.
     @concurrent public func downloadFile(_ path: String, to destination: URL, maxBytes: Int64) async throws {
         guard maxBytes >= 0 else { throw RemoteDriveError.tooLarge }
-        guard let url = streamURL(for: path) else { throw RemoteDriveError.notSignedIn }
-        let (bytes, response) = try await urlSession.bytes(from: url)
-        defer { bytes.task.cancel() }
-        guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
-        guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
-        guard response.expectedContentLength <= maxBytes else { throw RemoteDriveError.tooLarge }
-        _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: destination)
-        defer { try? handle.close() }
-        try await withTaskCancellationHandler {
-            var buffer = Data()
-            buffer.reserveCapacity(256 * 1024)
-            var total: Int64 = 0
-            for try await byte in bytes {
-                total += 1
-                guard total <= maxBytes else { throw RemoteDriveError.tooLarge }
-                buffer.append(byte)
-                if buffer.count >= 256 * 1024 {
-                    try Task.checkCancellation()
-                    try handle.write(contentsOf: buffer)
-                    buffer.removeAll(keepingCapacity: true)
+        try await withSession { session in
+            guard let url = Self.streamURL(for: path, on: session) else { throw RemoteDriveError.notSignedIn }
+            let (bytes, response) = try await urlSession.bytes(from: url)
+            defer { bytes.task.cancel() }
+            guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
+            guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
+            try await Self.rejectRefusal(http, bytes)
+            guard response.expectedContentLength <= maxBytes else { throw RemoteDriveError.tooLarge }
+            _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
+            let handle = try FileHandle(forWritingTo: destination)
+            defer { try? handle.close() }
+            try await withTaskCancellationHandler {
+                var buffer = Data()
+                buffer.reserveCapacity(256 * 1024)
+                var total: Int64 = 0
+                for try await byte in bytes {
+                    total += 1
+                    guard total <= maxBytes else { throw RemoteDriveError.tooLarge }
+                    buffer.append(byte)
+                    if buffer.count >= 256 * 1024 {
+                        try Task.checkCancellation()
+                        try handle.write(contentsOf: buffer)
+                        buffer.removeAll(keepingCapacity: true)
+                    }
                 }
+                try Task.checkCancellation()
+                if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
+                try handle.synchronize()
+            } onCancel: {
+                bytes.task.cancel()
             }
-            try Task.checkCancellation()
-            if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
-            try handle.synchronize()
-        } onCancel: {
-            bytes.task.cancel()
         }
     }
 
@@ -228,51 +410,57 @@ extension SynologyDrive: WritableRemoteDrive {
     /// its parameters as form fields, and the file as the last part. The form is staged on disk so
     /// the song streams from there.
     @concurrent public func upload(_ file: URL, toFolder folder: String, name: String, modified: Date?) async throws {
-        guard let (url, call) = session.form(api: "SYNO.FileStation.Upload", version: 2, method: "upload") else {
-            throw RemoteWriteError.unsupported
-        }
-        var fields = ["api", "version", "method"].compactMap { key in call[key].map { (key, $0) } }
-        fields += [("path", folder), ("create_parents", "false"), ("overwrite", "true")]
-        if let modified { fields.append(("mtime", String(Int64(modified.timeIntervalSince1970 * 1000)))) }
-        let boundary = "gumbo-" + UUID().uuidString
-        let body = FileManager.default.temporaryDirectory.appending(path: "gumbo-upload-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: body) }
-        try Self.writeMultipartForm(fields: fields, file: file, fileName: name, boundary: boundary, to: body)
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        if let token = session.token { request.setValue(token, forHTTPHeaderField: "X-SYNO-TOKEN") }
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await urlSession.upload(for: request, fromFile: body)
-        } catch {
-            throw SynologyError.unreachable(error.localizedDescription)
-        }
-        guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
-        guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
-        // Some DSM builds answer with details, others with a bare success; only a refusal or a
-        // skipped file counts as failure.
-        _ = try SynologyClient.decode(data, as: SynologyEmpty.self, api: "SYNO.FileStation.Upload")
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        if let result = try? decoder.decode(SynologyEnvelope<SynologyUploadResult>.self, from: data), result.data?.blSkip == true {
-            throw SynologyError.api(code: 1805, api: "SYNO.FileStation.Upload")
+        try await withSession { session in
+            guard let (url, call) = session.form(api: "SYNO.FileStation.Upload", version: 2, method: "upload") else {
+                throw RemoteWriteError.unsupported
+            }
+            var fields = ["api", "version", "method"].compactMap { key in call[key].map { (key, $0) } }
+            fields += [("path", folder), ("create_parents", "false"), ("overwrite", "true")]
+            if let modified { fields.append(("mtime", String(Int64(modified.timeIntervalSince1970 * 1000)))) }
+            let boundary = "gumbo-" + UUID().uuidString
+            let body = FileManager.default.temporaryDirectory.appending(path: "gumbo-upload-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: body) }
+            try Self.writeMultipartForm(fields: fields, file: file, fileName: name, boundary: boundary, to: body)
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            if let token = session.token { request.setValue(token, forHTTPHeaderField: "X-SYNO-TOKEN") }
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await urlSession.upload(for: request, fromFile: body)
+            } catch {
+                throw SynologyError.unreachable(error.localizedDescription)
+            }
+            guard let http = response as? HTTPURLResponse else { throw RemoteDriveError.http(0) }
+            guard (200..<300).contains(http.statusCode) else { throw RemoteDriveError.http(http.statusCode) }
+            // Some DSM builds answer with details, others with a bare success; only a refusal or a
+            // skipped file counts as failure.
+            _ = try SynologyClient.decode(data, as: SynologyEmpty.self, api: "SYNO.FileStation.Upload")
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            if let result = try? decoder.decode(SynologyEnvelope<SynologyUploadResult>.self, from: data), result.data?.blSkip == true {
+                throw SynologyError.api(code: 1805, api: "SYNO.FileStation.Upload")
+            }
         }
     }
 
     public func rename(_ path: String, to name: String) async throws {
-        guard let url = session.url(api: "SYNO.FileStation.Rename", version: 2, method: "rename", params: [
-            "path": .strings([path]), "name": .strings([name]),
-        ]) else { throw RemoteWriteError.unsupported }
-        _ = try await SynologyClient.request(url, as: SynologyEmpty.self, api: "SYNO.FileStation.Rename")
+        try await withSession { session in
+            guard let url = session.url(api: "SYNO.FileStation.Rename", version: 2, method: "rename", params: [
+                "path": .strings([path]), "name": .strings([name]),
+            ]) else { throw RemoteWriteError.unsupported }
+            _ = try await SynologyClient.request(url, as: SynologyEmpty.self, api: "SYNO.FileStation.Rename")
+        }
     }
 
     public func delete(_ path: String) async throws {
-        guard let url = session.url(api: "SYNO.FileStation.Delete", version: 2, method: "delete", params: [
-            "path": .strings([path]), "recursive": .bool(false),
-        ]) else { throw RemoteWriteError.unsupported }
-        _ = try await SynologyClient.request(url, as: SynologyEmpty.self, api: "SYNO.FileStation.Delete")
+        try await withSession { session in
+            guard let url = session.url(api: "SYNO.FileStation.Delete", version: 2, method: "delete", params: [
+                "path": .strings([path]), "recursive": .bool(false),
+            ]) else { throw RemoteWriteError.unsupported }
+            _ = try await SynologyClient.request(url, as: SynologyEmpty.self, api: "SYNO.FileStation.Delete")
+        }
     }
 
     /// Writes the multipart body to `destination`: the text fields first, then the file, copied in chunks.

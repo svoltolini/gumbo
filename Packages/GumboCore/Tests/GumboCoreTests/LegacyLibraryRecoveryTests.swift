@@ -25,6 +25,7 @@ private final class LegacyRecoveryFixture {
 
     func makeModel(restore: Bool = false) {
         var services = ConnectionServices()
+        services.observeNetwork = { _ in {} }
         services.login = { url, account, _, _ in
             self.loginCalls += 1
             return DSMSession(baseURL: url, sid: "ordinary-test-session", apis: [:], account: account)

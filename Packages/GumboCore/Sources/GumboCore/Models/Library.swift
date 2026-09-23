@@ -77,6 +77,10 @@ public nonisolated struct Track: Identifiable, Hashable, Codable, Sendable {
         return codec
     }
 
+    /// A hidden file such as a macOS "._" companion. Scans never list one as a song, but a catalogue
+    /// saved before they were ignored keeps its ghosts until the next complete scan drops them.
+    public var isHiddenFile: Bool { path != nil && RemoteDriveSupport.isHidden(fileName) }
+
     public var isLossless: Bool { Self.losslessCodecs.contains(codec) }
 
     public var quality: AudioQuality {

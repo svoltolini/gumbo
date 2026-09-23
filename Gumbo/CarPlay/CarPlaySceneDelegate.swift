@@ -304,9 +304,10 @@ final class CarPlayController {
         let request = UUID()
         playbackRequest = request
         let command = player.beginDeferredPlaybackCommand()
-        // A CarPlay-only launch can show the cached library before server sign-in completes.
+        // A CarPlay-only launch can show the cached library before server sign-in completes, and an
+        // offline library reconnects when CarPlay connects; waiting for the drive also starts that.
         // Downloaded songs already have a local URL and can start immediately.
-        if model.isRestoring, player.streamURLProvider?(tracks[index]) == nil {
+        if !model.isConnected, player.mediaSourceProvider?(tracks[index]) == nil {
             await model.waitForDrive(upTo: .seconds(8))
         }
         guard canUse(context), playbackRequest == request, player.commandRevision == command else { return }
