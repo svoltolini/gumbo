@@ -1329,6 +1329,18 @@ public final class CloudSync {
         return (host == "www.icloud.com" || host == "icloud.com") && url.path().hasPrefix("/share/")
     }
 
+    /// The invitation in text someone typed or pasted: a message may carry the link among other
+    /// words, and a typed link often leaves out `https://`. Nil when there is no invitation.
+    public nonisolated static func invitationURL(in text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidate = trimmed.split(whereSeparator: \.isWhitespace)
+            .first { $0.lowercased().contains("icloud.com/share") }
+            .map(String.init) ?? trimmed
+        if !candidate.contains("://") { candidate = "https://" + candidate }
+        guard let url = URL(string: candidate), ["https", "http"].contains(url.scheme?.lowercased()), isInvitation(url) else { return nil }
+        return url
+    }
+
     private nonisolated static func describeInvitation(_ error: any Error) -> String {
         if let ckError = error as? CKError {
             switch ckError.code {
