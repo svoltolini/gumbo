@@ -3,6 +3,7 @@
 import base64
 import contextlib
 import ctypes
+import errno
 import fcntl
 import hashlib
 import json
@@ -38,6 +39,33 @@ class ServiceError(Exception):
 class Cancelled(ServiceError):
     def __init__(self):
         super().__init__("cancelled", "Stopped before replacing the file.", 409)
+
+
+# Path-resolution failures from O_NOFOLLOW/O_DIRECTORY walks. BSD reports a final symlink as EMLINK.
+PATH_ERRNOS = {errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EMLINK, errno.ENAMETOOLONG}
+PERMISSION_ERRNOS = {errno.EACCES, errno.EPERM}
+SPACE_ERRNOS = {errno.ENOSPC, errno.EDQUOT}
+BUSY_ERRNOS = {errno.EAGAIN, errno.EWOULDBLOCK, errno.EBUSY, errno.ETXTBSY}
+
+
+def storage_error(error):
+    """Map an OSError to an accurate, path-free ServiceError. The caller has already made
+    sure that no replacement or deletion is left unconfirmed (those raise recovery_required)."""
+    number = error.errno
+    if number in PATH_ERRNOS:
+        return ServiceError("unsafe_or_missing_path", "The file or one of its folders is missing, or the path uses a symbolic link.", 409)
+    if number in PERMISSION_ERRNOS:
+        return ServiceError("permission_denied", "The helper isn't allowed to read or change this file or its folder. Run it as the file's owner with write access to the folder.", 409)
+    if number == errno.EROFS:
+        return ServiceError("permission_denied", "The music folder is mounted read-only for the helper.", 409)
+    if number in SPACE_ERRNOS:
+        return ServiceError("insufficient_space", "There is not enough space or quota to stage and recover this file.", 507)
+    if number in BUSY_ERRNOS:
+        return ServiceError("file_busy", "Another program is using this file. Try again when it has finished.", 409)
+    if number == errno.EEXIST:
+        return ServiceError("conflict", "A file already exists where the helper needed to create a temporary or recovery file.", 409)
+    name = errno.errorcode.get(number, "unknown")
+    return ServiceError("io_error", "The storage reported an error (" + name + "). Check the NAS disk, then inspect the file before retrying.", 500)
 
 
 def check_cancel(cancelled):
@@ -407,13 +435,19 @@ class FileEngine:
         parts = relative_parts(path, deletion=deletion)
         descriptor = os.dup(self.root_fd)
         try:
-            for part in parts[:-1]:
-                following = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
-                os.close(descriptor)
-                descriptor = following
-            yield descriptor, parts[-1]
-        except OSError as error:
-            raise ServiceError("unsafe_or_missing_path", "The file is missing, inaccessible or uses a symbolic link.", 409) from error
+            try:
+                for part in parts[:-1]:
+                    following = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+                    os.close(descriptor)
+                    descriptor = following
+            except OSError as error:
+                raise storage_error(error) from error
+            try:
+                yield descriptor, parts[-1]
+            except OSError as error:
+                # Operations report recovery_required themselves once a file may have changed;
+                # any OSError reaching here left the original in place, so report its real cause.
+                raise storage_error(error) from error
         finally:
             os.close(descriptor)
 
@@ -654,13 +688,17 @@ class FileEngine:
                 return result
             except Exception as error:
                 if replaced and not durable and not (isinstance(error, ServiceError) and error.code == "recovery_required"):
-                    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                    if (current.st_dev, current.st_ino) == (stage_identity.st_dev, stage_identity.st_ino):
+                    try:
+                        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                        if (current.st_dev, current.st_ino) != (stage_identity.st_dev, stage_identity.st_ino):
+                            raise ServiceError("recovery_required", "Another writer changed the replacement; the original recovery copy was retained.", 500) from error
                         os.replace(backup_name, name, src_dir_fd=parent, dst_dir_fd=parent)
                         backup, replaced = False, False
                         os.fsync(parent)
-                    else:
-                        raise ServiceError("recovery_required", "Another writer changed the replacement; the original recovery copy was retained.", 500) from error
+                    except OSError as rollback_error:
+                        if replaced:
+                            raise ServiceError("recovery_required", "The file may be updated and could not be rolled back. Its original was kept as " + backup_name + "; check this job before retrying.", 500) from rollback_error
+                        raise ServiceError("recovery_required", "The original file was restored, but the restore could not be made durable. Check this file before retrying.", 500) from rollback_error
                 raise
             finally:
                 with contextlib.suppress(FileNotFoundError):
