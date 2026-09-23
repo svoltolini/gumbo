@@ -392,7 +392,21 @@ private struct MacServerStep: View {
                 .frame(height: servers.isEmpty ? 90 : 150)
                 .disabled(isBusy)
                 .overlay {
-                    if servers.isEmpty {
+                    if servers.isEmpty, model.discovery.isLocalNetworkDenied {
+                        VStack(spacing: 6) {
+                            Text("Allow Local Network access for Gumbo to find servers on this network.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") {
+                                    Link("Open Privacy Settings", destination: url)
+                                }
+                                Button("Search Again") { model.discovery.start() }
+                                    .buttonStyle(.link)
+                            }
+                            .font(.callout)
+                        }
+                        .padding(.horizontal)
+                    } else if servers.isEmpty {
                         HStack(spacing: 8) {
                             if model.discovery.isBrowsing { ProgressView().controlSize(.small) }
                             Text(model.discovery.isBrowsing ? "Looking for servers…" : "No servers found on this network")
@@ -499,6 +513,7 @@ private struct MacSignInStep: View {
                         .accessibilityLabel("NAS account")
                         .accessibilityIdentifier("setup.nasAccount")
                         .onSubmit { focus = .password }
+                        .disabled(model.isSigningIn)
                 }
                 GridRow {
                     label("Password")
@@ -507,6 +522,7 @@ private struct MacSignInStep: View {
                         .frame(width: 280)
                         .focused($focus, equals: .password)
                         .onSubmit { model.needsOTP ? focus = .otp : submit() }
+                        .disabled(model.isSigningIn)
                 }
                 if model.needsOTP {
                     GridRow {
@@ -516,6 +532,7 @@ private struct MacSignInStep: View {
                             .frame(width: 160)
                             .focused($focus, equals: .otp)
                             .onSubmit(submit)
+                            .disabled(model.isSigningIn)
                     }
                 }
                 GridRow {
@@ -622,7 +639,7 @@ private struct MacSignInStep: View {
     }
 
     private func submit() {
-        guard !account.isEmpty, !password.isEmpty, transportAllowed else { return }
+        guard !model.isSigningIn, !account.isEmpty, !password.isEmpty, transportAllowed else { return }
         Task { await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember, syncCredentials: remember && syncCredentials) }
     }
 

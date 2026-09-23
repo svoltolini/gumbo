@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Testing
 @testable import GumboCore
 
@@ -40,5 +41,11 @@ struct DiscoveryProviderTests {
     @Test func IPv6IsPreserved() throws {
         let server = try #require(DiscoveryService.server(name: "Music", type: "_smb._tcp", txt: [:], host: "[2001:db8::1]", port: 445))
         #expect(server.baseURL.absoluteString == "smb://[2001:db8::1]:445")
+    }
+
+    @Test func deniedLocalNetworkPermissionIsRecognised() {
+        #expect(DiscoveryService.isPolicyDenied(.dns(DiscoveryService.policyDeniedCode)))
+        #expect(!DiscoveryService.isPolicyDenied(.dns(-65563)))
+        #expect(!DiscoveryService.isPolicyDenied(.posix(.ECONNREFUSED)))
     }
 }

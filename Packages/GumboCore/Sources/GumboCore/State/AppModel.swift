@@ -175,6 +175,9 @@ public final class AppModel {
         if kind != .synology {
             let text = entry.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let url = URL(string: text.contains("://") ? text : (kind == .smb ? "smb://" : "https://") + text) else { throw ProviderError.invalidConfiguration }
+            // A pasted "Music " must not reach the server as a different share name.
+            let share = share.trimmingCharacters(in: .whitespacesAndNewlines)
+            let domain = domain.trimmingCharacters(in: .whitespacesAndNewlines)
             let config = try ProviderConfiguration(kind: kind, endpoint: url, share: kind == .smb ? share : nil,
                                                    domain: kind == .smb ? domain : nil, requiresEncryption: requiresEncryption)
             if stage == .welcome { stage = .discovering }
@@ -212,7 +215,9 @@ public final class AppModel {
     }
 
     public func signIn(account: String, password: String, otpCode: String, remember: Bool, syncCredentials: Bool = false) async {
-        guard let server = pendingServer else { return }
+        // Return in a field can arrive while an attempt is running. Starting again would discard it,
+        // count a wrong password twice toward DSM's auto-block, or send a one-time code twice.
+        guard !isSigningIn, let server = pendingServer else { return }
         let cloudConnection = pendingCloudConnection
         let wasUsingSyncedCredentials = pendingCloudCredentialSync
         // A scan asked for while offline may have led here, when the saved sign-in needed the person.
@@ -291,7 +296,9 @@ public final class AppModel {
             guard isCurrent(generation) else { return }
             needsOTP = true
             if cloudConnection != nil && syncCredentials { pendingReconnectPassword = password }
-            signInError = "Enter the code from your authenticator app."
+            // DSM answers a code it didn't accept (Auth 404) the same way as a missing one.
+            signInError = otpCode.isEmpty ? "Enter the code from your authenticator app."
+                : "That code didn’t work. Enter the current code from your authenticator app."
         } catch {
             guard isCurrent(generation) else { return }
             services.log("Sign-in failed at \(server.address): \(error.localizedDescription)")
@@ -506,7 +513,7 @@ public final class AppModel {
         }
         let entries = try await drive.list(parent)
         services.log("Picker listed \(parent): \(entries.count) entries, \(entries.filter(\.isAudio).count) audio files")
-        return entries.filter { $0.isDirectory && !$0.name.hasPrefix(".") && $0.name != "@eaDir" && $0.name != "#recycle" }
+        return entries.filter { $0.isDirectory && !RemoteDriveSupport.isSystemFolder($0.name) }
     }
 
     /// Records the folder to index and starts indexing. A library already open from this server stays

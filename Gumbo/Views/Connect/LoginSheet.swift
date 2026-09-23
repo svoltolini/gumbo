@@ -35,16 +35,19 @@ struct LoginSheet: View {
                         .focused($focus, equals: .account)
                         .submitLabel(.next)
                         .onSubmit { focus = .password }
+                        .disabled(model.isSigningIn)
                     SecureField("Password", text: $password)
                         .textContentType(.password)
                         .focused($focus, equals: .password)
                         .submitLabel(model.needsOTP ? .next : .go)
                         .onSubmit { model.needsOTP ? focus = .otp : submit() }
+                        .disabled(model.isSigningIn)
                     if model.needsOTP {
                         TextField("Two-factor code", text: $otpCode)
                             .textContentType(.oneTimeCode)
                             .numberKeyboard()
                             .focused($focus, equals: .otp)
+                            .disabled(model.isSigningIn)
                     }
                     Toggle("Remember me", isOn: $remember)
                         .disabled(model.isSigningIn)
@@ -134,7 +137,7 @@ struct LoginSheet: View {
     }
 
     private func submit() {
-        guard !account.isEmpty, !password.isEmpty, transportAllowed else { return }
+        guard !model.isSigningIn, !account.isEmpty, !password.isEmpty, transportAllowed else { return }
         Task {
             await model.signIn(account: account, password: password, otpCode: otpCode, remember: remember, syncCredentials: remember && syncCredentials)
         }

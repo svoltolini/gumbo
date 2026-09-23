@@ -37,7 +37,10 @@ public nonisolated struct DiscoveredServer: Identifiable, Hashable, Sendable {
 public final class ServerDiscovery {
     public private(set) var servers: [DiscoveredServer] = []
     public private(set) var isBrowsing = false
+    /// Local Network access is off for this app, so nothing can be found until it's allowed.
+    public private(set) var isLocalNetworkDenied = false
     private var browsers: [NWBrowser] = []
+    private var failedTypes: Set<String> = []
     private var attempts = DiscoveryAttempts()
     private var resolutions: [String: NWConnection] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
@@ -69,6 +72,19 @@ public final class ServerDiscovery {
                     self.consider(candidates)
                 }
             }
+            browser.stateUpdateHandler = { [weak self] state in
+                let status: DiscoveryService.BrowserStatus? = switch state {
+                case .ready: .browsing
+                case .waiting(let error): DiscoveryService.isPolicyDenied(error) ? .denied : nil
+                case .failed(let error): DiscoveryService.isPolicyDenied(error) ? .denied : .failed
+                default: nil
+                }
+                guard let status else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.attempts.generation == generation else { return }
+                    self.update(type, status)
+                }
+            }
             browser.start(queue: .main)
             browsers.append(browser)
         }
@@ -83,7 +99,25 @@ public final class ServerDiscovery {
         servers = []
         browsers.forEach { $0.cancel() }
         browsers.removeAll()
+        failedTypes = []
         isBrowsing = false
+        isLocalNetworkDenied = false
+    }
+
+    /// Without this, a denied Local Network permission or a failed browser leaves the spinner running forever.
+    private func update(_ type: String, _ status: DiscoveryService.BrowserStatus) {
+        switch status {
+        case .browsing:
+            failedTypes.remove(type)
+            isLocalNetworkDenied = false
+            isBrowsing = true
+        case .denied:
+            isLocalNetworkDenied = true
+            isBrowsing = false
+        case .failed:
+            failedTypes.insert(type)
+            if failedTypes.count >= browsers.count { isBrowsing = false }
+        }
     }
 
     private func consider(_ candidates: [Candidate]) {
@@ -163,6 +197,15 @@ nonisolated struct DiscoveryAttempts {
 
 /// Pure discovery policy: a generic SMB advertisement must never be reinterpreted as DSM.
 nonisolated enum DiscoveryService {
+    enum BrowserStatus: Equatable { case browsing, denied, failed }
+
+    /// `kDNSServiceErr_PolicyDenied`: the person turned off Local Network access for the app.
+    static let policyDeniedCode: Int32 = -65570
+
+    static func isPolicyDenied(_ error: NWError) -> Bool {
+        if case let .dns(code) = error { return Int32(code) == policyDeniedCode }
+        return false
+    }
     static func provider(type: String, name: String, txt: [String: String]) -> NASProviderKind? {
         let type = type.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
         if type == "_smb._tcp" { return .smb }

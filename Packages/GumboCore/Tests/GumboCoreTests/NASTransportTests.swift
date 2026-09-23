@@ -42,6 +42,13 @@ struct NASTransportTests {
         #expect(SynologyClient.baseURL(from: "https://listener:password@nas.example") == nil)
     }
 
+    @Test func browserSignInPageAddressGivesTheServer() {
+        #expect(SynologyClient.baseURL(from: "https://nas.local:5001/#/signin")?.absoluteString == "https://nas.local:5001")
+        #expect(SynologyClient.baseURL(from: "nas.local:5001/#/signin")?.absoluteString == "https://nas.local:5001")
+        #expect(SynologyClient.secureCandidates(for: "https://nas.local:5001/#/signin").map(\.port) == [5001])
+        #expect(SynologyClient.baseURL(from: "https://nas.local:5001/?launchApp=SYNO.SDS.App.FileStation3.Instance#/")?.absoluteString == "https://nas.local:5001")
+    }
+
     @Test func HTTPPermissionIsLocalAndBoundToOneOrigin() throws {
         let suiteA = "gumbo.transport.A.\(UUID().uuidString)"
         let suiteB = "gumbo.transport.B.\(UUID().uuidString)"

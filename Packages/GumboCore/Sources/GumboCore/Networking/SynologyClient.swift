@@ -341,8 +341,10 @@ public nonisolated enum SynologyClient {
         if components.port == nil, !hadScheme {
             components.port = components.scheme == "https" ? 5001 : 5000
         }
+        // DSM's sign-in page in a browser reads https://nas:5001/#/signin; only the origin matters.
         components.path = ""
         components.query = nil
+        components.fragment = nil
         guard let url = components.url, let origin = NASOrigin(url: url) else { return nil }
         return origin.url
     }

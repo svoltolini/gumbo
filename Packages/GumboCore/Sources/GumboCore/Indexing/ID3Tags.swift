@@ -31,7 +31,14 @@ public nonisolated enum ID3Tags {
         guard let frame = firstFrame(b, from: audioStart) else { return hasTag ? media : nil }
         media.codec = "mp3"
         media.sampleRate = frame.sampleRate
-        let audioBytes = fileSize.map { $0 > Int64(audioStart) ? $0 - Int64(audioStart) : 0 }
+        // Without a usable ID3v2 tag, the names may still be in the 128-byte ID3v1 tag at the end.
+        var trailer: Int64 = 0
+        if media.title == nil, media.artist == nil, media.album == nil,
+           let fileSize, fileSize - 128 >= Int64(audioStart),
+           let tail = try? await read(fileSize - 128..<fileSize), applyV1(tail, to: &media) {
+            trailer = 128
+        }
+        let audioBytes = fileSize.map { $0 - trailer > Int64(audioStart) ? $0 - trailer - Int64(audioStart) : 0 }
         if let frames = frame.xingFrames, frame.sampleRate > 0 {
             let duration = Double(frames) * Double(frame.samplesPerFrame) / Double(frame.sampleRate)
             media.duration = duration
@@ -43,6 +50,28 @@ public nonisolated enum ID3Tags {
             if let audioBytes { media.duration = Double(audioBytes) * 8 / Double(frame.bitrate) }
         }
         return media
+    }
+
+    // MARK: ID3v1
+
+    /// Fills the names, year, track and genre from an ID3v1(.1) tag: "TAG", then fixed-width
+    /// Latin-1 fields. Returns false when `tail` isn't one.
+    static func applyV1(_ tail: Data, to media: inout ProbedMedia) -> Bool {
+        let b = [UInt8](tail)
+        guard b.count == 128, b[0] == 0x54, b[1] == 0x41, b[2] == 0x47 else { return false }
+        func field(_ start: Int, _ length: Int) -> String? {
+            let bytes = b[start..<start + length].prefix { $0 != 0 }
+            let text = (String(bytes: bytes, encoding: .isoLatin1) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
+        }
+        media.title = media.title ?? field(3, 30)
+        media.artist = media.artist ?? field(33, 30)
+        media.album = media.album ?? field(63, 30)
+        if media.year == nil, let year = field(93, 4).flatMap({ Int($0) }), year > 0 { media.year = year }
+        // ID3v1.1 keeps the track number in the comment's last byte, after a NUL.
+        if media.trackNumber == nil, b[125] == 0, b[126] != 0 { media.trackNumber = Int(b[126]) }
+        if media.genre == nil, Int(b[127]) < MediaProbe.id3Genres.count { media.genre = MediaProbe.id3Genres[Int(b[127])] }
+        return true
     }
 
     // MARK: Frames

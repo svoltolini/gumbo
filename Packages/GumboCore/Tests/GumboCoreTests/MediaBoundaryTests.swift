@@ -121,6 +121,24 @@ import Testing
     #expect(media.duration == 1)
 }
 
+@Test func id3v1TagSuppliesNamesWhenThereIsNoID3v2Tag() async throws {
+    func field(_ text: String, _ width: Int) -> [UInt8] {
+        Array(text.utf8) + [UInt8](repeating: 0, count: width - text.utf8.count)
+    }
+    let v1 = Array("TAG".utf8) + field("Morning", 30) + field("The Band", 30) + field("First Light", 30)
+        + Array("1999".utf8) + field("", 28) + [0, 7] + [17]
+    let audio = [0xFF, 0xFB, 0x90, 0] + [UInt8](repeating: 0, count: 16_000 - 4)
+    let file = audio + v1
+    let media = try #require(try await ID3Tags.read(fileSize: Int64(file.count)) { range in fixtureRead(file, range) })
+    #expect(media.title == "Morning")
+    #expect(media.artist == "The Band")
+    #expect(media.album == "First Light")
+    #expect(media.year == 1999)
+    #expect(media.trackNumber == 7)
+    #expect(media.genre == "Rock")
+    #expect(media.duration == 1)
+}
+
 // MARK: - Security: Malformed Metadata Rejection
 
 @Test func mp4OversizedMoovDeclarationIsRejected() async throws {

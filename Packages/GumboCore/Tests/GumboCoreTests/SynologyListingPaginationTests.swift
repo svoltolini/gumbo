@@ -118,4 +118,49 @@ private nonisolated func listingDrive(_ transport: ListingPageTransport) -> Syno
             #expect(await transport.offsets == [0])
         }
     }
+
+    @Test func timedOutListingIsRetriedWithSizesAndDates() async throws {
+        let transport = FailingListingTransport(failures: [SynologyError.unreachable("The request timed out.")])
+        let files = try await failingDrive(transport).list("/music")
+        #expect(files.count == 1)
+        #expect(await transport.asksForSizes == [true, true])
+    }
+
+    @Test func repeatedServerErrorIsNotAnsweredWithAMinimalListing() async throws {
+        let transport = FailingListingTransport(failures: [SynologyError.http(503), SynologyError.http(503)])
+        await #expect(throws: SynologyError.self) {
+            try await failingDrive(transport).list("/music")
+        }
+        #expect(await transport.asksForSizes == [true, true])
+    }
+
+    @Test func refusedParametersStillFallBackToAMinimalListing() async throws {
+        let transport = FailingListingTransport(failures: [SynologyError.api(code: 101, api: "SYNO.FileStation.List")])
+        #expect(try await failingDrive(transport).list("/music").count == 1)
+        #expect(await transport.asksForSizes == [true, false])
+    }
+}
+
+private actor FailingListingTransport {
+    private var failures: [SynologyError]
+    private(set) var asksForSizes: [Bool] = []
+
+    init(failures: [SynologyError]) { self.failures = failures }
+
+    func request(_ url: URL) throws -> SynologyFileList {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        asksForSizes.append(query.contains { $0.name == "additional" })
+        if !failures.isEmpty { throw failures.removeFirst() }
+        return listingPage(0..<1, total: 1, offset: 0)
+    }
+}
+
+private nonisolated func failingDrive(_ transport: FailingListingTransport) -> SynologyDrive {
+    let session = DSMSession(
+        baseURL: URL(string: "https://listing-retry-test.invalid")!, sid: "fixture",
+        apis: ["SYNO.FileStation.List": SynologyAPIDescriptor(path: "entry.cgi", minVersion: 1, maxVersion: 2)]
+    )
+    return SynologyDrive(session: session, displayName: "Retry fixture", renewal: nil) { url in
+        try await transport.request(url)
+    }
 }
