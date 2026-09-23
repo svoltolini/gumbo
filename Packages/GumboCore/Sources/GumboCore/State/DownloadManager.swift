@@ -129,8 +129,9 @@ public nonisolated struct DownloadReconciliation: Equatable, Sendable {
 }
 
 /// Space in the downloads folder that no download on this device uses: files the manifest does not
-/// know, songs whose every owner is a profile that is not on this device, and songs saved for a
-/// library this device is not signed in to. Surfaced so it never sits invisible, deleted only on request.
+/// know, songs whose every owner is a profile that is not on this device or an album or playlist that
+/// no longer exists, and songs saved for a library this device is not signed in to. Surfaced so it
+/// never sits invisible, deleted only on request.
 public nonisolated struct UnusedDownloadStorage: Equatable, Sendable {
     public var bytes: Int64 = 0
     public var fileCount = 0
@@ -321,6 +322,9 @@ public final class DownloadManager {
     /// Albums and playlists whose download membership came back from iCloud, by drive. They stay
     /// listed while their songs are still missing, so a restored download is never invisible.
     private var restoredOwners: [String: Set<String>] = [:] { didSet { stateRevision &+= 1 } }
+    /// Albums and playlists, by drive, that the last reconciliation of their profile could not find
+    /// any more. They hold nothing: songs only they own are surfaced as unused storage.
+    private var unavailableOwners: [String: Set<String>] = [:]
     /// What the downloads folder holds that no download here uses, from the last reconciliation.
     public private(set) var unusedStorage = UnusedDownloadStorage()
     /// 0…1 for every file currently coming down, by track id.
@@ -566,6 +570,8 @@ public final class DownloadManager {
         let scope = DownloadOwner.scope(activeProfileID)
         var ownerIDs: Set<String> = []
         for record in records.values where record.driveID == driveID { ownerIDs.formUnion(record.owners) }
+        // Songs left behind by a deleted album or playlist must not put it back in iCloud.
+        ownerIDs.subtract(unavailableOwners[driveID] ?? [])
         for (ownerID, keys) in pendingByOwner where keys.contains(where: { jobs[$0]?.driveID == driveID }) { ownerIDs.insert(ownerID) }
         ownerIDs.formUnion(restoredOwners[driveID] ?? [])
         var albums: Set<String> = []
@@ -589,7 +595,8 @@ public final class DownloadManager {
     /// shared with the restored owner, or a file named for it is adopted when its size matches the
     /// catalogue. Songs that are not here stay missing until a retry fetches only them. Afterwards the
     /// folder is swept: partial transfers no live task owns are deleted, and anything else no download
-    /// uses is surfaced as unused storage rather than left invisible.
+    /// uses is surfaced as unused storage rather than left invisible. Songs kept only for an album or
+    /// playlist of this profile that `album` or `playlist` no longer finds count as unused too.
     @discardableResult
     public func reconcile(albums: [String], playlists: [String], driveID: String,
                           album: (String) -> Album?, playlist: (String) -> Playlist?) -> DownloadReconciliation {
@@ -650,6 +657,20 @@ public final class DownloadManager {
         var listed = (restoredOwners[driveID] ?? []).filter { !$0.hasPrefix(scope) }
         listed.formUnion(restored)
         if (restoredOwners[driveID] ?? []) != listed { restoredOwners[driveID] = listed.isEmpty ? nil : listed }
+        // An album or playlist of this profile that no longer exists, e.g. a playlist deleted on
+        // another device, no longer keeps its songs. Only this profile's collections can be looked
+        // up here; what was judged for another profile stays until that profile is reconciled.
+        var unavailable = (unavailableOwners[driveID] ?? []).filter { !$0.hasPrefix(scope) }
+        var savedOwners: Set<String> = []
+        for record in records.values where record.driveID == driveID { savedOwners.formUnion(record.owners) }
+        for ownerID in savedOwners where ownerID.hasPrefix(scope) {
+            switch DownloadOwner.destination(ownerID: ownerID) {
+            case .album(let id)?: if album(id) == nil { unavailable.insert(ownerID) }
+            case .playlist(let id)?: if playlist(id) == nil { unavailable.insert(ownerID) }
+            default: break
+            }
+        }
+        unavailableOwners[driveID] = unavailable.isEmpty ? nil : unavailable
         if changed { saveManifest() }
         let sweep = sweepFolder(driveID: driveID)
         report.removedPartialFiles = sweep.removedPartialFiles
@@ -709,7 +730,9 @@ public final class DownloadManager {
         var unused = UnusedDownloadStorage()
         var unusedNames: Set<String> = []
         for (key, record) in records where !record.fileName.isEmpty {
-            let hasKnownOwner = !record.owners.isEmpty && (known.isEmpty || record.owners.contains { owner in
+            // Owners whose album or playlist no longer exists do not claim the file.
+            let owners = record.owners.subtracting(unavailableOwners[record.driveID] ?? [])
+            let hasKnownOwner = !owners.isEmpty && (known.isEmpty || owners.contains { owner in
                 guard let profileID = Self.profileID(inOwner: owner) else { return true }
                 return known.contains(profileID)
             })
@@ -1239,6 +1262,96 @@ public final class DownloadManager {
         notifyMembershipChange(driveID: driveIDProvider())
     }
 
+    /// An album or playlist that is being deleted takes its download with it: transfers stop and files
+    /// no other download needs are deleted. Pass the collection as it was, before it went. Nothing
+    /// happens when it was never downloaded here, so the saved membership is left untouched.
+    public func removeDeleted(_ owner: DownloadOwner) {
+        let driveID = driveIDProvider()
+        let involved = listedOwnerIDs.contains(owner.id)
+            || initialPendingOwners[owner.id] != nil
+            || requests[requestKey(ownerID: owner.id, driveID: driveID)] != nil
+        guard involved else { return }
+        remove(owner)
+    }
+
+    /// Songs taken out of a playlist stop being kept for it. Pass the playlist as it is now, with
+    /// every song id it still lists, including songs the catalogue does not show at the moment: a
+    /// song still in it, even once, stays. Files no other download needs are deleted, and transfers
+    /// no other download waits for stop.
+    public func releaseRemovedSongs(of owner: DownloadOwner, keeping trackIDs: Set<String>) {
+        let driveID = driveIDProvider()
+        let kept = Set(trackIDs.union(owner.tracks.map(\.id)).map { Self.cacheKey(trackID: $0, driveID: driveID) })
+        let membership = downloadMembership(driveID: driveID)
+        var released: Set<String> = []
+        // Transfers of this library only: a key is scoped to its drive, so one from another library
+        // would never be in `kept` and must not be mistaken for a removed song.
+        let pending = (pendingByOwner[owner.id] ?? []).union(initialPendingOwners[owner.id] ?? [])
+        let dropped = pending.filter { key in
+            !kept.contains(key) && (jobs[key] ?? initialJobs[key])?.driveID == driveID
+        }
+        if !dropped.isEmpty {
+            pendingByOwner[owner.id]?.subtract(dropped)
+            if pendingByOwner[owner.id]?.isEmpty == true { pendingByOwner[owner.id] = nil }
+            initialPendingOwners[owner.id]?.subtract(dropped)
+            if initialPendingOwners[owner.id]?.isEmpty == true { initialPendingOwners[owner.id] = nil }
+            for key in dropped {
+                let wantedElsewhere = pendingByOwner.values.contains { $0.contains(key) }
+                    || initialPendingOwners.values.contains { $0.contains(key) }
+                guard !wantedElsewhere else { continue }
+                let task = tasks[key]
+                let simulation = simulations[key]
+                if let job = jobs[key] ?? initialJobs[key] { retire(job) }
+                task?.cancel()
+                simulation?.cancel()
+            }
+            released.formUnion(dropped)
+        }
+        let requestID = requestKey(ownerID: owner.id, driveID: driveID)
+        if var request = requests[requestID] {
+            let removed = request.keys.subtracting(kept)
+            if !removed.isEmpty {
+                request.keys.subtract(removed)
+                request.total = max(0, request.total - removed.count)
+                for key in removed { request.errors[key] = nil }
+                requests[requestID] = request.keys.isEmpty ? nil : request
+                released.formUnion(removed)
+            }
+        }
+        var deleted = 0
+        var changedRecords = false
+        for (key, var record) in records where record.driveID == driveID && record.owners.contains(owner.id) && !kept.contains(key) {
+            record.owners.remove(owner.id)
+            changedRecords = true
+            released.insert(key)
+            if record.owners.isEmpty {
+                records[key] = nil
+                if !record.fileName.isEmpty {
+                    try? FileManager.default.removeItem(at: cacheDirectory.appending(path: record.fileName))
+                }
+                deleted += 1
+            } else {
+                records[key] = record
+            }
+        }
+        guard !released.isEmpty else { return }
+        // A resumable partial copy goes too, unless another download still asks for the song.
+        for key in released where !pendingByOwner.values.contains(where: { $0.contains(key) })
+            && !initialPendingOwners.values.contains(where: { $0.contains(key) })
+            && !requests.values.contains(where: { $0.driveID == driveID && $0.keys.contains(key) }) {
+            checkpoints.remove(key: key)
+        }
+        if changedRecords { saveManifest() }
+        savePendingOwners()
+        refreshRetainedPartialBytes()
+        startNextIfIdle()
+        refreshActivity(force: true)
+        log("“\(owner.title)”: \(released.count) removed songs released, \(deleted) files deleted")
+        let updated = downloadMembership(driveID: driveID)
+        if updated.albums != membership.albums || updated.playlists != membership.playlists {
+            notifyMembershipChange(driveID: driveID)
+        }
+    }
+
     /// Removes local copies of files whose deletion was confirmed by the NAS. The physical file
     /// belongs to its exact source and track, so all profile/playlist owners lose that copy; files
     /// from a different NAS are unaffected even when their paths and album identities match.
@@ -1431,6 +1544,7 @@ public final class DownloadManager {
             _ = sweepFolder(driveID: driveIDProvider())
         }
         startNextIfIdle()
+        adoptActivities()
         refreshActivity(force: true)
     }
 
@@ -1633,13 +1747,16 @@ public final class DownloadManager {
         return text.hasPrefix("{") || text.hasPrefix("<")
     }
 
-    /// Shared by the Live Activity and isolated tests, including terminal outcomes.
+    /// Shared by the Live Activity and isolated tests, including terminal outcomes. Read from the
+    /// manifest alone: the activity refreshes while songs come down, and checking every saved file on
+    /// each refresh stalls the main actor for a playlist of thousands. A record only exists once its
+    /// file is in place, and removals and launches drop records whose files are gone.
     func progressSnapshot(ownerID: String, driveID: String) -> DownloadProgress? {
         let id = requestKey(ownerID: ownerID, driveID: driveID)
         guard let request = requests[id] else { return nil }
         let done = request.keys.filter { key in
             guard let record = records[key], record.owners.contains(ownerID) else { return false }
-            return record.fileName.isEmpty ? simulatedKeys.contains(key) : FileManager.default.fileExists(atPath: cacheDirectory.appending(path: record.fileName).path)
+            return !record.fileName.isEmpty || simulatedKeys.contains(key)
         }.count
         let pending = (pendingByOwner[ownerID] ?? []).intersection(request.keys)
         let inFlight = pending.reduce(0.0) { $0 + (progressByKey[$1] ?? 0) }
@@ -1658,13 +1775,19 @@ public final class DownloadManager {
     #if os(iOS)
     // MARK: Live Activity
 
+    /// How long an activity reads as current without an update. Progress moves it on while songs come
+    /// down, so one left behind by a process that ended is shown as stale by the system, not as live.
+    nonisolated private static let activityStaleInterval: TimeInterval = 5 * 60
+
     private func refreshActivity(force: Bool) {
+        // Progress arrives many times a second per song; it is looked at no more than once a second.
+        // Every change of outcome (a song saved or failed, a cancellation) forces a refresh.
+        guard force || Date.now.timeIntervalSince(lastActivityUpdate) > 1 else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        lastActivityUpdate = .now
         // Keep an owner's activity until that request ends, even if another owner's task is running.
         if let activity, let id = activityRequestKey, let request = requests[id],
            let state = progressSnapshot(ownerID: request.ownerID, driveID: request.driveID), state.outcome == .downloading {
-            guard force || Date.now.timeIntervalSince(lastActivityUpdate) > 1 else { return }
-            lastActivityUpdate = .now
             push(state, to: activity.id)
             return
         }
@@ -1675,12 +1798,44 @@ public final class DownloadManager {
         guard let request = requests[id], let state = progressSnapshot(ownerID: ownerID, driveID: job.driveID) else { return }
         // A tap on the activity opens the player when a song is playing, else the album or playlist being saved.
         let attributes = DownloadActivityAttributes(title: request.title, subtitle: request.subtitle,
-                                                    link: WidgetLink.nowPlaying(fallback: DownloadOwner.destination(ownerID: ownerID)))
-        guard let created = try? Activity.request(attributes: attributes, content: ActivityContent(state: state, staleDate: nil)) else { return }
+                                                    link: WidgetLink.nowPlaying(fallback: DownloadOwner.destination(ownerID: ownerID)),
+                                                    requestKey: id)
+        let content = ActivityContent(state: state, staleDate: .now + Self.activityStaleInterval)
+        guard let created = try? Activity.request(attributes: attributes, content: content) else { return }
         activity = created
         activityOwnerID = ownerID
         activityRequestKey = id
-        lastActivityUpdate = .now
+    }
+
+    /// Activities outlive the process that started them, but the handle to one does not. Once the
+    /// session's tasks are known, the activity still reporting a download under way is picked back up,
+    /// and every other one is ended with its final state, so the Lock Screen never keeps a frozen
+    /// activity or shows a second one for the same download.
+    private func adoptActivities() {
+        for existing in Activity<DownloadActivityAttributes>.activities {
+            guard existing.activityState == .active || existing.activityState == .stale, existing.id != activity?.id else { continue }
+            let attributes = existing.attributes
+            // Activities from an earlier build carry no request key; their title and subtitle name it.
+            let key = attributes.requestKey
+                ?? requests.first { $0.value.title == attributes.title && $0.value.subtitle == attributes.subtitle }?.key
+            let request = key.flatMap { requests[$0] }
+            let state = request.flatMap { progressSnapshot(ownerID: $0.ownerID, driveID: $0.driveID) }
+            if activity == nil, let key, let request, let state, state.outcome == .downloading {
+                activity = existing
+                activityOwnerID = request.ownerID
+                activityRequestKey = key
+                continue
+            }
+            if state?.outcome == .downloading {
+                // Another activity already reports this download, or will once its turn comes.
+                push(existing.content.state, to: existing.id, ending: true, immediately: true)
+                continue
+            }
+            var final = state ?? existing.content.state
+            // Without its request there is nothing left to wait for; never end on a live-looking line.
+            if final.outcome == .downloading { final.outcome = final.done > 0 ? .partial : .cancelled }
+            push(final, to: existing.id, ending: true)
+        }
     }
 
     private func endActivity() {
@@ -1695,27 +1850,29 @@ public final class DownloadManager {
     }
 
     /// Serialize updates and the terminal message so an earlier progress task cannot arrive after end.
-    private func push(_ state: DownloadActivityAttributes.ContentState, to id: String?, ending: Bool = false) {
+    private func push(_ state: DownloadActivityAttributes.ContentState, to id: String?, ending: Bool = false, immediately: Bool = false) {
         guard let id else { return }
         let previous = activityDelivery
         activityDelivery = Task { @MainActor in
             await previous?.value
-            await Self.deliver(state, to: id, ending: ending)
+            await Self.deliver(state, to: id, ending: ending, immediately: immediately)
         }
     }
 
     /// Look up ActivityKit's non-Sendable object on the same executor that awaits its update.
-    nonisolated private static func deliver(_ state: DownloadActivityAttributes.ContentState, to id: String, ending: Bool) async {
+    nonisolated private static func deliver(_ state: DownloadActivityAttributes.ContentState, to id: String, ending: Bool, immediately: Bool) async {
         guard let activity = Activity<DownloadActivityAttributes>.activities.first(where: { $0.id == id }) else { return }
-        let content = ActivityContent(state: state, staleDate: nil)
         if ending {
-            await activity.end(content, dismissalPolicy: .after(.now + (state.outcome == .downloaded ? 4 : 30)))
+            let dismissal: ActivityUIDismissalPolicy = immediately ? .immediate : .after(.now + (state.outcome == .downloaded ? 4 : 30))
+            await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: dismissal)
         } else {
-            await activity.update(content)
+            // Each update moves the stale date on; a process that stops updating leaves a stale activity.
+            await activity.update(ActivityContent(state: state, staleDate: .now + activityStaleInterval))
         }
     }
     #else
     private func refreshActivity(force: Bool) {}
+    private func adoptActivities() {}
     #endif
 
     // MARK: Manifest

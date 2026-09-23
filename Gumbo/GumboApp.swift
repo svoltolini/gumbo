@@ -173,6 +173,11 @@ struct GumboApp: App {
         }
         // An album renamed in its files keeps its downloads under its new identity.
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        // A deleted playlist takes its download with it; songs taken out of one stop being kept for it.
+        library.onPlaylistWillBeDeleted = { [downloads] playlist in downloads.removeDeleted(downloads.owner(for: playlist)) }
+        library.onPlaylistSongsRemoved = { [downloads] playlist, trackIDs in
+            downloads.releaseRemovedSongs(of: downloads.owner(for: playlist), keeping: trackIDs)
+        }
         library.onServerTracksDeleted = { [library, downloads, player, watchBridge] sourceID, trackIDs in
             downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
             if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {
@@ -281,7 +286,11 @@ struct GumboApp: App {
         profiles.onProfilesRemoved = { [watchBridge] in watchBridge.sync() }
         // Signing out removes the server; the Watch's catalogue and sign-in for it go too, even when
         // the NAS was out of reach all this launch and its library never opened here.
-        model.onSignedOut = { [watchBridge] in watchBridge.revoke() }
+        // Nothing queued from the old library may play on, from the app or the lock screen.
+        model.onSignedOut = { [watchBridge, player] in
+            player.stop()
+            watchBridge.revoke()
+        }
         watchBridge.provider = { [library, model, profiles] in
             guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name

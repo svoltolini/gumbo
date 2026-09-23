@@ -18,14 +18,19 @@ struct LibraryView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
     @Namespace private var artworkNamespace
+    /// The stack's pages. "Go to Album" appends a fresh page, so an album page further down keeps its own state.
+    @State private var path = NavigationPath()
+    /// The album "Go to Album" last pushed and the depth it landed at, so repeating it while that page is on top does nothing.
+    @State private var openedAlbum: (id: String, depth: Int)?
 
     private var isEmptyLibrary: Bool { library.isEmpty && !model.isDemo }
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    pendingScanNotice
                     if isEmptyLibrary {
                         emptyState
                     } else {
@@ -70,7 +75,18 @@ struct LibraryView: View {
             .gumboBackground(player.tint)
             .navigationTitle("Library")
             .libraryDestinations()
-            .navigationDestination(item: $model.albumToOpen) { AlbumView(album: $0) }
+            // A request becomes a new page on the stack, then clears. Binding the destination to the
+            // request instead would restyle an earlier "Go to Album" page still in the stack in place.
+            .onChange(of: model.albumToOpen, initial: true) { _, album in
+                guard let album else { return }
+                model.albumToOpen = nil
+                guard openedAlbum?.id != album.id || openedAlbum?.depth != path.count else { return }
+                path.append(album)
+                openedAlbum = (album.id, path.count)
+            }
+            .onChange(of: path.count) { _, depth in
+                if let openedAlbum, depth < openedAlbum.depth { self.openedAlbum = nil }
+            }
             .toolbar {
                 #if os(macOS)
                 ToolbarItem(placement: .primaryAction) {
@@ -92,7 +108,36 @@ struct LibraryView: View {
         case .missing: "The folder you chose no longer exists. You can pick another one in Settings."
         case .unreadable(_, let path): "Some folders in “\(LibraryIndexer.Failure.name(of: path))” couldn't be read. Check the account's permissions. \(Hints.tryAgain)"
         case .other(let message): message + " " + Hints.tryAgain
-        case .noMusic, .none: "Add music to “\(library.catalogue.rootName)” and \(Hints.rescan), or pick another folder in Settings."
+        // The failed folder may be a newly chosen one while the previous folder's library is still shown.
+        case .noMusic(let path): "Add music to “\(LibraryIndexer.Failure.name(of: path))” and \(Hints.rescan), or pick another folder in Settings."
+        case .none: "Add music to “\(library.catalogue.rootName)” and \(Hints.rescan), or pick another folder in Settings."
+        }
+    }
+
+    /// A pull or a tap asked for a scan that can't start yet: why, and for an offline server the way back.
+    @ViewBuilder
+    private var pendingScanNotice: some View {
+        if model.isScanRequestPending, let blocker = model.scanBlocker {
+            VStack(alignment: .leading, spacing: 8) {
+                switch blocker {
+                case .offline:
+                    Label("Music server offline", systemImage: "icloud.slash").font(.headline)
+                case .connecting:
+                    Label("Connecting to your music server", systemImage: "icloud").font(.headline)
+                case .writingTags, .deletingFiles:
+                    Label("Library update waiting", systemImage: "clock").font(.headline)
+                }
+                Text(blocker.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if blocker == .offline {
+                    if let error = model.signInError {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                    Button("Reconnect") { model.rescan() }
+                }
+            }
+            .padding(20)
         }
     }
 

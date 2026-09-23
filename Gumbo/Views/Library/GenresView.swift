@@ -1,7 +1,7 @@
 import GumboCore
 import SwiftUI
 
-/// "Genres" facet: decade tiles followed by a two column genre grid. Holding a genre card opens the editor.
+/// "Genres" facet: decade tiles followed by a two column genre grid. A genre card's context menu opens the editor.
 struct GenresView: View {
     @Environment(LibraryStore.self) private var library
     @State private var editingGenre: Genre?
@@ -40,13 +40,11 @@ struct GenresView: View {
                         .zoomSource(id: destination.sourceID, shape: .rounded(14))
                 }
                 .cardButton()
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in editingGenre = genre })
                 .genreMenu { editingGenre = genre }
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 10)
-        .sensoryFeedback(.impact(weight: .medium), trigger: editingGenre) { _, new in new != nil }
         .sheet(item: $editingGenre) { genre in
             GenreEditorSheet(genre: genre)
         }
@@ -109,14 +107,12 @@ struct GenreCard: View {
 }
 
 private extension View {
-    /// The Mac's way in to the genre editor; the phone holds the card instead.
-    @ViewBuilder func genreMenu(_ action: @escaping () -> Void) -> some View {
-        #if os(macOS)
+    /// The way in to the genre editor: a context menu (secondary click, or holding the card), with a matching
+    /// accessibility action. Unlike a raw long press, the menu never lets the card's tap through as well.
+    func genreMenu(_ action: @escaping () -> Void) -> some View {
         contextMenu {
             Button("Rename or Merge Genre…", systemImage: "pencil", action: action)
         }
-        #else
-        self
-        #endif
+        .accessibilityAction(named: "Rename or Merge Genre", action)
     }
 }

@@ -84,6 +84,9 @@ struct GumboTVApp: App {
             return library.track(id: id).map(DownloadFileRevision.init)
         }
         model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
+        // Signing out or leaving the sample library clears the player: nothing queued from the old
+        // library may play on, from the app or the system's Now Playing controls.
+        model.onSignedOut = { [player] in player.stop() }
         downloads.activeProfileID = profiles.lastActiveID ?? profiles.owner?.id ?? "default"
         // Persist download membership changes to iCloud via the profile state (TV doesn't keep files, but membership syncs).
         downloads.onMembershipChanged = { [profiles] driveID, albumIDs, playlistIDs in

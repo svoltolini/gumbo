@@ -346,7 +346,12 @@ nonisolated final class SMBCSession: SMBReadSession, @unchecked Sendable {
             if status < 0, let rejection = SMBDriveError.authenticationFailure(
                 for: UInt32(bitPattern: smb2_get_nterror(next))
             ) { throw rejection }
-            try check(status)
+            do {
+                try check(status)
+            } catch let error as SMBDriveError {
+                // Before a share is connected nothing below it can be missing.
+                throw error.atShareRoot
+            }
             let dialect = smb2_get_dialect(next)
             guard dialect >= 0x0202, settings.security != .encrypted || dialect >= 0x0300 else { throw SMBDriveError.securityPolicy }
             try cancellation.check()

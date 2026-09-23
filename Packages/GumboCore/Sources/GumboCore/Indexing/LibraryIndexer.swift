@@ -121,7 +121,10 @@ public final class LibraryIndexer {
     }
 
     /// Scans `rootPath` on the drive; `onCatalogue` receives the catalogue when the structure is known and again as tags arrive.
-    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, forceMetadataReread: Bool = false, onVerifiedListing: (@MainActor (Catalogue) -> Void)? = nil, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
+    /// `existing` is the catalogue this scan refreshes: when the folder turns out empty or gone, it is emptied.
+    /// `reusingTagsFrom` only lends tags already read, such as another folder's on the same drive; its
+    /// songs are not expected here, so an empty or missing folder is reported rather than published.
+    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, reusingTagsFrom tagSource: Catalogue? = nil, forceMetadataReread: Bool = false, onVerifiedListing: (@MainActor (Catalogue) -> Void)? = nil, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
         cancel()
         let run = IndexingRun()
         currentRun = run
@@ -195,7 +198,7 @@ public final class LibraryIndexer {
                     let catalogue = await Task.detached(priority: .userInitiated) {
                         CoverStore.$directoryOverride.withValue(coverDirectory) {
                             CoverStore.$indexingRun.withValue(run) {
-                                var built = Catalogue.build(folders: folders, rootPath: rootPath, serverName: serverName, driveID: driveID, existing: existing, forceMetadataReread: forceMetadataReread)
+                                var built = Catalogue.build(folders: folders, rootPath: rootPath, serverName: serverName, driveID: driveID, existing: existing ?? tagSource, forceMetadataReread: forceMetadataReread)
                                 Catalogue.discardFinderMetadataCovers(previous: existing, driveID: driveID, rootPath: rootPath)
                                 if run.isActive, built.enrichedTrackCount > 0 { built.regroupByTags() }
                                 return built
@@ -269,6 +272,10 @@ public final class LibraryIndexer {
         var found = 0
         var isFirst = true
         var lastProgress = ContinuousClock.now
+        // The folder each queued folder was listed in, and the cover image of every folder listed so
+        // far, music or not: "CD1" and "CD2" often share the album's cover one level up.
+        var parents: [String: String] = [:]
+        var covers: [String: RemoteEntry] = [:]
         while !queue.isEmpty {
             try Task.checkCancellation()
             let batch = Array(queue.prefix(parallelism))
@@ -293,13 +300,18 @@ public final class LibraryIndexer {
                 isFirst = false
                 let directories = entries.filter { $0.isDirectory && !$0.name.hasPrefix(".") && $0.name != "@eaDir" && $0.name != "#recycle" }
                 queue.append(contentsOf: directories.map(\.path))
+                for directory in directories { parents[directory.path] = path }
+                let cover = RemoteDriveSupport.coverImage(in: entries)
+                if let cover { covers[path] = cover }
                 let audio = entries.filter(\.isAudio)
                 result.filesSeen += entries.filter { !$0.isDirectory }.count
                 if result.foldersListed < 3 {
                     recordDiagnostics("Listed \(path): \(entries.count) entries, \(directories.count) folders, \(audio.count) audio. Sample: \(entries.prefix(3).map { "\($0.name)\($0.isDirectory ? "/" : "")" }.joined(separator: ", "))")
                 }
                 if !audio.isEmpty {
-                    result.folders.append(ScannedFolder(path: path, audio: audio, cover: RemoteDriveSupport.coverImage(in: entries)))
+                    // Breadth first, so the parent was listed in an earlier batch.
+                    result.folders.append(ScannedFolder(path: path, audio: audio, cover: cover,
+                                                        parentCover: parents[path].flatMap { covers[$0] }))
                     found += audio.count
                 }
                 result.foldersListed += 1
@@ -315,16 +327,27 @@ public final class LibraryIndexer {
 
     // MARK: Enrichment
 
+    /// What looking for an album's cover found.
+    nonisolated enum CoverLookup: Sendable {
+        /// The image and a description of where it came from.
+        case found(Data, String)
+        /// Every place was looked at and none holds a picture.
+        case absent
+        /// A request failed on the way, e.g. the connection dropped, so absence is not established.
+        case failed(String)
+    }
+
     /// A cover fetched for an album, as a struct for the same reason as `Listing`.
     nonisolated private struct CoverFetch: Sendable {
         let album: Album
-        let data: Data?
-        let source: String?
+        let lookup: CoverLookup
     }
 
     nonisolated private struct EnrichmentResult: Sendable {
         let track: Track
         let cover: Data?
+        /// Reading the file failed on the way, not because of the file; it does not count as an attempt.
+        var interrupted = false
     }
 
     // `nonisolated` alone inherits the caller's executor with NonisolatedNonsendingByDefault.
@@ -359,6 +382,7 @@ public final class LibraryIndexer {
             enrichedCount = 0
         }
         var enrichedSoFar = 0
+        var interruptedSoFar = 0
         var lastPublish = Date.now
 
         for start in stride(from: 0, to: pending.count, by: Self.parallelism) {
@@ -379,8 +403,9 @@ public final class LibraryIndexer {
             try await checkActive(run)
             for result in results {
                 var track = result.track
-                if !track.isEnriched || track.tagVersion != Track.currentTagVersion {
-                    // Still not read: remember the failure so it is not retried forever.
+                if !result.interrupted, !track.isEnriched || track.tagVersion != Track.currentTagVersion {
+                    // Still not read: remember the failure so it is not retried forever. A dropped
+                    // connection says nothing about the file, so that song is simply tried next time.
                     track.enrichAttempts = (track.enrichAttempts ?? 0) + 1
                     track.enrichAttemptedAt = .now
                 }
@@ -397,6 +422,7 @@ public final class LibraryIndexer {
                     coverRequested.remove(request.albumID)
                 }
                 enrichedSoFar += 1
+                if result.interrupted { interruptedSoFar += 1 }
             }
             try await publishProgress(run: run, enriched: enrichedSoFar)
             if Date.now.timeIntervalSince(lastPublish) > 6 {
@@ -407,6 +433,7 @@ public final class LibraryIndexer {
             }
         }
         try await publishProgress(run: run, enriched: enrichedSoFar, force: true)
+        if interruptedSoFar > 0 { recordDiagnostics("Couldn't reach \(interruptedSoFar) songs; they are read again on the next refresh") }
         working.indexedAt = .now
         working = await regroupInBackground(working, run: run)
         try await checkActive(run)
@@ -461,19 +488,21 @@ public final class LibraryIndexer {
             try await checkActive(run)
             let chunk = missing[start..<min(start + Self.parallelism, missing.count)]
             let results: [CoverFetch] = await parallelResults(Array(chunk)) { album in
-                let found = await Self.fetchCover(for: album, drive: drive)
-                return CoverFetch(album: album, data: found?.0, source: found?.1)
+                CoverFetch(album: album, lookup: await Self.lookUpCover(for: album, drive: drive))
             }
             try await checkActive(run)
             for fetch in results {
                 let album = fetch.album
-                let found: (Data, String)? = fetch.data.flatMap { data in fetch.source.map { (data, $0) } }
-                if let (data, source) = found {
+                switch fetch.lookup {
+                case .found(let data, let source):
                     CoverStore.save(data, for: album.id)
                     recordDiagnostics("Cover for “\(album.title)” by \(album.artist): \(source)")
-                } else {
+                case .absent:
                     CoverStore.noteMissingCover(for: album.id)
                     recordDiagnostics("No cover found for “\(album.title)” by \(album.artist)")
+                case .failed(let reason):
+                    // Only a search that reached every place may rest for a week.
+                    recordDiagnostics("Cover for “\(album.title)” by \(album.artist) is looked for again next time: \(reason)")
                 }
                 coversSoFar += 1
             }
@@ -483,24 +512,43 @@ public final class LibraryIndexer {
         return missing.count
     }
 
-    /// The cover image and a description of where it came from.
-    public nonisolated static func fetchCover(for album: Album, drive: any RemoteDrive) async -> (Data, String)? {
-        if let coverPath = album.coverPath, let data = try? await drive.download(coverPath, maxBytes: ArtworkPolicy.maxArtworkDownloadBytes), !data.isEmpty {
-            return (data, "folder image \(coverPath)")
+    /// Looks in the album's folder image, then in the first songs' embedded pictures. Absence is only
+    /// reported when every request got an answer; a dropped connection is `.failed`, not "no cover".
+    nonisolated static func lookUpCover(for album: Album, drive: any RemoteDrive) async -> CoverLookup {
+        var failure: String?
+        func note(_ error: any Error, _ path: String) {
+            if failure == nil, !error.isAnswerAboutFile { failure = "\(path): \(error.localizedDescription)" }
+        }
+        if let coverPath = album.coverPath {
+            do {
+                let data = try await drive.download(coverPath, maxBytes: ArtworkPolicy.maxArtworkDownloadBytes)
+                if !data.isEmpty { return .found(data, "folder image \(coverPath)") }
+            } catch {
+                note(error, coverPath)
+            }
         }
         for track in album.tracks.prefix(3) {
             guard let path = track.path else { continue }
             if track.codec == "flac" {
-                if let info = try? await readFLAC(path: path, drive: drive), let picture = info.picture {
-                    return (picture, "embedded art in \(path)")
+                do {
+                    if let info = try await readFLAC(path: path, drive: drive) {
+                        if let picture = info.picture { return .found(picture, "embedded art in \(path)") }
+                        continue
+                    }
+                } catch {
+                    note(error, path)
+                    continue
                 }
-            } else if let source = RemoteMediaSource.resolve(drive: drive, path: path) {
+                // Not a stream this parser follows; AVFoundation may still find a picture.
+            }
+            if let source = RemoteMediaSource.resolve(drive: drive, path: path) {
                 if let artwork = await MediaProbe.probe(source: source).artwork {
-                    return (artwork, "embedded art in \(path)")
+                    return .found(artwork, "embedded art in \(path)")
                 }
             }
         }
-        return nil
+        if let failure { return .failed(failure) }
+        return .absent
     }
 
     /// Reads one file's headers and tags; FLAC by hand, everything else through AVFoundation.
@@ -522,7 +570,14 @@ public final class LibraryIndexer {
             ?? PathParser.splitDisc(folderName).disc ?? 1
 
         if track.codec == "flac" {
-            if var info = try? await readFLAC(path: path, drive: drive) {
+            let parsed: FLACInfo?
+            do {
+                parsed = try await readFLAC(path: path, drive: drive)
+            } catch {
+                guard error.isAnswerAboutFile else { return EnrichmentResult(track: updated, cover: cover, interrupted: true) }
+                parsed = nil
+            }
+            if var info = parsed {
                 updated.sampleRate = info.sampleRate ?? updated.sampleRate
                 updated.bitDepth = info.bitsPerSample
                 if let duration = info.duration { updated.duration = duration }
@@ -543,14 +598,23 @@ public final class LibraryIndexer {
                 updated.tagVersion = Track.currentTagVersion
                 if cover == nil, wantsEmbeddedArt, let picture = info.picture { cover = picture }
                 info.picture = nil
+                return EnrichmentResult(track: updated, cover: cover)
             }
-            return EnrichmentResult(track: updated, cover: cover)
+            // Metadata this parser can't follow, such as an ID3v2 tag too large to skip in front of
+            // the stream: AVFoundation reads FLAC too, only more slowly.
         }
 
         // MP4 and MP3 files are read in one or two ranged requests; anything else still asks AVFoundation,
         // which fetches the file piece by piece and is slow over the internet.
         let probe: ProbedMedia
-        if let native = await readNatively(track: track, path: path, drive: drive) {
+        let native: ProbedMedia?
+        do {
+            native = try await readNatively(track: track, path: path, drive: drive)
+        } catch {
+            guard error.isAnswerAboutFile else { return EnrichmentResult(track: updated, cover: cover, interrupted: true) }
+            native = nil
+        }
+        if let native {
             probe = native
         } else {
             guard let source = RemoteMediaSource.resolve(drive: drive, path: path) else { return EnrichmentResult(track: updated, cover: cover) }
@@ -587,19 +651,22 @@ public final class LibraryIndexer {
         return EnrichmentResult(track: updated, cover: cover)
     }
 
-    nonisolated private static func readNatively(track: Track, path: String, drive: any RemoteDrive) async -> ProbedMedia? {
+    /// Nil when the file is not in a format read here or could not be parsed; throws when a read failed.
+    nonisolated private static func readNatively(track: Track, path: String, drive: any RemoteDrive) async throws -> ProbedMedia? {
         let read: (Range<Int64>) async throws -> Data = { range in try await drive.read(path, range: range) }
         switch (path as NSString).pathExtension.lowercased() {
         case "m4a", "mp4", "aac", "alac":
-            return try? await MP4Tags.read(read: read)
+            return try await MP4Tags.read(read: read)
         case "mp3":
-            return try? await ID3Tags.read(fileSize: track.fileSize, read: read)
+            return try await ID3Tags.read(fileSize: track.fileSize, read: read)
         default:
             return nil
         }
     }
 
+    /// Indexing needs the stream details and the comments, not every block: a huge embedded picture
+    /// must not cost a song its tags.
     nonisolated private static func readFLAC(path: String, drive: any RemoteDrive) async throws -> FLACInfo? {
-        try await FLACHeader.read { range in try await drive.read(path, range: range) }
+        try await FLACHeader.read(requireAllBlocks: false) { range in try await drive.read(path, range: range) }
     }
 }

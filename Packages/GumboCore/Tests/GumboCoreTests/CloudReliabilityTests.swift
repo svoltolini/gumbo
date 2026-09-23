@@ -1593,3 +1593,103 @@ private let familyDetails = FamilyInfo(name: "NAS family", serverName: "NAS", se
     await fixture.sync.refresh(reason: "settled")
     #expect(fixture.familyUploads.count == 3)
 }
+
+/// Leaving a family and joining it again in the same session brings its people back: the former
+/// zone is read again from the start, and the retired profiles' saved data can be written again (#251).
+@Test @MainActor func rejoiningAFamilyLeftInTheSameSessionRestoresItsProfiles() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    f.owners = ["family-owner"]
+    let mine = f.profileRecord("mine", owner: "family-owner"); mine["userRecordName"] = "A"
+    let peer = f.profileRecord("peer", name: "Peer", owner: "family-owner"); peer["userRecordName"] = "someone-else"
+    f.pages = [.init(records: [.success(mine), .success(peer)], token: Data("family-cursor".utf8))]
+    await f.sync.refresh(reason: "joined family")
+    #expect(f.profiles.profiles.contains { $0.id == "peer" })
+    f.owners = []
+    try await f.sync.stopSharing()
+    #expect(!f.profiles.profiles.contains { $0.id == "peer" })
+    let left = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(left.zones["family-owner"]?.changeToken == nil)
+    #expect(left.zones["family-owner"]?.systemFields.isEmpty != false)
+    #expect(left.zones["family-owner"]?.remoteStamps.isEmpty != false)
+
+    f.owners = ["family-owner"]
+    var remote = ProfileState()
+    remote.settings.shuffle = true
+    remote.updatedAt = Date(timeIntervalSince1970: 30)
+    let zone = CKRecordZone.ID(zoneName: "Family", ownerName: "family-owner")
+    let peerState = CKRecord(recordType: "ProfileState", recordID: .init(recordName: "state-peer", zoneID: zone))
+    peerState["profileID"] = "peer"
+    peerState["document"] = try ProfileCloudDocument.encode(remote)
+    // The document before its profile: the harder order for a profile retired earlier in this process.
+    f.pages = [.init(records: [.success(peerState), .success(mine), .success(peer)], token: Data("family-cursor-2".utf8))]
+    await f.sync.refresh(reason: "rejoined")
+    #expect(f.sync.membership == .member)
+    #expect(f.requests.last(where: { $0.0.owner == "family-owner" })?.1 == nil, "A full fetch, not the cursor from before")
+    #expect(f.profiles.profiles.contains { $0.id == "peer" })
+    #expect(f.profiles.persistenceFailure == nil)
+    if case .failed(let message) = f.sync.status { Issue.record("Rejoining failed: \(message)") }
+    await f.profiles.drainPersistence()
+}
+
+@Test @MainActor func retiredProfileDocumentsCanBeWrittenAgainWhenTheProfileReturns() throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: "gumbo-reinstate-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let persistence = ProfilePersistence(directory: directory)
+    var state = ProfileState()
+    state.settings.gapless = false
+    _ = try persistence.replace(state, id: "returning")
+    try persistence.retire(id: "returning")
+    #expect(throws: (any Error).self) { _ = try persistence.load(id: "returning") }
+    persistence.reinstate(id: "returning")
+    #expect(try persistence.load(id: "returning").state.settings.gapless, "Starts again with nothing retired")
+    _ = try persistence.replace(state, id: "returning")
+    #expect(try persistence.load(id: "returning").state.settings.gapless == false)
+}
+
+/// An owner opening their own invitation link never becomes a member of their own zone (#252).
+@Test @MainActor func theOwnersOwnZoneIsNeverJoinedAsAMember() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    #expect(f.profiles.activate(try #require(f.profiles.owner)))
+    f.owners = ["A"]
+    await f.sync.refresh(reason: "own zone listed as shared")
+    #expect(f.sync.membership == .owner)
+    try f.sync.join(zoneOwnerName: "A")
+    try f.sync.join(zoneOwnerName: CKCurrentUserDefaultName)
+    #expect(f.sync.membership == .owner)
+    #expect(f.profiles.canManageProfiles)
+    #expect(f.requests.allSatisfy { !$0.0.isMember && $0.0.owner == CKCurrentUserDefaultName })
+    #expect(try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName).membership == "owner")
+}
+
+/// A device an earlier version left as a "member" of its own zone is the owner again at launch.
+@Test @MainActor func aDeviceStuckAsAMemberOfItsOwnZoneBecomesTheOwnerAgain() async throws {
+    let f = try CloudFixture(); defer { f.cleanUp() }
+    let owner = try #require(f.profiles.owner)
+    #expect(f.profiles.activate(owner))
+    await f.sync.refresh(reason: "owner")
+    f.profiles.lock()
+    var stuck = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    stuck.membership = "member"
+    stuck.zoneOwner = "A"
+    var strayZone = CloudAccountState.Zone()
+    strayZone.deletions["gone"] = []
+    stuck.zones["A"] = strayZone
+    try f.persistence.save(stuck)
+    #expect(f.profiles.markAllAsMembers(in: stuck.profileIDs))
+    #expect(!f.profiles.profiles.contains { $0.role == .owner })
+
+    f.relaunch()
+    f.modifications = []
+    await f.sync.refresh(reason: "relaunch")
+    #expect(f.sync.membership == .owner)
+    #expect(f.profiles.profiles.first { $0.id == owner.id }?.role == .owner)
+    #expect(f.requests.last?.0.isMember == false)
+    #expect(f.requests.last?.0.owner == CKCurrentUserDefaultName)
+    #expect(f.modifications.contains { !$0.0.isMember && $0.2.contains("gone") }, "The stray deletion is sent where the zone lives")
+    let repaired = try f.persistence.load(account: "A", defaultOwner: CKCurrentUserDefaultName)
+    #expect(repaired.membership == "owner")
+    #expect(repaired.zoneOwner == CKCurrentUserDefaultName)
+    #expect(repaired.zones["A"] == nil)
+    if case .failed(let message) = f.sync.status { Issue.record("Sync failed after the repair: \(message)") }
+}

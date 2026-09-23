@@ -58,6 +58,9 @@ struct GumboMacApp: App {
             return library.track(id: id).map(DownloadFileRevision.init)
         }
         model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
+        // Signing out or leaving the sample library clears the player: nothing queued from the old
+        // library may play on, from the app or the system's Now Playing controls.
+        model.onSignedOut = { [player] in player.stop() }
         if !UserDefaults.standard.bool(forKey: "downloads.ownersScoped"), let owner = profiles.owner {
             downloads.adoptLegacyOwners(into: owner.id)
             UserDefaults.standard.set(true, forKey: "downloads.ownersScoped")
@@ -80,6 +83,11 @@ struct GumboMacApp: App {
         }
         // An album renamed in its files keeps its downloads under its new identity.
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
+        // A deleted playlist takes its download with it; songs taken out of one stop being kept for it.
+        library.onPlaylistWillBeDeleted = { [downloads] playlist in downloads.removeDeleted(downloads.owner(for: playlist)) }
+        library.onPlaylistSongsRemoved = { [downloads] playlist, trackIDs in
+            downloads.releaseRemovedSongs(of: downloads.owner(for: playlist), keeping: trackIDs)
+        }
         library.onServerTracksDeleted = { [library, downloads, player] sourceID, trackIDs in
             downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
             if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {

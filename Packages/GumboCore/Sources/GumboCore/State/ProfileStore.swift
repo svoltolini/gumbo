@@ -129,8 +129,7 @@ public final class ProfileStore {
             }
         } catch {
             isProfileIndexReadable = false
-            persistenceFailure = PersistenceFailure(kind: .unreadableIndex, title: "Profiles couldn't be read",
-                message: "The saved profile list could not be read. Its files have been kept unchanged. Restore the profile list from a backup, then try again.")
+            persistenceFailure = Self.unreadableIndexFailure
         }
         lastActiveID = defaults.string(forKey: "profiles.active")
     }
@@ -153,10 +152,48 @@ public final class ProfileStore {
     public func activate(_ profile: Profile, pin: String? = nil) -> Bool {
         guard isProfileIndexReadable, let current = profiles.first(where: { $0.id == profile.id }) else { return false }
         if current.id == activeID, sessionID != nil { return true }
+        var opening = current
         if let record = current.pin {
-            guard let pin, record.matches(pin) else { return false }
+            guard let pin, acceptPIN(pin, record: record, id: current.id) else { return false }
+            // An earlier version's quick hash is derived again the slow way now that the PIN is known.
+            if let upgraded = record.upgraded(with: pin) {
+                var stronger = current
+                stronger.pin = upgraded
+                if saveUpdated(stronger), let saved = profiles.first(where: { $0.id == current.id }) { opening = saved }
+            }
         }
-        return openAuthenticated(current)
+        return openAuthenticated(opening)
+    }
+
+    /// While wrong PINs keep this profile's keypad waiting on this device, when it takes one again.
+    public func pinRetryDate(for profile: Profile) -> Date? {
+        pinAttempts(id: profile.id).retryDate(now: .now)
+    }
+
+    /// Checks a PIN, counting wrong ones on this device. None is even tried while the keypad waits.
+    private func acceptPIN(_ pin: String, record: PINRecord, id: String) -> Bool {
+        let now = Date.now
+        var attempts = pinAttempts(id: id)
+        guard attempts.retryDate(now: now) == nil else { return false }
+        guard record.matches(pin) else {
+            attempts.recordFailure(now: now)
+            if let data = try? JSONEncoder().encode(attempts) { defaults.set(data, forKey: Self.pinAttemptsKey(id)) }
+            log("A wrong PIN was entered for a profile (\(attempts.failures) in a row)")
+            return false
+        }
+        defaults.removeObject(forKey: Self.pinAttemptsKey(id))
+        return true
+    }
+
+    private func pinAttempts(id: String) -> PINAttempts {
+        defaults.data(forKey: Self.pinAttemptsKey(id)).flatMap { try? JSONDecoder().decode(PINAttempts.self, from: $0) } ?? PINAttempts()
+    }
+
+    /// A PIN set, changed or removed, rather than the same PIN derived again the slow way.
+    private static func isNewPIN(_ old: PINRecord?, _ new: PINRecord?) -> Bool {
+        guard old != new else { return false }
+        if let old, let new, new.isUpgrade(of: old) { return false }
+        return true
     }
 
     private func openAuthenticated(_ profile: Profile) -> Bool {
@@ -286,8 +323,9 @@ public final class ProfileStore {
         var candidate = profiles
         candidate[index] = updated
         guard saveProfiles(candidate) else { return false }
-        if updated.pin != profiles[index].pin {
+        if Self.isNewPIN(profiles[index].pin, updated.pin) {
             defaults.removeObject(forKey: Self.biometricsKey(profile.id))
+            defaults.removeObject(forKey: Self.pinAttemptsKey(profile.id))
             authenticationGeneration = UUID()
         }
         profiles = candidate
@@ -316,6 +354,7 @@ public final class ProfileStore {
                 persistenceTokens[id] = nil
                 unreadableStateIDs.remove(id)
                 defaults.removeObject(forKey: Self.biometricsKey(id))
+                defaults.removeObject(forKey: Self.pinAttemptsKey(id))
             }
             if let lastActiveID, ids.contains(lastActiveID) {
                 self.lastActiveID = nil
@@ -364,6 +403,7 @@ public final class ProfileStore {
         persistenceTokens[profile.id] = nil
         try? FileManager.default.removeItem(at: storageDirectory.appending(path: "\(profile.id)-photo.jpg"))
         defaults.removeObject(forKey: Self.biometricsKey(profile.id))
+        defaults.removeObject(forKey: Self.pinAttemptsKey(profile.id))
         if lastActiveID == profile.id {
             lastActiveID = nil
             defaults.removeObject(forKey: "profiles.active")
@@ -483,11 +523,15 @@ public final class ProfileStore {
             // A real profile arriving from another device is never a local first-launch stand-in.
             incoming.localOrigin = .created
             updated.append(incoming)
+            // It may have left this device earlier in this session, retired with a family left and
+            // now rejoined: its saved data starts again from what iCloud sends (#251).
+            persistence.reinstate(id: profile.id)
         }
         guard saveProfiles(updated) else { return false }
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-            if profile.pin != profiles[index].pin {
+            if Self.isNewPIN(profiles[index].pin, profile.pin) {
                 defaults.removeObject(forKey: Self.biometricsKey(profile.id))
+                defaults.removeObject(forKey: Self.pinAttemptsKey(profile.id))
                 authenticationGeneration = UUID()
                 if activeID == profile.id { lock() }
             }
@@ -499,6 +543,8 @@ public final class ProfileStore {
     /// A profile's document as another device has it.
     @discardableResult
     public func applyRemote(_ remote: ProfileState, id: String) -> Bool {
+        // The document can arrive before its profile, of one rejoined after it was retired here (#251).
+        if !profiles.contains(where: { $0.id == id }) { persistence.reinstate(id: id) }
         let local = storedState(id: id)
         let merged = local.merged(with: remote)
         guard merged != local else { return true }
@@ -549,10 +595,11 @@ public final class ProfileStore {
         return true
     }
 
-    /// The departing account can manage its retained personal profile again.
-    func ensurePersonalOwner(in ids: Set<String>) -> Bool {
+    /// The departing account can manage its retained personal profile again: its own, when one is.
+    func ensurePersonalOwner(in ids: Set<String>, preferring account: String? = nil) -> Bool {
         guard !profiles.contains(where: { ids.contains($0.id) && $0.role == .owner }),
-              let index = profiles.firstIndex(where: { ids.contains($0.id) }) else { return true }
+              let index = account.flatMap({ account in profiles.firstIndex { ids.contains($0.id) && $0.userRecordName == account } })
+                ?? profiles.firstIndex(where: { ids.contains($0.id) }) else { return true }
         var updated = profiles
         updated[index].role = .owner
         updated[index].updatedAt = .now
@@ -584,9 +631,11 @@ public final class ProfileStore {
         return !unreadableStateIDs.contains(id) && saved.isPristine
     }
 
+    /// Wrong PINs count here as they do at opening, so this keypad is no way round the wait.
     public func verify(pin: String, for profile: Profile) -> Bool {
         guard let current = profiles.first(where: { $0.id == profile.id }) else { return false }
-        return current.pin?.matches(pin) ?? true
+        guard let record = current.pin else { return true }
+        return acceptPIN(pin, record: record, id: current.id)
     }
 
     // MARK: Face ID, per device
@@ -630,8 +679,9 @@ public final class ProfileStore {
         do {
             let accepted = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Open the profile “\(current.name)”")
             guard accepted, authenticationGeneration == generation,
-                  let stored = profiles.first(where: { $0.id == current.id }), stored.pin == current.pin,
+                  let stored = profiles.first(where: { $0.id == current.id }), !Self.isNewPIN(current.pin, stored.pin),
                   biometricsEnabled(for: stored) else { return false }
+            defaults.removeObject(forKey: Self.pinAttemptsKey(stored.id))
             return openAuthenticated(stored)
         } catch {
             return false
@@ -642,6 +692,7 @@ public final class ProfileStore {
     }
 
     private static func biometricsKey(_ id: String) -> String { "profiles.biometrics.\(id)" }
+    private static func pinAttemptsKey(_ id: String) -> String { "profiles.pinAttempts.\(id)" }
 
     // MARK: The active profile's data
 
@@ -789,8 +840,17 @@ public final class ProfileStore {
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
     }
 
+    /// Why "Who's listening?" has no one to show: the profile list could not be read.
+    public static let unreadableIndexFailure = PersistenceFailure(kind: .unreadableIndex, title: "Profiles couldn't be read",
+        message: "The saved profile list could not be read. Its files have been kept unchanged. Restore the profile list from a backup, then try again.")
+
     public func retryProfileIndex() {
-        guard !isProfileIndexReadable, let stored = try? loadAvailableProfiles() else { return }
+        guard !isProfileIndexReadable else { return }
+        // Still unreadable, or gone: the alert that offered this retry has closed, so say so again.
+        guard let stored = try? loadAvailableProfiles() else {
+            persistenceFailure = Self.unreadableIndexFailure
+            return
+        }
         profiles = stored
         isProfileIndexReadable = true
         persistenceFailure = nil

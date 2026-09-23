@@ -101,7 +101,7 @@ struct MacAlbumDetailView: View {
                             player.togglePlayback(of: album.tracks, sourceID: library.catalogue.driveID)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                            player.play(queue: album.tracks.shuffled(), title: album.title)
+                            player.shuffle(queue: album.tracks, title: album.title)
                         }
                         MacCollectionDownloadControl(item: .album(album))
                     }
@@ -154,6 +154,8 @@ struct MacPlaylistDetailView: View {
     @Environment(PlayerModel.self) private var player
     @Environment(ProfileStore.self) private var profiles
     @Environment(\.dismiss) private var dismiss
+    /// False when this page is the root of the sidebar's playlist pane, where there is nothing to pop.
+    @Environment(\.isPresented) private var isPresented
     @State private var isRenaming = false
     @State private var renameText = ""
     @State private var isConfirmingDelete = false
@@ -179,7 +181,7 @@ struct MacPlaylistDetailView: View {
                                     player.togglePlayback(of: playlist.tracks, sourceID: library.catalogue.driveID, title: playlist.name)
                                 } shuffle: {
                                     guard scope.isCurrent(library: library, profiles: profiles), library.playlist(id: playlist.id) == playlist else { return }
-                                    player.play(queue: playlist.tracks.shuffled(), title: playlist.name)
+                                    player.shuffle(queue: playlist.tracks, title: playlist.name)
                                 }
                                 if playlist.kind == .local || playlist.id == Playlist.favouritesID {
                                     MacCollectionDownloadControl(item: .playlist(playlist))
@@ -233,7 +235,8 @@ struct MacPlaylistDetailView: View {
                 guard let editingScope, editingScope.isCurrent(library: library, profiles: profiles), let editingPlaylist,
                       library.playlist(id: playlist.id) == editingPlaylist, library.isLocalPlaylist(playlist.id) else { return }
                 library.deletePlaylist(id: playlist.id)
-                if library.playlist(id: playlist.id) == nil { dismiss() }
+                // At the pane root, dismiss would reach the window; MacMainView moves the sidebar selection instead.
+                if isPresented, library.playlist(id: playlist.id) == nil { dismiss() }
             }
         } message: {
             Text("The songs stay in your library.")
@@ -275,7 +278,7 @@ struct MacArtistDetailView: View {
                             player.play(queue: artist.albums.flatMap(\.tracks), title: artist.name)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.artist(named: artist.name) == artist else { return }
-                            player.play(queue: artist.albums.flatMap(\.tracks).shuffled(), title: artist.name)
+                            player.shuffle(queue: artist.albums.flatMap(\.tracks), title: artist.name)
                         }
                         .padding(.top, 4)
                     }

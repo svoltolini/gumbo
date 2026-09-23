@@ -45,6 +45,7 @@ private struct PlaylistRow: View {
         let songs = "\(playlist.tracks.count) songs"
         switch state {
         case .downloaded: return "\(songs) · On watch"
+        case .partial(let available, let total, _): return "\(available) of \(total) on Watch"
         case .downloading(let done, let total): return "Downloading \(done) of \(total)"
         case .failed: return "\(songs) · Download failed"
         case .none: return "\(songs) · \(ByteText.format(playlist.totalBytes))"

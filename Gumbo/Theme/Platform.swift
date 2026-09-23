@@ -453,6 +453,15 @@ extension View {
         #endif
     }
 
+    /// Reading text the Siri Remote can land on: a television scroll view only moves as focus moves.
+    @ViewBuilder func focusableForReading() -> some View {
+        #if os(tvOS)
+        focusable()
+        #else
+        self
+        #endif
+    }
+
     /// Sheet heights on iPhone; on Mac a sheet is a panel, so it gets a sensible size instead.
     @ViewBuilder func sheetDetents(_ detents: Set<PresentationDetent>) -> some View {
         #if os(macOS)

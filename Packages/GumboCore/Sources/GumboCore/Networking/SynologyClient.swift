@@ -245,6 +245,20 @@ public nonisolated enum SynologyError: LocalizedError, Sendable {
         return false
     }
 
+    /// A request that never got an answer. A certificate this device won't trust is named as such
+    /// wherever it turns up, with advice on the address to use, rather than reading as a server that
+    /// could not be found: DSM's own certificate never covers the LAN address discovery resolves.
+    static func transport(_ error: any Error, url: URL) -> SynologyError {
+        if isCertificateProblem(error), let host = url.host() { return .untrustedCertificate(host: host) }
+        return .unreachable(error.localizedDescription)
+    }
+
+    static func isCertificateProblem(_ error: any Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [.serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateHasBadDate,
+                .serverCertificateNotYetValid, .secureConnectionFailed].contains(urlError.code)
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidAddress:
@@ -351,11 +365,7 @@ public nonisolated enum SynologyClient {
             return candidates[index]
         }
         let certificateProblem = results.contains { result in
-            if let error = result.error, let urlError = error as? URLError {
-                return [.serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateHasBadDate,
-                        .serverCertificateNotYetValid, .secureConnectionFailed].contains(urlError.code)
-            }
-            return false
+            result.error.map(SynologyError.isCertificateProblem) ?? false
         }
         if certificateProblem { throw SynologyError.untrustedCertificate(host: host) }
         if !isHome { throw SynologyError.noAnswer(host: host) }
@@ -630,7 +640,7 @@ public nonisolated enum SynologyClient {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw SynologyError.unreachable(error.localizedDescription)
+            throw SynologyError.transport(error, url: url)
         }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw SynologyError.http(http.statusCode)

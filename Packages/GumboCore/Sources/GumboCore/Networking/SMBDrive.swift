@@ -9,6 +9,9 @@ public nonisolated enum SMBSecurityPolicy: String, Codable, Sendable {
 public nonisolated enum SMBDriveError: Error, LocalizedError, Sendable, Equatable {
     case invalidEndpoint, invalidShare, invalidPath, credentialsRequired, authenticationRequired, unavailableOnPlatform
     case missingPath, permissionDenied, fileBusy, disconnected, timedOut, invalidResponse, securityPolicy, io(Int32)
+    /// The server answered, but not for the shared folder itself: it is not shared right now, for
+    /// example because its disk is detached or not mounted yet. Never proof that music was deleted.
+    case shareUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +29,7 @@ public nonisolated enum SMBDriveError: Error, LocalizedError, Sendable, Equatabl
         case .invalidResponse: "The server returned an incomplete or invalid file response."
         case .securityPolicy: "The server does not support the secure SMB connection you selected."
         case .io: "The shared folder could not complete this request. Try again."
+        case .shareUnavailable: "The shared folder isn't available on the server right now. Check its name and that its disk is connected, then try again."
         }
     }
 }
@@ -47,6 +51,13 @@ nonisolated extension SMBDriveError {
         default:
             nil
         }
+    }
+
+    /// libsmb2 reports a refused tree connect (STATUS_BAD_NETWORK_NAME, STATUS_NO_SUCH_DEVICE) as
+    /// ENOENT, like a missing file. While connecting, or at the share's root, that is the share
+    /// being unavailable, and a scan must not take it for a deleted music folder.
+    var atShareRoot: SMBDriveError {
+        self == .missingPath ? .shareUnavailable : self
     }
 }
 
@@ -220,7 +231,12 @@ public actor SMBDrive: RemoteDeletionDrive, ResumableRemoteFileDrive {
     public func list(_ path: String) async throws -> [RemoteEntry] {
         let relative = try SMBConnectionSettings.relativePath(path)
         try Task.checkCancellation()
-        let entries = try await session.list(relative)
+        let entries: [SMBFileInfo]
+        do {
+            entries = try await session.list(relative)
+        } catch let error as SMBDriveError where relative.isEmpty {
+            throw error.atShareRoot
+        }
         try Task.checkCancellation()
         var seen = Set<String>()
         return try entries.filter { $0.name != "." && $0.name != ".." && !$0.isSymbolicLink }.map { file in
@@ -234,7 +250,12 @@ public actor SMBDrive: RemoteDeletionDrive, ResumableRemoteFileDrive {
     public func info(_ path: String) async throws -> RemoteEntry {
         let relative = try SMBConnectionSettings.relativePath(path)
         try Task.checkCancellation()
-        let file = try await session.info(relative)
+        let file: SMBFileInfo
+        do {
+            file = try await session.info(relative)
+        } catch let error as SMBDriveError where relative.isEmpty {
+            throw error.atShareRoot
+        }
         try Task.checkCancellation()
         guard !file.isSymbolicLink else { throw SMBDriveError.invalidPath }
         return RemoteEntry(path: relative.isEmpty ? "/" : "/" + relative,

@@ -26,8 +26,13 @@ struct ProfilePickerView: View {
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
-                        tiles(availableWidth: max(0, geometry.size.width - horizontalPadding * 2))
-                            .padding(.top, 36)
+                        if profiles.isProfileIndexReadable {
+                            tiles(availableWidth: max(0, geometry.size.width - horizontalPadding * 2))
+                                .padding(.top, 36)
+                        } else {
+                            unreadableProfiles
+                                .padding(.top, 36)
+                        }
                         Spacer(minLength: 0)
                         Spacer(minLength: 0)
                     }
@@ -42,6 +47,26 @@ struct ProfilePickerView: View {
         .sheet(item: $unlocking) { profile in
             UnlockSheet(profile: profile)
         }
+    }
+
+    /// With the profile list unreadable there are no tiles to pick. Once its alert has gone, this
+    /// keeps the way forward on screen rather than leave an empty picker.
+    private var unreadableProfiles: some View {
+        VStack(spacing: 16) {
+            Label(ProfileStore.unreadableIndexFailure.title, systemImage: "exclamationmark.triangle")
+                .font(.headline)
+            Text(ProfileStore.unreadableIndexFailure.message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 480)
+            Button("Try Again") { profiles.retryProfileIndex() }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accent)
+                .foregroundStyle(Palette.onAccent)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var titleFont: Font {

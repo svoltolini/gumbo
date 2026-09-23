@@ -239,12 +239,12 @@ final class CarPlayController {
         let play = CPListItem(text: "Play", detailText: nil, image: UIImage(systemName: "play.fill"))
         handle(play) { controller in
             guard let current = controller.library.album(id: album.id) else { return }
-            await controller.start(current.tracks, from: 0, title: nil)
+            await controller.start(current.tracks, title: nil)
         }
         let shuffle = CPListItem(text: "Shuffle", detailText: nil, image: UIImage(systemName: "shuffle"))
         handle(shuffle) { controller in
             guard let current = controller.library.album(id: album.id) else { return }
-            await controller.start(current.tracks.shuffled(), from: 0, title: current.title)
+            await controller.start(current.tracks, shuffled: true, title: current.title)
         }
         let songs = album.tracks.prefix(max(0, Self.listLimit - 2)).map { track -> CPListItem in
             let item = CPListItem(text: track.title, detailText: track.artist ?? album.artist)
@@ -266,12 +266,12 @@ final class CarPlayController {
         let play = CPListItem(text: "Play", detailText: nil, image: UIImage(systemName: "play.fill"))
         handle(play) { controller in
             guard let current = controller.library.playlist(id: playlist.id) else { return }
-            await controller.start(current.tracks, from: 0, title: current.name)
+            await controller.start(current.tracks, title: current.name)
         }
         let shuffle = CPListItem(text: "Shuffle", detailText: nil, image: UIImage(systemName: "shuffle"))
         handle(shuffle) { controller in
             guard let current = controller.library.playlist(id: playlist.id) else { return }
-            await controller.start(current.tracks.shuffled(), from: 0, title: current.name)
+            await controller.start(current.tracks, shuffled: true, title: current.name)
         }
         let songs = playlist.entries.prefix(max(0, Self.listLimit - 2)).map { entry -> CPListItem in
             let track = entry.track
@@ -297,21 +297,29 @@ final class CarPlayController {
         await push(template)
     }
 
-    /// Starts playback and brings up the system's Now Playing screen.
-    private func start(_ tracks: [Track], from index: Int, title: String?) async {
+    /// Starts playback and brings up the system's Now Playing screen. Without a song to start at, the
+    /// player picks the first song, or a random one when shuffling.
+    private func start(_ tracks: [Track], from index: Int? = nil, shuffled: Bool = false, title: String?) async {
         let context = browseContext
-        guard canUse(context), tracks.indices.contains(index) else { return }
+        guard canUse(context), !tracks.isEmpty else { return }
+        if let index, !tracks.indices.contains(index) { return }
         let request = UUID()
         playbackRequest = request
         let command = player.beginDeferredPlaybackCommand()
         // A CarPlay-only launch can show the cached library before server sign-in completes, and an
         // offline library reconnects when CarPlay connects; waiting for the drive also starts that.
-        // Downloaded songs already have a local URL and can start immediately.
-        if !model.isConnected, player.mediaSourceProvider?(tracks[index]) == nil {
+        // Downloaded songs already have a local file and start immediately; the player's own
+        // source is asked, as it is what plays them. A shuffled start may be any of the songs.
+        let firstSongs = if let index { [tracks[index]] } else if shuffled || player.isShuffling { tracks } else { [tracks[0]] }
+        if !model.isConnected, firstSongs.contains(where: { player.mediaSourceProvider?($0) == nil }) {
             await model.waitForDrive(upTo: .seconds(8))
         }
         guard canUse(context), playbackRequest == request, player.commandRevision == command else { return }
-        player.play(queue: tracks, startingAt: index, title: title)
+        if shuffled {
+            player.shuffle(queue: tracks, title: title)
+        } else {
+            player.play(queue: tracks, startingAt: index, title: title)
+        }
         if interface.topTemplate !== CPNowPlayingTemplate.shared {
             await push(CPNowPlayingTemplate.shared)
         }

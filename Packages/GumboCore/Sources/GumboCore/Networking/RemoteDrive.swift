@@ -82,6 +82,36 @@ nonisolated extension Error {
         if let smb = self as? SMBDriveError { return smb == .missingPath }
         return false
     }
+
+    /// True when the server answered for the file itself: it is gone, this account may not read it,
+    /// or it is too large to read. Such an answer holds until the file changes. Anything else, such as
+    /// a lost connection, a timeout, a sleeping NAS or a server error, says nothing about the file, so
+    /// a lookup that failed that way is tried again on the next pass instead of being remembered.
+    var isAnswerAboutFile: Bool {
+        if isMissingPath { return true }
+        if let url = self as? URLError {
+            return [.fileDoesNotExist, .fileIsDirectory, .noPermissionsToReadFile, .dataLengthExceedsMaximum].contains(url.code)
+        }
+        if let drive = self as? RemoteDriveError {
+            switch drive {
+            case .tooLarge: return true
+            case .http(let status): return [403, 404, 410].contains(status)
+            default: return false
+            }
+        }
+        if let synology = self as? SynologyError {
+            switch synology {
+            // FileStation: 407 operation not permitted, 408 no such file or directory.
+            case .api(let code, let api): return api != "SYNO.API.Auth" && [407, 408].contains(code)
+            case .http(let status): return [403, 404, 410].contains(status)
+            default: return false
+            }
+        }
+        if let provider = self as? ProviderError { return provider == .permissionDenied }
+        if let webDAV = self as? WebDAVError { return [.forbidden, .unsafePath, .rangeNotSupported].contains(webDAV) }
+        if let smb = self as? SMBDriveError { return smb == .permissionDenied || smb == .invalidPath }
+        return false
+    }
 }
 
 public nonisolated enum RemoteDriveError: LocalizedError, Sendable, Equatable {

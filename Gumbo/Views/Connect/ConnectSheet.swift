@@ -85,8 +85,11 @@ struct ConnectSheet: View {
     @State private var error: String?
     @State private var isReadingGuide = false
 
-    init(server: DiscoveredServer? = nil) {
+    /// `error` explains why a suggested server needs another address, for example a certificate
+    /// that doesn't cover the address discovery found.
+    init(server: DiscoveredServer? = nil, error: String? = nil) {
         _draft = State(initialValue: NASConnectionDraft(server: server))
+        _error = State(initialValue: error)
     }
 
     var body: some View {

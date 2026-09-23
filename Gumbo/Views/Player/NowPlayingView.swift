@@ -11,7 +11,8 @@ struct NowPlayingView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isAddingToPlaylist = false
+    /// The song "Add to Playlist…" was chosen for, captured at the tap so a track change while the sheet is open can't swap it.
+    @State private var trackToAdd: Track?
     @State private var previousTaps = 0
     @State private var nextTaps = 0
     @State private var playPauseTaps = 0
@@ -99,7 +100,7 @@ struct NowPlayingView: View {
                             Button("Go to Album", systemImage: "square.stack") { openAlbum() }
                         }
                         Button("Add to Playlist…", systemImage: "text.badge.plus") {
-                            isAddingToPlaylist = true
+                            trackToAdd = track
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -110,8 +111,8 @@ struct NowPlayingView: View {
                     .accessibilityLabel("More")
                 }
                 .animation(.easeInOut(duration: 0.25), value: track.id)
-                .sheet(isPresented: $isAddingToPlaylist) {
-                    AddToPlaylistSheet(tracks: [track])
+                .sheet(item: $trackToAdd) { chosen in
+                    AddToPlaylistSheet(tracks: [chosen])
                 }
 
                 PlaybackProgress()

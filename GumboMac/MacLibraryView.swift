@@ -179,7 +179,7 @@ struct MacAlbumGrid: View {
                     }
                     Button("Shuffle Album", systemImage: "shuffle") {
                         guard actionScope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                        player.play(queue: album.tracks.shuffled(), title: album.title)
+                        player.shuffle(queue: album.tracks, title: album.title)
                     }
                 }
                 .accessibilityLabel("\(album.title), \(album.artist)")

@@ -148,7 +148,7 @@ struct AlbumView: View {
                             player.togglePlayback(of: album.tracks, sourceID: library.catalogue.driveID)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                            player.play(queue: album.tracks.shuffled(), startingAt: 0, title: album.title)
+                            player.shuffle(queue: album.tracks, title: album.title)
                         }
                         #if !os(tvOS)
                         downloadButton(for: album)
@@ -775,6 +775,9 @@ struct TrackRow: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(ProfileStore.self) private var profiles
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The number column's usual width, which grows with the text size; longer numbers widen it rather than wrap.
+    @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 24
     @State private var isAddingToPlaylist = false
 
     private var playbackState: PlayerModel.CollectionPlaybackState {
@@ -791,7 +794,8 @@ struct TrackRow: View {
                       let index = current.tracks.firstIndex(where: { $0.id == track.id }) else { return }
                 player.play(album: current, startingAt: index)
             } label: {
-                HStack(spacing: 14) {
+                // At accessibility sizes the title wraps across the full width, with the badges and duration under it.
+                HStack(alignment: dynamicTypeSize.isAccessibilitySize ? .firstTextBaseline : .center, spacing: 14) {
                     Group {
                         if isCurrent {
                             TrackPlaybackIndicator(state: playbackState)
@@ -802,34 +806,19 @@ struct TrackRow: View {
                     }
                     .font(.subheadline)
                     .monospacedDigit()
-                    .frame(width: 24, alignment: .trailing)
-                    FadingText(track.title)
-                        .font(.body.weight(isCurrent ? .semibold : .regular))
-                    Spacer(minLength: 8)
-                    if library.isFavourite(track) {
-                        FavouriteMark()
-                            .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: numberWidth, alignment: .trailing)
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 6) {
+                            title
+                            HStack(spacing: 14) { details }
+                        }
+                    } else {
+                        title
+                        Spacer(minLength: 8)
+                        details
                     }
-                    if let fraction = downloads.progress[track.id] {
-                        MiniProgressRing(fraction: fraction)
-                            .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
-                    } else if downloads.isQueued(track) {
-                        Circle()
-                            .stroke(.quaternary, lineWidth: 2)
-                            .frame(width: 13, height: 13)
-                            .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
-                            .accessibilityLabel("Waiting to download")
-                    } else if downloads.isDownloaded(track) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
-                            .accessibilityLabel("Downloaded")
-                    }
-                    Text(TimeText.clock(track.duration))
-                        .font(.footnote)
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
                 }
                 .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: downloads.isDownloaded(track))
                 .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: library.isFavourite(track))
@@ -848,5 +837,38 @@ struct TrackRow: View {
         .sheet(isPresented: $isAddingToPlaylist) {
             AddToPlaylistSheet(tracks: [track])
         }
+    }
+
+    private var title: some View {
+        LibraryRowText(track.title)
+            .font(.body.weight(isCurrent ? .semibold : .regular))
+    }
+
+    /// The favourite and download badges, then the duration.
+    @ViewBuilder private var details: some View {
+        if library.isFavourite(track) {
+            FavouriteMark()
+                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+        }
+        if let fraction = downloads.progress[track.id] {
+            MiniProgressRing(fraction: fraction)
+                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+        } else if downloads.isQueued(track) {
+            Circle()
+                .stroke(.quaternary, lineWidth: 2)
+                .frame(width: 13, height: 13)
+                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                .accessibilityLabel("Waiting to download")
+        } else if downloads.isDownloaded(track) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                .accessibilityLabel("Downloaded")
+        }
+        Text(TimeText.clock(track.duration))
+            .font(.footnote)
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
     }
 }

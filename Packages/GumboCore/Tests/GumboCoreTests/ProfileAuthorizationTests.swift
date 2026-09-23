@@ -328,3 +328,91 @@ private final class ProfileFixture {
     store.openAutomaticallyIfPossible()
     #expect(!store.isLocked, "Profile without PIN opens automatically")
 }
+
+/// Wrong PINs make the keypad wait, on this device and across relaunches, whichever keypad they
+/// were typed into; even the right PIN is refused until the wait is over (#257).
+@Test @MainActor func wrongPINsLockTheProfileForAWhileEvenAgainstTheRightPIN() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    let owner = try fixture.owner(pin: "2468")
+    store.lock()
+    for _ in 0..<PINAttempts.freeFailures {
+        #expect(!store.activate(owner, pin: "0000"))
+        #expect(store.pinRetryDate(for: owner) == nil)
+    }
+    #expect(!store.activate(owner), "Opening without a PIN tries none")
+    #expect(store.pinRetryDate(for: owner) == nil)
+    #expect(!store.verify(pin: "1111", for: owner))
+    let retry = try #require(store.pinRetryDate(for: owner))
+    #expect(retry > .now.addingTimeInterval(20))
+    #expect(!store.activate(owner, pin: "2468"))
+    #expect(!store.verify(pin: "2468", for: owner))
+    #expect(store.isLocked)
+
+    let relaunched = ProfileStore(directory: fixture.directory, defaults: fixture.defaults)
+    #expect(relaunched.pinRetryDate(for: owner) != nil)
+    #expect(!relaunched.activate(owner, pin: "2468"))
+
+    // The wait is over: the right PIN opens the profile and starts the count again.
+    var lapsed = PINAttempts()
+    for _ in 0...PINAttempts.freeFailures { lapsed.recordFailure(now: .now.addingTimeInterval(-2 * 60 * 60)) }
+    fixture.defaults.set(try JSONEncoder().encode(lapsed), forKey: "profiles.pinAttempts.\(owner.id)")
+    #expect(store.pinRetryDate(for: owner) == nil)
+    #expect(store.activate(owner, pin: "2468"))
+    #expect(fixture.defaults.data(forKey: "profiles.pinAttempts.\(owner.id)") == nil)
+}
+
+@Test @MainActor func aNewPINStartsTheWrongPINCountAgain() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    let owner = try fixture.owner(pin: "2468")
+    for _ in 0...PINAttempts.freeFailures { #expect(!store.verify(pin: "0000", for: owner)) }
+    #expect(store.pinRetryDate(for: owner) != nil)
+    var changed = try #require(store.active)
+    changed.pin = PINRecord.make("1357")
+    #expect(store.update(changed))
+    #expect(store.pinRetryDate(for: owner) == nil)
+    store.lock()
+    #expect(store.activate(try #require(store.owner), pin: "1357"))
+}
+
+/// A PIN saved by an earlier version still opens its profile, and is then derived again the slow
+/// way. It is the same PIN: Face ID stays enrolled and another device's open profile stays open.
+@Test @MainActor func legacyPINsUpgradeOnTheirFirstRightEntryWithoutCountingAsANewPIN() throws {
+    let fixture = try ProfileFixture()
+    defer { fixture.cleanUp() }
+    let store = fixture.store
+    var owner = try fixture.owner()
+    owner.pin = legacyPINRecord("2468")
+    #expect(store.update(owner))
+    owner = try #require(store.owner)
+    #expect(store.setBiometrics(true, for: owner))
+    store.lock()
+
+    #expect(store.activate(owner, pin: "2468"))
+    let upgraded = try #require(store.active?.pin)
+    #expect(!upgraded.isLegacy)
+    #expect(upgraded.salt == owner.pin?.salt)
+    #expect(upgraded.matches("2468"))
+    #expect(store.biometricsEnabled(for: try #require(store.active)))
+    #expect(try #require(store.active).updatedAt > owner.updatedAt)
+
+    // The same upgrade arriving from another device while the old record is open here.
+    let other = try ProfileFixture()
+    defer { other.cleanUp() }
+    var remoteOwner = try other.owner()
+    remoteOwner.pin = legacyPINRecord("2468")
+    #expect(other.store.update(remoteOwner))
+    remoteOwner = try #require(other.store.owner)
+    #expect(other.store.setBiometrics(true, for: remoteOwner))
+    let session = other.store.sessionID
+    var arriving = remoteOwner
+    arriving.pin = try #require(remoteOwner.pin?.upgraded(with: "2468"))
+    arriving.updatedAt = remoteOwner.updatedAt.addingTimeInterval(60)
+    #expect(other.store.applyRemote(arriving))
+    #expect(!other.store.isLocked)
+    #expect(other.store.sessionID == session)
+    #expect(other.store.biometricsEnabled(for: arriving))
+}

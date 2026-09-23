@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 import base64
 import copy
+import errno
 import http.client
 import json
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from engine import FileEngine, ServiceError, Cancelled, load_audio, media_signature, unrelated_tags, validate_request
+from engine import FileEngine, ServiceError, Cancelled, load_audio, media_signature, storage_error, unrelated_tags, validate_request
 from server import JobStore, HTTPServer
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -481,6 +482,166 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(result["status"], "succeeded")
                 self.assertEqual(result["after"]["fields"]["genre"], "Rock")
 
+
+    # Issue #256: a failed rollback after replacement must be unconfirmed and stop the batch.
+    def test_failed_rollback_after_replacement_is_unconfirmed_and_stops_batch(self):
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        identifier = str(uuid.uuid4())
+        flac, mp3 = self.music / "tone.flac", self.music / "tone.mp3"
+        flac_before, mp3_before = flac.read_bytes(), mp3.read_bytes()
+        store.submit(identifier, {"version": 1, "files": [self.edit("tone.flac"), self.edit("tone.mp3")]})
+        real_replace, calls = os.replace, []
+        def replace(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 2:  # The rollback of the first file's replacement.
+                raise OSError(errno.EIO, "I/O error")
+            return real_replace(*args, **kwargs)
+        real_execute = self.engine.execute
+        def execute(entry, *args, **kwargs):
+            if entry["path"] == "tone.flac":
+                def fail():
+                    raise OSError(errno.EIO, "fsync failed after replace")
+                kwargs["after_replace"] = fail
+            return real_execute(entry, *args, **kwargs)
+        with patch("engine.os.replace", side_effect=replace), patch.object(self.engine, "execute", side_effect=execute):
+            store.run_job(identifier)
+        status = store.status(identifier)
+        self.assertEqual(status["status"], "partial")
+        self.assertEqual([item["status"] for item in status["files"]], ["unconfirmed", "cancelled"])
+        self.assertEqual(status["files"][0]["error"]["code"], "recovery_required")
+        self.assertNotEqual(flac.read_bytes(), flac_before)
+        backups = list(self.music.glob(".gumbo-tag-*.backup"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), flac_before)
+        self.assertEqual(mp3.read_bytes(), mp3_before)
+        store.close()
+
+    def test_rollback_fsync_failure_restores_original_but_is_unconfirmed(self):
+        path = self.music / "tone.flac"
+        before = path.read_bytes()
+        real_fsync, real_replace, rolled_back = os.fsync, os.replace, []
+        def replace(source, destination, **kwargs):
+            if source.endswith(".backup"):
+                rolled_back.append(True)
+            return real_replace(source, destination, **kwargs)
+        def fsync(descriptor):
+            if rolled_back:
+                raise OSError(errno.EIO, "I/O error")
+            return real_fsync(descriptor)
+        def fail():
+            raise OSError(errno.EIO, "read failed after replace")
+        with patch("engine.os.replace", side_effect=replace), patch("engine.os.fsync", side_effect=fsync), \
+                self.assertRaises(ServiceError) as raised:
+            self.execute(self.edit(path.name), after_replace=fail)
+        self.assertEqual(raised.exception.code, "recovery_required")
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_os_error_after_replacement_rolls_back_and_reports_real_cause(self):
+        path = self.music / "tone.flac"
+        before = path.read_bytes()
+        def fail():
+            raise OSError(errno.EIO, "fsync failed after replace")
+        with self.assertRaises(ServiceError) as raised:
+            self.execute(self.edit(path.name), after_replace=fail)
+        self.assertEqual((raised.exception.code, raised.exception.status), ("io_error", 500))
+        self.assertIn("EIO", raised.exception.message)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_os_errors_map_to_accurate_codes_and_keep_original(self):
+        path = self.music / "tone.flac"
+        before = path.read_bytes()
+        real_open = os.open
+        def deny_stage(name, flags, mode=0o777, *, dir_fd=None):
+            if isinstance(name, str) and name.endswith(".tmp"):
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_open(name, flags, mode, dir_fd=dir_fd)
+        def raising(number):
+            def fail(*args, **kwargs):
+                raise OSError(number, os.strerror(number))
+            return fail
+        cases = [
+            (patch("engine.os.open", side_effect=deny_stage), "permission_denied", 409),
+            (patch("engine.copy_extended_attributes", side_effect=raising(errno.EPERM)), "permission_denied", 409),
+            (patch("engine.os.fsync", side_effect=raising(errno.ENOSPC)), "insufficient_space", 507),
+            (patch("engine.os.fsync", side_effect=raising(errno.EDQUOT)), "insufficient_space", 507),
+            (patch("engine.os.link", side_effect=raising(errno.EROFS)), "permission_denied", 409),
+            (patch("engine.os.fsync", side_effect=raising(errno.EIO)), "io_error", 500),
+            (patch("engine.fcntl.flock", side_effect=raising(errno.EWOULDBLOCK)), "file_busy", 409),
+        ]
+        for patcher, code, status in cases:
+            with self.subTest(code=code, patched=patcher.attribute):
+                edit = self.edit(path.name)
+                with patcher, self.assertRaises(ServiceError) as raised:
+                    self.execute(edit)
+                self.assertEqual((raised.exception.code, raised.exception.status), (code, status))
+                self.assertNotIn("symbolic link", raised.exception.message)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(list(self.music.glob(".gumbo-tag-*")), [])
+
+    def test_path_errors_still_report_missing_or_symbolic_link(self):
+        (self.music / "folder").mkdir()
+        (self.music / "linked").symlink_to(self.music / "folder", target_is_directory=True)
+        (self.music / "linked.mp3").symlink_to(self.music / "tone.mp3")
+        for path in ("absent.mp3", "absent/tone.mp3", "linked/tone.mp3", "linked.mp3", "tone.mp3/tone.mp3"):
+            with self.subTest(path=path), self.assertRaises(ServiceError) as raised:
+                self.engine.inspect(path)
+            self.assertEqual((raised.exception.code, raised.exception.status), ("unsafe_or_missing_path", 409))
+        real_open = os.open
+        def deny_folder(name, flags, mode=0o777, *, dir_fd=None):
+            if name == "folder":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_open(name, flags, mode, dir_fd=dir_fd)
+        with patch("engine.os.open", side_effect=deny_folder), self.assertRaises(ServiceError) as raised:
+            self.engine.inspect("folder/tone.mp3")
+        self.assertEqual(raised.exception.code, "permission_denied")
+
+    def test_storage_error_mapping_and_ordinary_failure_does_not_stop_batch(self):
+        for number, code in ((errno.EAGAIN, "file_busy"), (errno.EBUSY, "file_busy"), (errno.EEXIST, "conflict"),
+                             (errno.ENOTDIR, "unsafe_or_missing_path"), (errno.ELOOP, "unsafe_or_missing_path"), (None, "io_error")):
+            with self.subTest(number=number):
+                self.assertEqual(storage_error(OSError(number, "x") if number else OSError("x")).code, code)
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        identifier = str(uuid.uuid4())
+        store.submit(identifier, {"version": 1, "files": [self.edit("tone.flac"), self.edit("tone.mp3")]})
+        real_execute = self.engine.execute
+        def execute(entry, *args, **kwargs):
+            if entry["path"] == "tone.flac":
+                with patch("engine.os.fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+                    return real_execute(entry, *args, **kwargs)
+            return real_execute(entry, *args, **kwargs)
+        with patch.object(self.engine, "execute", side_effect=execute):
+            store.run_job(identifier)
+        files = store.status(identifier)["files"]
+        self.assertEqual([item["status"] for item in files], ["failed", "succeeded"])
+        self.assertEqual(files[0]["error"]["code"], "insufficient_space")
+        self.assertEqual((self.music / "tone.flac").read_bytes(), (FIXTURES / "tone.flac").read_bytes())
+        store.close()
+
+    def test_http_reports_storage_errors_with_their_codes(self):
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        server = HTTPServer(("127.0.0.1", 0), self.engine, store, "t" * 43)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            def stat(path):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=5)
+                connection.request("POST", "/v1/files/stat", json.dumps({"path": path}).encode(),
+                                   {"Content-Type": "application/json", "Authorization": "Bearer " + "t" * 43})
+                response = connection.getresponse()
+                data = json.loads(response.read())
+                connection.close()
+                return response.status, data["error"]["code"]
+            with patch("engine.digest", side_effect=OSError(errno.EIO, "I/O error")):
+                self.assertEqual(stat("tone.mp3"), (500, "io_error"))
+            with patch("engine.digest", side_effect=PermissionError(errno.EACCES, "Permission denied")):
+                self.assertEqual(stat("tone.mp3"), (409, "permission_denied"))
+            self.assertEqual(stat("absent.mp3"), (409, "unsafe_or_missing_path"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+            store.close()
 
 if __name__ == "__main__":
     unittest.main()
