@@ -17,6 +17,7 @@ struct NowPlayingView: View {
     @State private var nextTaps = 0
     @State private var playPauseTaps = 0
     @State private var modeTaps = 0
+    @State private var isShowingQueue = false
 
     @Environment(\.isWideLayout) private var isWide
 
@@ -188,6 +189,23 @@ struct NowPlayingView: View {
                     Spacer()
                     routePicker
                     Spacer()
+                    #if os(iOS)
+                    Button {
+                        isShowingQueue = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(TransportButtonStyle())
+                    .accessibilityLabel("Up Next")
+                    .sheet(isPresented: $isShowingQueue) {
+                        UpNextSheet()
+                    }
+                    Spacer()
+                    #endif
                     Button {
                         modeTaps += 1
                         player.cycleRepeat()
@@ -225,16 +243,22 @@ struct NowPlayingView: View {
 /// only this strip and not the whole sheet with its artwork and glass buttons.
 private struct PlaybackProgress: View {
     @Environment(PlayerModel.self) private var player
+    /// Where a drag is aiming, so the times preview it before the seek.
+    @State private var scrubFraction: Double?
 
     var body: some View {
+        let position = scrubFraction.map { $0 * player.duration } ?? player.position
+        let remaining = scrubFraction == nil ? player.remaining : max(0, player.duration - position)
         VStack(spacing: 8) {
-            ScrubBar(progress: player.progress) { fraction in
+            ScrubBar(progress: player.progress, onSeek: { fraction in
                 player.seek(toFraction: fraction)
-            }
+            }, onScrub: { fraction in
+                scrubFraction = fraction
+            })
             HStack {
-                Text(TimeText.clock(player.position))
+                Text(TimeText.clock(position))
                 Spacer()
-                Text("-" + TimeText.clock(player.remaining))
+                Text("-" + TimeText.clock(remaining))
             }
             .font(.caption)
             .monospacedDigit()
@@ -328,10 +352,106 @@ extension NowPlayingView {
     }
 }
 
+#if os(iOS)
+/// The current song and what follows it in the queue; tapping a song jumps straight to it.
+private struct UpNextSheet: View {
+    @Environment(PlayerModel.self) private var player
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let queue = player.queue
+        let command = player.commandRevision
+        let entries = TrackListEntry.make(from: queue).filter { $0.position >= player.index }
+        NavigationStack {
+            List {
+                if let current = entries.first {
+                    Section("Now Playing") {
+                        UpNextRow(entry: current, isCurrent: true)
+                    }
+                }
+                Section("Up Next") {
+                    if entries.count <= 1 {
+                        Text("No more songs in the queue.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(entries.dropFirst()) { entry in
+                        Button {
+                            play(entry, from: queue, command: command)
+                        } label: {
+                            UpNextRow(entry: entry, isCurrent: false)
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityHint("Plays this song now")
+                    }
+                }
+            }
+            .navigationTitle("Up Next")
+            .inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .sheetDetents([.medium, .large])
+    }
+
+    /// A row drawn for an earlier queue must not start whichever song now sits at its position.
+    private func play(_ entry: TrackListEntry, from queue: [Track], command: UUID) {
+        guard command == player.commandRevision, queue == player.queue else { return }
+        player.playQueuedTrack(at: entry.position)
+    }
+}
+
+private struct UpNextRow: View {
+    let entry: TrackListEntry
+    let isCurrent: Bool
+    @Environment(LibraryStore.self) private var library
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let album = library.album(for: entry.track) {
+                ArtworkView(album: album, cornerRadius: 6, highlight: false, size: .row)
+                    .frame(width: 44, height: 44)
+            } else {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.quaternary)
+                    .frame(width: 44, height: 44)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.track.title)
+                    .font(.body.weight(isCurrent ? .semibold : .regular))
+                    .lineLimit(1)
+                Text(entry.track.artist ?? library.album(for: entry.track)?.artist ?? "Unknown Artist")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if isCurrent {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            } else {
+                Text(TimeText.clock(entry.track.duration))
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(isCurrent ? "Current song" : "")
+    }
+}
+#endif
+
 /// Thin capsule progress bar that seeks on drag or tap.
 struct ScrubBar: View {
     let progress: Double
     let onSeek: (Double) -> Void
+    /// Reports the drag's position as it moves, and nil once it ends.
+    var onScrub: ((Double?) -> Void)? = nil
     @State private var dragFraction: Double?
 
     var body: some View {
@@ -350,9 +470,11 @@ struct ScrubBar: View {
             .contentShape(Rectangle().inset(by: -14))
             .modifier(ScrubGesture(width: geometry.size.width) { fraction in
                 dragFraction = fraction
+                onScrub?(fraction)
             } onEnd: { fraction in
                 onSeek(fraction)
                 dragFraction = nil
+                onScrub?(nil)
             })
             .animation(.easeOut(duration: 0.15), value: dragFraction == nil)
         }

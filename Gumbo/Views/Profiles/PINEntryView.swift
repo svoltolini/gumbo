@@ -27,6 +27,9 @@ struct PINEntryView: View {
                         .animation(.snappy(duration: 0.2), value: digits.count)
                 }
             }
+            .accessibilityElement()
+            .accessibilityLabel("PIN")
+            .accessibilityValue("\(digits.count) of 4 digits entered")
             .keyframeAnimator(initialValue: 0.0, trigger: shakes) { view, offset in
                 view.offset(x: motionReduced ? 0 : offset)
             } keyframes: { _ in
@@ -49,7 +52,6 @@ struct PINEntryView: View {
                 Text("That PIN didn’t match. Try again.")
                     .font(.footnote)
                     .foregroundStyle(.red)
-                    .accessibilityAddTraits(.updatesFrequently)
             }
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(76), spacing: 22), count: 3), spacing: 16) {
                 ForEach(keys, id: \.self) { key in
@@ -110,6 +112,11 @@ struct PINEntryView: View {
                 isInvalid = true
                 waitUntil = retryDate()
                 shakes += 1
+                // The message appears without focus moving to it, so VoiceOver hears it here.
+                let message: String = waitUntil == nil
+                    ? "That PIN didn’t match. Try again."
+                    : "Too many wrong PINs. Wait before trying again."
+                AccessibilityNotification.Announcement(message).post()
                 try? await Task.sleep(for: .milliseconds(350))
                 digits = ""
             }
@@ -212,6 +219,7 @@ struct PINSetupSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 24)
+            .scrollsWhenCramped()
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -253,6 +261,7 @@ struct PINVerificationSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 24)
+            .scrollsWhenCramped()
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -322,6 +331,7 @@ struct UnlockSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 24)
+            .scrollsWhenCramped()
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -334,6 +344,19 @@ struct UnlockSheet: View {
 }
 
 private extension View {
+    /// Centred while it fits; scrolls on a small phone or at large text sizes rather than clipping
+    /// the avatar, keypad or biometrics switch.
+    func scrollsWhenCramped() -> some View {
+        GeometryReader { geometry in
+            ScrollView {
+                self
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
     /// On a Mac the digits can simply be typed; the keypad stays for the mouse.
     @ViewBuilder func pinKeyboard(_ tap: @escaping (String) -> Void) -> some View {
         #if os(macOS)

@@ -139,6 +139,8 @@ private struct Burst: View {
                 }
             }
         } keyframes: { _ in
+            // Each run carries on from the last one's end value, so every burst starts again from zero.
+            MoveKeyframe(0.0)
             CubicKeyframe(1.0, duration: 0.65)
         }
         .allowsHitTesting(false)
