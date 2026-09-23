@@ -50,7 +50,7 @@ For development only, `server.py --http-loopback` disables TLS and forces bindin
 
 ## API v1
 
-All responses are JSON with `version: 1`. Authenticate with `Authorization: Bearer <token>`. No redirects, cookies or browser CORS access are used. Request bodies are limited to 256 KiB; one job may contain at most 128 distinct files.
+All responses are JSON with `version: 1`. Authenticate with `Authorization: Bearer <token>`. No redirects, cookies or browser CORS access are used. Request bodies are limited to 256 KiB; one job may contain at most 128 distinct files. The TLS handshake, request line, headers and body must arrive within 15 seconds in total. The helper accepts at most 32 connections (8 per client address) and runs at most 8 authenticated requests at once, answering `503 busy` beyond that; job status and cancel requests don't count toward that limit. Paths and tag values may contain any Unicode text except ASCII control characters (U+0000–U+001F, U+007F).
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |

@@ -52,6 +52,7 @@ private actor HelperServiceFixture: ReviewedDeletionService {
         submissions += 1; lastID = jobID; lastPath = files[0].path
         #expect(files.count == 1 && files[0].expected == expected)
         if mode == "lostAck" { throw RemoteTagService.Error.unavailable }
+        if mode == "busy" { throw RemoteTagService.Error.service(code: "busy", message: "The helper's edit queue is full. Try later.") }
         if mode == "queued" { return try job(jobID, status: "queued", fileStatus: "pending") }
         return try job(jobID, status: mode == "unconfirmed" ? "partial" : "completed", fileStatus: mode == "unconfirmed" ? "unconfirmed" : "deleted")
     }
@@ -113,6 +114,19 @@ private actor HelperServiceFixture: ReviewedDeletionService {
         try await drive.deleteReviewed(review) { true }
         #expect(await service.submissions == 1)
         #expect(await service.statusReads == (mode == "lostAck" ? 1 : 0))
+    }
+
+    @Test func structuredRejectionIsReportedWithoutPollingAJobThatWasNeverQueued() async throws {
+        let base = HelperFileFixture()
+        let service = HelperServiceFixture(expected: await base.expected(), mode: "busy")
+        let drive = HelperDeletionDrive(base: base, configuration: configuration(), service: service)
+        let review = try await drive.reviewDeletion("/music/song.wav")
+        await #expect(throws: RemoteTagService.Error.service(code: "busy", message: "The helper's edit queue is full. Try later.")) {
+            try await drive.deleteReviewed(review) { true }
+        }
+        #expect(await service.submissions == 1)
+        #expect(await service.statusReads == 0)
+        #expect(await service.cancellations == 0)
     }
 
     @Test(arguments: ["unconfirmed", "wrongOperation", "dryRun"]) func ambiguousResultNeverCountsAsDeleted(_ mode: String) async throws {

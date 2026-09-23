@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 import base64
+import contextlib
 import copy
 import errno
 import http.client
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -17,7 +20,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from engine import FileEngine, ServiceError, Cancelled, load_audio, media_signature, storage_error, unrelated_tags, validate_request
-from server import JobStore, HTTPServer
+from server import JobStore, HTTPServer, MAX_ACTIVE_REQUESTS, MAX_CONNECTIONS_PER_ADDRESS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -642,6 +645,97 @@ class ServiceTests(unittest.TestCase):
             server.server_close()
             thread.join()
             store.close()
+
+    def serve(self):
+        store = JobStore(self.base / "state", self.engine, start_worker=False)
+        server = HTTPServer(("127.0.0.1", 0), self.engine, store, "t" * 43)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def stop():
+            server.shutdown()
+            server.server_close()
+            thread.join()
+            store.close()
+        self.addCleanup(stop)
+        return server
+
+    def authorized(self, server, method, route, body=None, source=None):
+        connection = http.client.HTTPConnection(*server.server_address, timeout=5, source_address=source)
+        try:
+            connection.request(method, route, json.dumps(body).encode() if body is not None else None,
+                               {"Content-Type": "application/json", "Authorization": "Bearer " + "t" * 43})
+            response = connection.getresponse()
+            data = json.loads(response.read())
+            return response.status, data.get("error", {}).get("code")
+        finally:
+            connection.close()
+
+    def assert_closed_by_server(self, client, within):
+        client.settimeout(within)
+        try:
+            self.assertEqual(client.recv(1024), b"")
+        except ConnectionResetError:
+            pass
+
+    def test_slow_drip_request_is_closed_at_its_absolute_deadline(self):
+        with patch("server.REQUEST_DEADLINE", 0.5):
+            server = self.serve()
+            client = socket.create_connection(server.server_address, timeout=5)
+            self.addCleanup(client.close)
+            # Each byte arrives well within any per-recv timeout; only the total deadline stops it.
+            with contextlib.suppress(OSError):
+                for byte in b"GET /v1/capabilities HTTP/1.0\r\nX-Slow: aaaaaaaaaaaa":
+                    client.sendall(bytes([byte]))
+                    time.sleep(0.05)
+            self.assert_closed_by_server(client, 2)
+
+    def test_one_address_cannot_occupy_every_connection_or_lock_out_other_clients(self):
+        server = self.serve()
+        idle = [socket.create_connection(server.server_address, timeout=5) for _ in range(MAX_CONNECTIONS_PER_ADDRESS)]
+        for connection in idle:
+            self.addCleanup(connection.close)
+        deadline = time.monotonic() + 5
+        while server.connections.get("127.0.0.1", 0) < MAX_CONNECTIONS_PER_ADDRESS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        extra = socket.create_connection(server.server_address, timeout=5)
+        self.addCleanup(extra.close)
+        self.assert_closed_by_server(extra, 2)
+        try:
+            self.assertEqual(self.authorized(server, "GET", "/v1/capabilities", source=("127.0.0.2", 0)), (200, None))
+        except OSError:
+            self.skipTest("A second loopback address isn't available on this host.")
+        for connection in idle:
+            connection.close()
+
+    def test_job_polls_are_answered_while_every_work_slot_is_busy(self):
+        server = self.serve()
+        for _ in range(MAX_ACTIVE_REQUESTS):
+            server.work.acquire()
+        try:
+            self.assertEqual(self.authorized(server, "POST", "/v1/files/stat", {"path": "tone.mp3"}), (503, "busy"))
+            identifier = str(uuid.uuid4())
+            self.assertEqual(self.authorized(server, "GET", "/v1/jobs/" + identifier), (404, "job_not_found"))
+            self.assertEqual(self.authorized(server, "POST", "/v1/jobs/" + identifier + "/cancel", {}), (404, "job_not_found"))
+        finally:
+            for _ in range(MAX_ACTIVE_REQUESTS):
+                server.work.release()
+        self.assertEqual(self.authorized(server, "POST", "/v1/files/stat", {"path": "tone.mp3"}), (200, None))
+
+    def test_format_characters_are_accepted_and_only_ascii_controls_rejected(self):
+        # ZWNJ, ZWJ, LRM, soft hyphen and BOM are ordinary text; the Swift client applies the same rule.
+        for text in ("\u062f\u0644\u062a\u0646\u06af\u200c\u06cc", "\U0001F469\u200d\U0001F3A4", "a\u200eb", "soft\u00adhyphen", "\ufeffBOM"):
+            with self.subTest(text=text):
+                entry = self.edit()
+                entry["changes"] = {"album": text}
+                validate_request({"version": 1, "files": [entry]})
+                entry["path"] = text + ".mp3"
+                validate_request({"version": 1, "files": [entry]})
+        for text in ("tab\there", "unit\x1fseparator", "delete\x7f"):
+            with self.subTest(text=text), self.assertRaises(ServiceError):
+                entry = self.edit()
+                entry["changes"] = {"album": text}
+                validate_request({"version": 1, "files": [entry]})
 
 if __name__ == "__main__":
     unittest.main()

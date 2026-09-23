@@ -56,10 +56,41 @@ private nonisolated final class TagFixtureProtocol: URLProtocol, @unchecked Send
         await #expect(throws: RemoteTagService.Error.invalidResponse) { _ = try await changed.capabilities() }
     }
 
-    @Test(arguments: ["/absolute.mp3", "../outside.mp3", "folder/../outside.mp3", "folder//song.mp3", "folder\\song.mp3", ".gumbo-tag-secret.mp3"])
+    @Test func deletionDisabledIsReportedAsTheHelpersReasonNotABadToken() async throws {
+        let client = try client { _ in
+            (403, Data(#"{"version":1,"error":{"code":"deletion_disabled","message":"Reviewed deletion is not enabled by this server's owner."}}"#.utf8))
+        }
+        await #expect(throws: RemoteTagService.Error.service(code: "deletion_disabled", message: "Reviewed deletion is not enabled by this server's owner.")) {
+            _ = try await client.reviewDeletion(path: "song.wav")
+        }
+        let bare = try self.client { _ in (403, Data(#"{"version":1}"#.utf8)) }
+        await #expect(throws: RemoteTagService.Error.unauthorized) { _ = try await bare.capabilities() }
+    }
+
+    @Test(arguments: ["/absolute.mp3", "../outside.mp3", "folder/../outside.mp3", "folder//song.mp3", "folder\\song.mp3", ".gumbo-tag-secret.mp3",
+                      "folder/so\u{1}ng.mp3", "folder/so\u{7F}ng.mp3"])
     func rejectsPathsBeforeSendingRequest(_ path: String) async throws {
         let client = try client { _ in Issue.record("Unsafe request reached the network"); return (500, Data()) }
         await #expect(throws: RemoteTagService.Error.invalidPath) { _ = try await client.stat(path: path) }
+    }
+
+    @Test func formatCharactersInPathsAndTagsMatchTheHelpersRule() async throws {
+        // ZWNJ, ZWJ, LRM, soft hyphen and BOM are ordinary text; only ASCII controls are refused.
+        for text in ["دلتنگ\u{200C}ی", "👩\u{200D}🎤", "a\u{200E}b", "soft\u{00AD}hyphen", "\u{FEFF}BOM"] {
+            #expect(!RemoteTagService.containsControl(text))
+        }
+        #expect(RemoteTagService.containsControl("tab\there"))
+        #expect(RemoteTagService.containsControl("delete\u{7F}"))
+        let path = "دلتنگ\u{200C}ی/song.mp3"
+        let client = try client { request in
+            if request.httpMethod == "PUT" { return (409, Data(#"{"version":1,"error":{"code":"conflict","message":"Changed"}}"#.utf8)) }
+            return (200, Data("""
+            {"version":1,"path":"\(path)","expected":{"size":500,"mtimeNs":1,"sha256":"\(String(repeating: "a", count: 64))"},"fields":{}}
+            """.utf8))
+        }
+        #expect(try await client.stat(path: path).path == path)
+        let edit = RemoteTagService.Edit(path: path, expected: .init(size: 500, mtimeNs: 1, sha256: digest), changes: .init(album: "👩\u{200D}🎤"))
+        await #expect(throws: RemoteTagService.Error.service(code: "conflict", message: "Changed")) { _ = try await client.submit(jobID: UUID(), files: [edit]) }
     }
 
     @Test func statMustMatchRequestedPathAndIncludesActualFields() async throws {
@@ -248,6 +279,17 @@ private nonisolated final class TagFixtureProtocol: URLProtocol, @unchecked Send
         #expect(await drive.transfers == 0)
     }
 
+    @Test func metadataWriterStopsAfterAnInterruptedFile() async throws {
+        let fixture = TagMetadataFixture(mode: .interrupted)
+        let (writer, drive, configuration) = try metadataFixture(fixture)
+        let report = await writer.write(.init(genre: "Rock"), to: [metadataTrack("song.mp3"), metadataTrack("next.mp3")],
+                                        drive: drive, helper: configuration)
+        #expect(report.written.isEmpty)
+        #expect(report.failures.count == 1)
+        #expect(fixture.calls.filter { $0.hasPrefix("PUT ") }.count == 1)
+        #expect(await drive.transfers == 0)
+    }
+
     @Test func metadataWriterPreservesDiscMarkerFromActualHelperTags() async throws {
         let fixture = TagMetadataFixture(mode: .renameAlbum)
         let (writer, drive, configuration) = try metadataFixture(fixture)
@@ -275,7 +317,7 @@ private nonisolated final class TagFixtureProtocol: URLProtocol, @unchecked Send
 }
 
 private nonisolated final class TagMetadataFixture: @unchecked Sendable {
-    enum Mode { case success, lostAcknowledgement, unchanged, unauthorized, cancelAfterSubmit, pollFailure, pollRecoveredByCancellation, cancellationFailure, renameAlbum }
+    enum Mode { case success, lostAcknowledgement, unchanged, unauthorized, cancelAfterSubmit, pollFailure, pollRecoveredByCancellation, cancellationFailure, renameAlbum, interrupted }
     private let lock = NSLock()
     private let mode: Mode
     private var recorded: [String] = []
@@ -322,6 +364,12 @@ private nonisolated final class TagMetadataFixture: @unchecked Sendable {
             }
             if mode == .lostAcknowledgement { throw URLError(.networkConnectionLost) }
             if mode == .unauthorized { return (401, Data(#"{"version":1,"error":{"code":"unauthorized","message":"Token rejected"}}"#.utf8)) }
+            if mode == .interrupted {
+                // A helper restart marks the file that was running as unconfirmed with code "interrupted".
+                return (200, Data("""
+                {"version":1,"jobID":"\(request.url!.lastPathComponent)","status":"interrupted","dryRun":false,"files":[{"path":"song.mp3","status":"unconfirmed","error":{"code":"interrupted","message":"The service stopped during this file."}}]}
+                """.utf8))
+            }
         }
         if path.hasSuffix("/cancel") { lock.withLock { cancelled = true } }
         if ((mode == .pollFailure || mode == .pollRecoveredByCancellation) && method == "GET")

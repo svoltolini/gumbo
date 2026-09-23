@@ -90,9 +90,11 @@ nonisolated struct HelperDeletionDrive: RemoteDeletionDrive {
         var job: RemoteTagService.Job?
         do { job = try await service.submitDeletion(jobID: identifier, files: [.init(path: path, expected: witness.expected)]) }
         catch let error as RemoteTagService.Error {
+            // Only a lost or unreadable reply can hide an accepted job. A structured rejection
+            // (such as 503 busy) means nothing was queued, so report it instead of polling.
             switch error {
-            case .unauthorized, .invalidEndpoint, .invalidToken, .invalidPath, .invalidRequest: throw error
-            default: job = try? await service.status(jobID: identifier)
+            case .unavailable, .invalidResponse: job = try? await service.status(jobID: identifier)
+            default: throw error
             }
         } catch { job = try? await service.status(jobID: identifier) }
         let deadline = ContinuousClock.now.advanced(by: .seconds(120))
