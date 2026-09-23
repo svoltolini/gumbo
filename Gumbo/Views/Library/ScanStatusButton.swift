@@ -39,12 +39,18 @@ struct ScanStatusButton: View {
     }
 
     private var idleIcon: some View {
-        Image(systemName: model.indexingFailure != nil ? "exclamationmark.icloud" : (model.scanCompleted ? "checkmark.icloud" : "icloud"))
+        Image(systemName: model.scanBlocker == .offline ? "icloud.slash"
+              : model.indexingFailure != nil ? "exclamationmark.icloud" : (model.scanCompleted ? "checkmark.icloud" : "icloud"))
             .foregroundStyle(.secondary)
     }
 
     private var accessibilityLabel: String {
-        isScanning ? "Library scanning" : model.scanStatusText
+        if isScanning { return "Library scanning" }
+        switch model.scanBlocker {
+        case .offline?: return "Offline"
+        case .connecting?: return "Connecting"
+        default: return model.scanStatusText
+        }
     }
 
     private var accessibilityValue: String {
@@ -77,6 +83,7 @@ struct ScanDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var isScanning: Bool { model.isScanning }
+    private var blocker: AppModel.ScanBlocker? { model.scanBlocker }
 
     var body: some View {
         NavigationStack {
@@ -96,10 +103,15 @@ struct ScanDetailSheet: View {
                         Button {
                             model.rescan()
                         } label: {
-                            Label("Scan for New Music", systemImage: "arrow.clockwise")
+                            Label(blocker == .offline ? "Reconnect and Scan" : "Scan for New Music", systemImage: "arrow.clockwise")
+                        }
+                        // Nothing can start while files change; the footer says why rather than the tap doing nothing.
+                        .disabled(blocker == .writingTags || blocker == .deletingFiles || (blocker == .connecting && model.isScanRequestPending))
+                        if blocker == .offline, let error = model.signInError {
+                            Text(error).font(.footnote).foregroundStyle(.red)
                         }
                     } footer: {
-                        Text("Checks the folder for music added since the last scan.")
+                        Text(blocker?.message ?? "Checks the folder for music added since the last scan.")
                     }
                 }
             }
@@ -137,9 +149,17 @@ struct ScanDetailSheet: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text(model.scanStatusText)
+                Text(statusText)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var statusText: String {
+        switch blocker {
+        case .offline?: "Offline"
+        case .connecting?: "Connecting…"
+        default: model.scanStatusText
         }
     }
 

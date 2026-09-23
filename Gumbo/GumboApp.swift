@@ -286,7 +286,11 @@ struct GumboApp: App {
         profiles.onProfilesRemoved = { [watchBridge] in watchBridge.sync() }
         // Signing out removes the server; the Watch's catalogue and sign-in for it go too, even when
         // the NAS was out of reach all this launch and its library never opened here.
-        model.onSignedOut = { [watchBridge] in watchBridge.revoke() }
+        // Nothing queued from the old library may play on, from the app or the lock screen.
+        model.onSignedOut = { [watchBridge, player] in
+            player.stop()
+            watchBridge.revoke()
+        }
         watchBridge.provider = { [library, model, profiles] in
             guard let scope = watchScope(), let active = profiles.active else { return nil }
             let profileName = active.name

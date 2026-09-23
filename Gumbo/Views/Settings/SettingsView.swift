@@ -113,7 +113,8 @@ struct SettingsView: View {
         }
         .confirmationDialog(library.isDemo ? "Leave the sample library?" : "Sign out of your music server?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
             Button(library.isDemo ? "Leave Sample Library" : "Sign Out", role: .destructive) {
-                player.pause()
+                // Cleared, not paused: nothing from this library may resume from the lock screen.
+                player.stop()
                 Task { await model.signOut() }
             }
             Button("Cancel", role: .cancel) {}

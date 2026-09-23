@@ -30,6 +30,7 @@ struct LibraryView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    pendingScanNotice
                     if isEmptyLibrary {
                         emptyState
                     } else {
@@ -107,7 +108,36 @@ struct LibraryView: View {
         case .missing: "The folder you chose no longer exists. You can pick another one in Settings."
         case .unreadable(_, let path): "Some folders in “\(LibraryIndexer.Failure.name(of: path))” couldn't be read. Check the account's permissions. \(Hints.tryAgain)"
         case .other(let message): message + " " + Hints.tryAgain
-        case .noMusic, .none: "Add music to “\(library.catalogue.rootName)” and \(Hints.rescan), or pick another folder in Settings."
+        // The failed folder may be a newly chosen one while the previous folder's library is still shown.
+        case .noMusic(let path): "Add music to “\(LibraryIndexer.Failure.name(of: path))” and \(Hints.rescan), or pick another folder in Settings."
+        case .none: "Add music to “\(library.catalogue.rootName)” and \(Hints.rescan), or pick another folder in Settings."
+        }
+    }
+
+    /// A pull or a tap asked for a scan that can't start yet: why, and for an offline server the way back.
+    @ViewBuilder
+    private var pendingScanNotice: some View {
+        if model.isScanRequestPending, let blocker = model.scanBlocker {
+            VStack(alignment: .leading, spacing: 8) {
+                switch blocker {
+                case .offline:
+                    Label("Music server offline", systemImage: "icloud.slash").font(.headline)
+                case .connecting:
+                    Label("Connecting to your music server", systemImage: "icloud").font(.headline)
+                case .writingTags, .deletingFiles:
+                    Label("Library update waiting", systemImage: "clock").font(.headline)
+                }
+                Text(blocker.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if blocker == .offline {
+                    if let error = model.signInError {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                    Button("Reconnect") { model.rescan() }
+                }
+            }
+            .padding(20)
         }
     }
 

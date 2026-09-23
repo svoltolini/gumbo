@@ -129,8 +129,7 @@ public final class ProfileStore {
             }
         } catch {
             isProfileIndexReadable = false
-            persistenceFailure = PersistenceFailure(kind: .unreadableIndex, title: "Profiles couldn't be read",
-                message: "The saved profile list could not be read. Its files have been kept unchanged. Restore the profile list from a backup, then try again.")
+            persistenceFailure = Self.unreadableIndexFailure
         }
         lastActiveID = defaults.string(forKey: "profiles.active")
     }
@@ -789,8 +788,17 @@ public final class ProfileStore {
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
     }
 
+    /// Why "Who's listening?" has no one to show: the profile list could not be read.
+    public static let unreadableIndexFailure = PersistenceFailure(kind: .unreadableIndex, title: "Profiles couldn't be read",
+        message: "The saved profile list could not be read. Its files have been kept unchanged. Restore the profile list from a backup, then try again.")
+
     public func retryProfileIndex() {
-        guard !isProfileIndexReadable, let stored = try? loadAvailableProfiles() else { return }
+        guard !isProfileIndexReadable else { return }
+        // Still unreadable, or gone: the alert that offered this retry has closed, so say so again.
+        guard let stored = try? loadAvailableProfiles() else {
+            persistenceFailure = Self.unreadableIndexFailure
+            return
+        }
         profiles = stored
         isProfileIndexReadable = true
         persistenceFailure = nil

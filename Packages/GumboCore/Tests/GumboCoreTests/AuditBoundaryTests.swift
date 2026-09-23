@@ -64,8 +64,14 @@ struct AuditBoundaryTests {
         #expect(store.persistenceFailure?.kind == .unreadableIndex)
         #expect(store.ensureProfileAfterSync(isOwner: true) == nil)
         #expect(try Data(contentsOf: url) == corrupt)
+        // Any alert button clears the failure; a retry that still can't read says so again (#233).
+        store.dismissPersistenceError()
+        store.retryProfileIndex()
+        #expect(!store.isProfileIndexReadable && store.profiles.isEmpty)
+        #expect(store.persistenceFailure?.kind == .unreadableIndex)
         try good.write(to: url)
         store.retryProfileIndex()
+        #expect(store.persistenceFailure == nil)
         #expect(store.profiles.map(\.id) == original.profiles.map(\.id))
         #expect(store.isProfileIndexReadable)
     }

@@ -5,6 +5,8 @@ struct ServerDiscoveryView: View {
     @Environment(AppModel.self) private var model
     @State private var isEnteringAddress = false
     @State private var suggestedServer: DiscoveredServer?
+    @State private var suggestionError: String?
+    @State private var checkingServerID: DiscoveredServer.ID?
     @State private var isReadingGuide = false
     @State private var hasWaited = false
 
@@ -22,7 +24,7 @@ struct ServerDiscoveryView: View {
             hasWaited = true
         }
         .sheet(isPresented: $isEnteringAddress) {
-            ConnectSheet(server: suggestedServer)
+            ConnectSheet(server: suggestedServer, error: suggestionError)
         }
         .sheet(isPresented: $isReadingGuide) {
             RemoteAccessGuide()
@@ -35,14 +37,17 @@ struct ServerDiscoveryView: View {
                 ForEach(servers) { server in
                     Button {
                         if server.providerKind == .synology {
-                            model.select(server)
+                            check(server)
                         } else {
                             suggestedServer = server
+                            suggestionError = nil
                             isEnteringAddress = true
                         }
                     } label: {
-                        ServerRow(title: server.name, subtitle: server.address, badge: server.providerKind.title)
+                        ServerRow(title: server.name, subtitle: server.address, badge: server.providerKind.title,
+                                  isChecking: checkingServerID == server.id)
                     }
+                    .disabled(checkingServerID != nil)
                 }
                 if servers.isEmpty, hasWaited {
                     VStack(alignment: .leading, spacing: 6) {
@@ -56,6 +61,7 @@ struct ServerDiscoveryView: View {
                 }
                 Button {
                     suggestedServer = nil
+                    suggestionError = nil
                     isEnteringAddress = true
                 } label: {
                     ServerRow(title: "Enter an address", subtitle: "Your NAS name, IP address or WebDAV address", badge: nil, symbol: "globe")
@@ -83,6 +89,25 @@ struct ServerDiscoveryView: View {
         .groupedList()
         .connectColumn(width: 640)
     }
+
+    /// A found DSM is checked before sign-in. When its address can't be used, typically for a
+    /// certificate that doesn't cover it, the address form opens with the reason, ready for the
+    /// NAS's hostname instead.
+    private func check(_ server: DiscoveredServer) {
+        guard checkingServerID == nil else { return }
+        checkingServerID = server.id
+        Task {
+            defer { checkingServerID = nil }
+            do {
+                try await model.connect(to: server)
+            } catch is CancellationError {
+            } catch {
+                suggestedServer = server
+                suggestionError = error.localizedDescription
+                isEnteringAddress = true
+            }
+        }
+    }
 }
 
 private struct ServerRow: View {
@@ -90,6 +115,7 @@ private struct ServerRow: View {
     let subtitle: String
     let badge: String?
     var symbol = "externaldrive.fill"
+    var isChecking = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -108,9 +134,14 @@ private struct ServerRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if isChecking {
+                ProgressView()
+                    .accessibilityLabel("Checking the address")
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
     }

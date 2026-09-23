@@ -10,11 +10,16 @@ struct FolderPickerView: View {
     let mode: Mode
     var parent: RemoteEntry? = nil
     @Environment(AppModel.self) private var model
+    @Environment(LibraryStore.self) private var library
     @Environment(PlayerModel.self) private var player
     @Environment(\.dismiss) private var dismiss
     @State private var folders: [RemoteEntry] = []
     @State private var isLoading = true
     @State private var error: String?
+    @State private var confirmingFolder: RemoteEntry?
+
+    /// Changing folders cancels a tag write or deletion and its scan could not start meanwhile.
+    private var isBusy: Bool { mode == .settings && (library.metadataWriter.isWriting || library.isDeletingFiles) }
 
     var body: some View {
         Group {
@@ -29,6 +34,14 @@ struct FolderPickerView: View {
         .gumboBackground(mode == .settings ? player.tint : Palette.neutralTint)
         .navigationTitle(parent?.name ?? "Music folder")
         .titleDisplay(large: parent == nil)
+        .confirmationDialog(confirmingFolder.map { "Use “\($0.name)” as your music folder?" } ?? "",
+                            isPresented: Binding(get: { confirmingFolder != nil }, set: { if !$0 { confirmingFolder = nil } }),
+                            titleVisibility: .visible, presenting: confirmingFolder) { folder in
+            Button("Use “\(folder.name)”") { choose(path: folder.path) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Gumbo will scan this folder for music. Your current library stays as it is until the scan has finished.")
+        }
         .task(id: parent?.path) {
             isLoading = true
             error = nil
@@ -46,7 +59,11 @@ struct FolderPickerView: View {
             if let parent {
                 Section {
                     Button {
-                        choose(path: parent.path)
+                        if mode == .settings, parent.path != model.musicPath {
+                            confirmingFolder = parent
+                        } else {
+                            choose(path: parent.path)
+                        }
                     } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "checkmark.circle.fill")
@@ -67,8 +84,13 @@ struct FolderPickerView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                    .disabled(isBusy)
                 } footer: {
-                    Text("Everything inside this folder, including subfolders, is indexed.")
+                    if isBusy {
+                        Text("Gumbo is saving changes to your music files. Choose a folder once that has finished.")
+                    } else {
+                        Text("Everything inside this folder, including subfolders, is indexed.")
+                    }
                 }
             }
 
@@ -124,6 +146,7 @@ struct FolderPickerView: View {
     }
 
     private func choose(path: String) {
+        guard !isBusy else { return }
         switch mode {
         case .onboarding:
             model.chooseMusicFolder(path: path, showsProgress: true)

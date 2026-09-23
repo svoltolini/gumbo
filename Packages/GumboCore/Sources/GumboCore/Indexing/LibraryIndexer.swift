@@ -121,7 +121,10 @@ public final class LibraryIndexer {
     }
 
     /// Scans `rootPath` on the drive; `onCatalogue` receives the catalogue when the structure is known and again as tags arrive.
-    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, forceMetadataReread: Bool = false, onVerifiedListing: (@MainActor (Catalogue) -> Void)? = nil, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
+    /// `existing` is the catalogue this scan refreshes: when the folder turns out empty or gone, it is emptied.
+    /// `reusingTagsFrom` only lends tags already read, such as another folder's on the same drive; its
+    /// songs are not expected here, so an empty or missing folder is reported rather than published.
+    public func start(drive: any RemoteDrive, rootPath: String, serverName: String, existing: Catalogue?, reusingTagsFrom tagSource: Catalogue? = nil, forceMetadataReread: Bool = false, onVerifiedListing: (@MainActor (Catalogue) -> Void)? = nil, onCatalogue: @escaping @MainActor (Catalogue) -> Void) {
         cancel()
         let run = IndexingRun()
         currentRun = run
@@ -195,7 +198,7 @@ public final class LibraryIndexer {
                     let catalogue = await Task.detached(priority: .userInitiated) {
                         CoverStore.$directoryOverride.withValue(coverDirectory) {
                             CoverStore.$indexingRun.withValue(run) {
-                                var built = Catalogue.build(folders: folders, rootPath: rootPath, serverName: serverName, driveID: driveID, existing: existing, forceMetadataReread: forceMetadataReread)
+                                var built = Catalogue.build(folders: folders, rootPath: rootPath, serverName: serverName, driveID: driveID, existing: existing ?? tagSource, forceMetadataReread: forceMetadataReread)
                                 Catalogue.discardFinderMetadataCovers(previous: existing, driveID: driveID, rootPath: rootPath)
                                 if run.isActive, built.enrichedTrackCount > 0 { built.regroupByTags() }
                                 return built

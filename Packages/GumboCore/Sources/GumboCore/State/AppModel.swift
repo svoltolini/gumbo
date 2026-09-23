@@ -39,8 +39,9 @@ public final class AppModel {
     public var onVerifiedServerListing: ((String, Set<String>) -> Void)?
     /// Cancels work holding live provider credentials before any connection intent changes.
     public var onConnectionWillChange: (() -> Void)?
-    /// The saved connection and its password are gone. Access handed on with them, such as the
-    /// Watch's own copy of the sign-in, ends too, even for a library this launch never had ready.
+    /// The saved connection and its password are gone, or the sample library was left. Access handed
+    /// on with them, such as the Watch's own copy of the sign-in, ends too, even for a library this
+    /// launch never had ready, and nothing from the old library may stay queued to play again.
     public var onSignedOut: (() -> Void)?
     private var pendingCloudConnection: ServerConnection?
     private var pendingCloudCredentialSync = false
@@ -127,6 +128,7 @@ public final class AppModel {
         isJoiningFamily = false
         pendingReconnectPassword = nil
         reconnectRequestedDuringAttempt = false
+        isScanRequestPending = false
         indexer.cancel()
         demoTask?.cancel()
         demoTask = nil
@@ -185,6 +187,21 @@ public final class AppModel {
         guard enterAddress(url.absoluteString) else { throw SynologyError.invalidAddress }
     }
 
+    /// Offers a DSM found on the network for sign-in once HTTPS answers at its address with a
+    /// certificate this device trusts. Discovery resolves a LAN address, which DSM's own certificate
+    /// and certificates for a hostname rarely cover, so that is found out before any password is
+    /// typed and reported with the same advice as a typed address.
+    public func connect(to server: DiscoveredServer) async throws {
+        guard server.providerKind == .synology, server.provider == nil, NASOrigin(url: server.baseURL)?.isHTTPS == true else {
+            select(server)
+            return
+        }
+        let generation = beginConnectionChange()
+        let url = try await SynologyClient.reachableBaseURL(for: server.baseURL.absoluteString)
+        guard isCurrent(generation) else { throw CancellationError() }
+        select(DiscoveredServer(name: server.name, baseURL: url, model: server.model))
+    }
+
     public func cancelSignIn() {
         beginConnectionChange()
         pendingCloudConnection = nil
@@ -198,6 +215,8 @@ public final class AppModel {
         guard let server = pendingServer else { return }
         let cloudConnection = pendingCloudConnection
         let wasUsingSyncedCredentials = pendingCloudCredentialSync
+        // A scan asked for while offline may have led here, when the saved sign-in needed the person.
+        let scanRequested = isScanRequestPending
         let generation = beginConnectionChange()
         isSigningIn = true
         signInError = nil
@@ -261,6 +280,7 @@ public final class AppModel {
             if library.catalogue.belongs(to: connection), !library.isEmpty {
                 library.drive = drive
                 stage = .ready
+                if scanRequested || isScanRequestPending { startIndexing(showsProgress: false) }
                 startAutoRefresh()
             } else {
                 library.replace(with: .empty, drive: drive)
@@ -294,11 +314,12 @@ public final class AppModel {
     /// attempt stays `within` the connection generation it was started in and only retries the saved
     /// sign-in of an offline library: what waits for the server carries on, such as a voice request,
     /// an album link or a paused download, and anything the person starts meanwhile supersedes it.
-    private func reconnect(within current: UUID?) async {
+    private func reconnect(within current: UUID?, thenScan: Bool = false) async {
         guard let saved = connection else { return }
         if let current, !isCurrent(current) || isReconnecting { return }
         let automatic = current != nil
         let generation = current ?? beginConnectionChange()
+        if thenScan { isScanRequestPending = true }
         guard let password = storedPassword(for: saved) else {
             requestReauthentication(saved, needsOTP: false)
             return
@@ -325,9 +346,10 @@ public final class AppModel {
             signInError = nil
             awaitsSignIn = false
             // A library that opened offline has not started its refreshes yet.
-            if stage == .ready, !library.isEmpty {
-                refreshIfStale(olderThan: 30 * 60)
-                startAutoRefresh()
+            if stage == .ready {
+                if isScanRequestPending { startIndexing(showsProgress: false) }
+                else if !library.isEmpty { refreshIfStale(olderThan: 30 * 60) }
+                if !library.isEmpty { startAutoRefresh() }
             }
         } catch SynologyError.twoFactorRequired {
             guard isCurrent(generation) else { return }
@@ -487,7 +509,9 @@ public final class AppModel {
         return entries.filter { $0.isDirectory && !$0.name.hasPrefix(".") && $0.name != "@eaDir" && $0.name != "#recycle" }
     }
 
-    /// Records the folder to index and starts indexing.
+    /// Records the folder to index and starts indexing. A library already open from this server stays
+    /// on screen, with its favourites and playlists, until the new folder's scan publishes; that scan
+    /// reuses the tags already read for songs the two folders share.
     public func chooseMusicFolder(path: String, showsProgress: Bool) {
         guard profiles?.isLocked != true, var connection, let drive = library.drive else { return }
         beginConnectionChange()
@@ -495,9 +519,11 @@ public final class AppModel {
         connection.musicPath = path
         self.connection = connection
         saveConnection()
-        if changed {
-            indexer.cancel()
-            library.replace(with: .empty, drive: drive)
+        if (changed && showsProgress) || library.isEmpty || library.catalogue.driveID != drive.id {
+            // Nothing of this server's to keep showing. The placeholder still belongs to it: the sample
+            // library's empty source ID would load, and save edits into, the sample library's profile data.
+            library.replace(with: Catalogue(serverName: connection.name, albums: [], indexedAt: .distantPast,
+                                            rootPath: path, driveID: drive.id), drive: drive)
         }
         startIndexing(showsProgress: showsProgress)
     }
@@ -544,11 +570,15 @@ public final class AppModel {
 
     private func startIndexing(showsProgress: Bool, forceMetadataReread: Bool = false) {
         guard !library.isDeletingFiles, !library.metadataWriter.isWriting, let drive = library.drive, let connection, let path = connection.musicPath else { return }
+        isScanRequestPending = false
         if showsProgress { stage = .indexing }
-        let existing = library.catalogue.isEmpty ? nil : library.catalogue
+        let shown = library.catalogue.isEmpty ? nil : library.catalogue
+        // The library on screen may still be the previous folder's, kept while a newly chosen one is
+        // scanned: its tags are reused, but its songs are not expected in the new folder.
+        let existing = shown?.rootPath == path ? shown : nil
         let generation = connectionGeneration
         let metadataRevision = library.metadataMutationRevision
-        indexer.start(drive: drive, rootPath: path, serverName: connection.name, existing: existing, forceMetadataReread: forceMetadataReread, onVerifiedListing: { [weak self] catalogue in
+        indexer.start(drive: drive, rootPath: path, serverName: connection.name, existing: existing, reusingTagsFrom: existing == nil ? shown : nil, forceMetadataReread: forceMetadataReread, onVerifiedListing: { [weak self] catalogue in
             guard let self, generation == self.connectionGeneration,
                   metadataRevision == self.library.metadataMutationRevision,
                   self.connection == connection, self.library.drive?.id == drive.id else { return }
@@ -720,9 +750,62 @@ public final class AppModel {
         discovery.start()
     }
 
+    /// What keeps a scan from starting right now, so a pull or a tap that can't scan says why.
+    public nonisolated enum ScanBlocker: Equatable, Sendable {
+        /// Files are being deleted from the server; a listing now could catch the deletion half done.
+        case deletingFiles
+        /// Song information is being written into files; a scan now would read songs mid-write.
+        case writingTags
+        /// The saved server is being signed in to; a scan asked for now starts once it connects.
+        case connecting
+        /// The saved server can't be reached; asking to scan reconnects first.
+        case offline
+
+        public var message: String {
+            switch self {
+            case .deletingFiles: "Gumbo is deleting files from your music server. Scan again once that has finished."
+            case .writingTags: "Gumbo is saving song information to your music files. Scan again once that has finished."
+            case .connecting: "Connecting to your music server. A scan asked for now starts once it’s connected."
+            case .offline: "Your music server can’t be reached right now. Gumbo reconnects before scanning."
+            }
+        }
+    }
+
+    public var scanBlocker: ScanBlocker? {
+        guard !isDemo, stage == .ready else { return nil }
+        if library.isDeletingFiles { return .deletingFiles }
+        if library.metadataWriter.isWriting { return .writingTags }
+        guard connection != nil, !isConnected else { return nil }
+        return isRestoring || isReconnecting || isSigningIn ? .connecting : .offline
+    }
+
+    /// A scan was asked for that could not start yet. The next connection to the server starts it,
+    /// and until a scan starts the library shows why it is waiting (`scanBlocker`).
+    public private(set) var isScanRequestPending = false
+    private var scanReconnectTask: Task<Void, Never>?
+
+    /// Scans the music folder for changes. An offline library reconnects first, as Reconnect in
+    /// Settings does, and scans once connected; while files are being written or deleted nothing
+    /// starts, and `scanBlocker` says why.
     public func rescan() {
         // Repeated pulls join the scan already in progress rather than restarting it.
         guard !isScanning else { return }
+        switch scanBlocker {
+        case .deletingFiles?, .writingTags?, .connecting?:
+            isScanRequestPending = true
+            return
+        case .offline?:
+            isScanRequestPending = true
+            // Until the attempt has set out, further pulls wait for this one.
+            guard scanReconnectTask == nil else { return }
+            scanReconnectTask = Task { [weak self] in
+                await self?.reconnect(within: nil, thenScan: true)
+                self?.scanReconnectTask = nil
+            }
+            return
+        case nil:
+            break
+        }
         if isDemo {
             demoScanning = true
             demoTask?.cancel()
@@ -861,7 +944,8 @@ public final class AppModel {
                     }
                 } else {
                     library.drive = drive
-                    refreshIfStale(olderThan: 30 * 60)
+                    if isScanRequestPending { startIndexing(showsProgress: false) }
+                    else { refreshIfStale(olderThan: 30 * 60) }
                     startAutoRefresh()
                 }
             } catch SynologyError.twoFactorRequired {

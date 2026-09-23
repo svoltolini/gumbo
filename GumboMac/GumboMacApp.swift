@@ -58,6 +58,9 @@ struct GumboMacApp: App {
             return library.track(id: id).map(DownloadFileRevision.init)
         }
         model.onConnectionWillChange = { [weak downloads] in downloads?.revokeForegroundDownloads() }
+        // Signing out or leaving the sample library clears the player: nothing queued from the old
+        // library may play on, from the app or the system's Now Playing controls.
+        model.onSignedOut = { [player] in player.stop() }
         if !UserDefaults.standard.bool(forKey: "downloads.ownersScoped"), let owner = profiles.owner {
             downloads.adoptLegacyOwners(into: owner.id)
             UserDefaults.standard.set(true, forKey: "downloads.ownersScoped")
