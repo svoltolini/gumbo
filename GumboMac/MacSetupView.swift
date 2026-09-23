@@ -661,6 +661,7 @@ private struct MacFolderStep: View {
                     .onTapGesture(count: 2) { open(entry) }
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
+                .disabled(isLoading)
                 .overlay {
                     if isLoading {
                         HStack(spacing: 8) {
@@ -690,7 +691,7 @@ private struct MacFolderStep: View {
             Button("Open") {
                 if let entry = entries.first(where: { $0.id == selection }) { open(entry) }
             }
-            .disabled(selection == nil)
+            .disabled(selection == nil || isLoading)
             Spacer()
             Button(trail.last.map { "Use “\($0.name)”" } ?? "Use This Folder") {
                 if let current = trail.last { model.chooseMusicFolder(path: current.path, showsProgress: true) }
@@ -723,17 +724,26 @@ private struct MacFolderStep: View {
     }
 
     private func open(_ entry: RemoteEntry) {
+        // While a level loads, a stray open would append to the wrong trail.
+        guard !isLoading else { return }
         trail.append(entry)
         selection = nil
     }
 
     private func load() async {
+        let path = trail.last?.path
         isLoading = true
         error = nil
+        entries = []
+        selection = nil
         do {
-            entries = try await model.loadFolders(in: trail.last?.path)
+            let folders = try await model.loadFolders(in: path)
+            // A superseded load must not overwrite the level now being shown.
+            guard !Task.isCancelled, path == trail.last?.path else { return }
+            entries = folders
         } catch {
-            entries = []
+            // A superseded load's cancellation error belongs to no level on screen.
+            guard !Task.isCancelled, path == trail.last?.path else { return }
             self.error = error.localizedDescription
         }
         isLoading = false

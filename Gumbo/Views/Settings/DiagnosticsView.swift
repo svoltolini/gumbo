@@ -14,9 +14,11 @@ struct DiagnosticsView: View {
     var body: some View {
         List {
             LabeledContent("Build", value: Self.buildText)
+                .focusableForReading()
             if log.entries.isEmpty {
                 Text("Nothing recorded yet.")
                     .foregroundStyle(.secondary)
+                    .focusableForReading()
             }
             ForEach(log.entries.reversed()) { entry in
                 VStack(alignment: .leading, spacing: 3) {
@@ -28,6 +30,7 @@ struct DiagnosticsView: View {
                         .selectableText()
                 }
                 .padding(.vertical, 2)
+                .focusableForReading()
             }
         }
         .groupedList()

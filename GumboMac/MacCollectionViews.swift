@@ -154,6 +154,8 @@ struct MacPlaylistDetailView: View {
     @Environment(PlayerModel.self) private var player
     @Environment(ProfileStore.self) private var profiles
     @Environment(\.dismiss) private var dismiss
+    /// False when this page is the root of the sidebar's playlist pane, where there is nothing to pop.
+    @Environment(\.isPresented) private var isPresented
     @State private var isRenaming = false
     @State private var renameText = ""
     @State private var isConfirmingDelete = false
@@ -233,7 +235,8 @@ struct MacPlaylistDetailView: View {
                 guard let editingScope, editingScope.isCurrent(library: library, profiles: profiles), let editingPlaylist,
                       library.playlist(id: playlist.id) == editingPlaylist, library.isLocalPlaylist(playlist.id) else { return }
                 library.deletePlaylist(id: playlist.id)
-                if library.playlist(id: playlist.id) == nil { dismiss() }
+                // At the pane root, dismiss would reach the window; MacMainView moves the sidebar selection instead.
+                if isPresented, library.playlist(id: playlist.id) == nil { dismiss() }
             }
         } message: {
             Text("The songs stay in your library.")

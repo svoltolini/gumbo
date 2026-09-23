@@ -90,6 +90,12 @@ struct MacMainView: View {
             navigation.showAlbum(album)
             model.albumToOpen = nil
         }
+        .onChange(of: library.playlists.map(\.id)) { _, _ in
+            // A playlist deleted here or on another device shouldn't leave its page selected.
+            if case .playlist(let id)? = navigation.selection, library.playlist(id: id) == nil {
+                navigation.selection = .playlists
+            }
+        }
         .onChange(of: model.playlistToOpen) { _, playlist in
             guard let playlist else { return }
             navigation.selection = .playlist(playlist.id)
