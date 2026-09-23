@@ -27,7 +27,8 @@ import Foundation
         }, currentCommand: {
             player.commandRevision
         }, play: { tracks, title, shuffle, repeatMode in
-            player.applySettings(repeatMode: repeatMode ?? player.repeatMode, shuffle: shuffle ?? player.isShuffling)
+            // A spoken shuffle or repeat is the listener's choice, so the profile remembers it.
+            player.applySettings(repeatMode: repeatMode ?? player.repeatMode, shuffle: shuffle ?? player.isShuffling, notifying: true)
             player.play(queue: tracks, title: title)
             return player.lastError == nil
         })

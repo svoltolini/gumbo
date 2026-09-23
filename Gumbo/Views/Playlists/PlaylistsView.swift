@@ -223,7 +223,7 @@ struct PlaylistDetailView: View {
                             guard sourceID == library.catalogue.driveID, library.contentSourceID == sourceID,
                                   sessionID != nil, profiles.sessionID == sessionID,
                                   library.playlist(id: playlist.id) == playlist else { return }
-                            player.play(queue: playlist.tracks.shuffled(), startingAt: 0, title: playlist.name)
+                            player.shuffle(queue: playlist.tracks, title: playlist.name)
                         }
                         #if !os(tvOS)
                         if canDownload {

@@ -148,7 +148,7 @@ struct AlbumView: View {
                             player.togglePlayback(of: album.tracks, sourceID: library.catalogue.driveID)
                         } shuffle: {
                             guard scope.isCurrent(library: library, profiles: profiles), library.album(id: album.id) == album else { return }
-                            player.play(queue: album.tracks.shuffled(), startingAt: 0, title: album.title)
+                            player.shuffle(queue: album.tracks, title: album.title)
                         }
                         #if !os(tvOS)
                         downloadButton(for: album)

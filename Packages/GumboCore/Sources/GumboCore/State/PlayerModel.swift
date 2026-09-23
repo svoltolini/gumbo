@@ -30,16 +30,24 @@ public final class PlayerModel {
     /// Shared by app, widget and CarPlay requests so a late server response cannot replace newer intent.
     public private(set) var commandRevision = UUID()
     public var repeatMode: RepeatMode = .off {
-        didSet { if repeatMode != oldValue { settingsChanged?(repeatMode, isShuffling) } }
+        didSet { if repeatMode != oldValue, !isApplyingSettings { settingsChanged?(repeatMode, isShuffling) } }
     }
     public private(set) var isShuffling = false
     /// Set by the app: the profile remembers repeat and shuffle.
     public var settingsChanged: ((RepeatMode, Bool) -> Void)?
+    /// Holds back `settingsChanged` while both settings change together, so it never reports one
+    /// new value beside a stale other, which the profile would then save as a newer edit.
+    private var isApplyingSettings = false
 
-    /// Takes the profile's saved repeat and shuffle without touching the queue.
-    public func applySettings(repeatMode: RepeatMode, shuffle: Bool) {
+    /// Takes repeat and shuffle without touching the queue. Settings read from the profile are not
+    /// reported back to it; `notifying` reports a listener's own choice, such as Siri's, once.
+    public func applySettings(repeatMode: RepeatMode, shuffle: Bool, notifying: Bool = false) {
+        let changed = repeatMode != self.repeatMode || shuffle != isShuffling
+        isApplyingSettings = true
         self.repeatMode = repeatMode
         isShuffling = shuffle
+        isApplyingSettings = false
+        if notifying, changed { settingsChanged?(repeatMode, shuffle) }
     }
 
     /// Clears everything: another profile is taking over.
@@ -74,8 +82,9 @@ public final class PlayerModel {
         didSet { player?.volume = volume }
     }
 
-    /// Resolves a stream URL for a track; nil means the file is not reachable right now.
-    public var streamURLProvider: ((Track) -> URL?)?
+    /// Where a track plays from: a downloaded file or the server. Nil means it is not reachable right
+    /// now. It is the player's only way to find a song, so code deciding whether a song can start
+    /// without waiting for the server, such as CarPlay's, asks it too.
     public var mediaSourceProvider: ((Track) -> RemoteMediaSource?)?
     /// Asked once when a song streaming from the server fails, with the address it used; true when
     /// a fresh address can be made, for example because the server session has been renewed, and
@@ -93,6 +102,7 @@ public final class PlayerModel {
     private var player: (any PlaybackTransport)?
     private let makePlayer: (URL) -> any PlaybackTransport
     private let publishNowPlaying: ([String: Any]?) -> Void
+    private let publishPlaybackState: (NowPlayingPlaybackState) -> Void
     private let usesSystemControls: Bool
     /// User intent survives item preparation, but pausing must prevent a late callback from starting audio.
     private var wantsToPlay = false
@@ -122,14 +132,32 @@ public final class PlayerModel {
     public init() {
         makePlayer = { AVPlaybackTransport(url: $0) }
         publishNowPlaying = { MPNowPlayingInfoCenter.default().nowPlayingInfo = $0 }
+        publishPlaybackState = { state in
+            // macOS has no audio session to tell it, and routes the media keys and Control Center's
+            // Now Playing by this; the other systems take it from the audio session.
+            #if os(macOS)
+            MPNowPlayingInfoCenter.default().playbackState = switch state {
+            case .stopped: .stopped
+            case .paused: .paused
+            case .playing: .playing
+            }
+            #endif
+        }
         usesSystemControls = true
     }
 
     /// Exercises the actual command and recovery paths without audio output or shared system controls.
-    init(makePlayer: @escaping (URL) -> any PlaybackTransport, publishNowPlaying: @escaping ([String: Any]?) -> Void) {
+    init(makePlayer: @escaping (URL) -> any PlaybackTransport, publishNowPlaying: @escaping ([String: Any]?) -> Void,
+         publishPlaybackState: @escaping (NowPlayingPlaybackState) -> Void = { _ in }) {
         self.makePlayer = makePlayer
         self.publishNowPlaying = publishNowPlaying
+        self.publishPlaybackState = publishPlaybackState
         usesSystemControls = false
+    }
+
+    /// What the system is told besides the Now Playing details: whether this app is playing.
+    nonisolated enum NowPlayingPlaybackState: Equatable, Sendable {
+        case stopped, paused, playing
     }
 
     public var track: Track? { queue.indices.contains(index) ? queue[index] : nil }
@@ -164,17 +192,19 @@ public final class PlayerModel {
         interruptionResumeRevision = nil
     }
 
-    public func play(album: Album, startingAt index: Int = 0) {
+    public func play(album: Album, startingAt index: Int? = nil) {
         play(queue: album.tracks, startingAt: index, title: nil)
     }
 
-    public func play(queue: [Track], startingAt index: Int = 0, title: String?) {
+    /// Without a song to start at, the queue starts at its first song, or at a random one while
+    /// shuffle is on, so a shuffled collection doesn't always open with the same song.
+    public func play(queue: [Track], startingAt index: Int? = nil, title: String?) {
         recordPlaybackCommand()
         guard !queue.isEmpty else { return }
         playbackSourceID = sourceIDProvider?()
         orderedQueue = queue
         queueTitle = title
-        let start = min(max(0, index), queue.count - 1)
+        let start = index.map { min(max(0, $0), queue.count - 1) } ?? (isShuffling ? Int.random(in: queue.indices) : 0)
         if isShuffling {
             queueOrigins = [start] + queue.indices.filter { $0 != start }.shuffled()
             self.queue = queueOrigins.map { queue[$0] }
@@ -184,6 +214,16 @@ public final class PlayerModel {
             self.queue = queue
             load(index: start, autoplay: true)
         }
+    }
+
+    /// A Shuffle button: turns shuffle on and plays the collection from a random song. The queue keeps
+    /// the collection's own order underneath, so turning shuffle off afterwards restores it.
+    public func shuffle(queue: [Track], title: String?) {
+        if !queue.isEmpty, !isShuffling {
+            isShuffling = true
+            settingsChanged?(repeatMode, isShuffling)
+        }
+        play(queue: queue, title: title)
     }
 
     /// Starts this occurrence in the existing queue without rebuilding or reshuffling that queue.
@@ -274,19 +314,53 @@ public final class PlayerModel {
         updateNowPlayingInfo()
     }
 
+    /// A skip keeps playing, or stays paused, as before. The last song wraps around only with Repeat
+    /// All; otherwise the queue stops at its end, as it does when that song plays out.
     public func next() {
         recordPlaybackCommand()
-        advance(by: 1, autoplay: wantsToPlay || position == 0)
+        guard !queue.isEmpty else { return }
+        if index + 1 < queue.count {
+            load(index: index + 1, autoplay: wantsToPlay)
+        } else if repeatMode == .all {
+            load(index: 0, autoplay: wantsToPlay)
+        } else {
+            load(index: index, autoplay: false)
+        }
     }
 
+    /// A few seconds into a song, or on the first song without Repeat All, Previous restarts the
+    /// song, as the system players and the Watch do; otherwise it goes back one song.
     public func previous() {
         recordPlaybackCommand()
-        advance(by: -1, autoplay: wantsToPlay || position == 0)
+        guard !queue.isEmpty else { return }
+        if position > Self.previousRestartThreshold || (index == 0 && repeatMode != .all) {
+            restartCurrentTrack()
+        } else {
+            load(index: index == 0 ? queue.count - 1 : index - 1, autoplay: wantsToPlay)
+        }
+    }
+
+    /// How far into a song Previous restarts it rather than going back a song.
+    static let previousRestartThreshold: TimeInterval = 3
+
+    /// Returns to the start in place, playing or paused as before. A song that failed, or has no
+    /// player because its file couldn't be reached, loads again instead: there is nothing to seek.
+    private func restartCurrentTrack() {
+        if isSimulated {
+            seek(to: 0)
+        } else if let player, player.status == .ready || player.status == .loading, lastError == nil {
+            seek(to: 0)
+        } else {
+            load(index: index, autoplay: wantsToPlay)
+        }
     }
 
     public func seek(toFraction fraction: Double) {
         recordPlaybackCommand()
-        let target = max(0, min(1, fraction)) * duration
+        seek(to: max(0, min(1, fraction)) * duration)
+    }
+
+    private func seek(to target: TimeInterval) {
         if isSimulated {
             position = target
             anchorPosition = target
@@ -336,11 +410,6 @@ public final class PlayerModel {
 
     // MARK: Loading
 
-    private func advance(by delta: Int, autoplay: Bool) {
-        guard !queue.isEmpty else { return }
-        load(index: (index + delta + queue.count) % queue.count, autoplay: autoplay)
-    }
-
     /// The song played to its end: repeat it, move on, wrap around, or stop, depending on the repeat mode.
     private func trackEnded() {
         guard !queue.isEmpty else { return }
@@ -373,7 +442,7 @@ public final class PlayerModel {
         // CarPlay and lock-screen Play must also work after the first URL lookup failed.
         if usesSystemControls { setupRemoteCommands() }
 
-        if let source = mediaSourceProvider?(track) ?? streamURLProvider?(track).map(RemoteMediaSource.url) {
+        if let source = mediaSourceProvider?(track) {
             isSimulated = false
             if usesSystemControls { configureAudioSession() }
             let player: any PlaybackTransport
@@ -647,8 +716,12 @@ public final class PlayerModel {
     private func updateNowPlayingInfo() {
         guard let track else {
             publishNowPlaying(nil)
+            publishPlaybackState(.stopped)
             return
         }
+        // Follows the request, like the Play/Pause glyph, so a media key pressed while a song loads
+        // or a seek settles pauses it, as the in-app button would.
+        publishPlaybackState(wantsToPlay ? .playing : .paused)
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: album?.artist ?? track.artist ?? "",

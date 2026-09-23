@@ -282,7 +282,7 @@ import Testing
         let fixture = PlaybackFixture()
         var source: URL?
         var lookups = 0
-        fixture.model.streamURLProvider = { _ in lookups += 1; return source }
+        fixture.model.mediaSourceProvider = { _ in lookups += 1; return source.map(RemoteMediaSource.url) }
         fixture.model.play(queue: [track("first")], title: "Queue")
         #expect(!fixture.model.isPlaying)
         #expect(fixture.rate == 0)
@@ -336,7 +336,7 @@ import Testing
         #expect(fixture.rate == 0)
         #expect(fixture.model.lastError == "Connection lost")
         fixture.nextStatus = .loading
-        fixture.model.streamURLProvider = { _ in URL(filePath: "/fixture/refreshed.m4a") }
+        fixture.model.mediaSourceProvider = { _ in .url(URL(filePath: "/fixture/refreshed.m4a")) }
         fixture.model.resume()
         let replacement = fixture.transports[1]
         #expect(first.invalidated)
@@ -366,7 +366,7 @@ import Testing
         fixture.model.play(queue: [track("first")], title: nil)
         fixture.transports[0].positionChanged?(35)
         fixture.transports[0].status = .failed("Expired source")
-        fixture.model.streamURLProvider = { _ in nil }
+        fixture.model.mediaSourceProvider = { _ in nil }
         fixture.model.resume()
         #expect(fixture.transports.count == 1)
         #expect(!fixture.model.isPlaying)
@@ -375,7 +375,7 @@ import Testing
         fixture.model.resume()
         #expect(!fixture.model.isPlaying)
         #expect(fixture.model.position == 35)
-        fixture.model.streamURLProvider = { _ in URL(filePath: "/fixture/restored.m4a") }
+        fixture.model.mediaSourceProvider = { _ in .url(URL(filePath: "/fixture/restored.m4a")) }
         fixture.model.resume()
         let replacement = fixture.transports[1]
         #expect(replacement.seeks.map(\.seconds) == [35])
@@ -513,7 +513,7 @@ import Testing
         let fixture = PlaybackFixture()
         var resolutions = 0
         fixture.model.allowsSimulation = { true }
-        fixture.model.streamURLProvider = { _ in resolutions += 1; return nil }
+        fixture.model.mediaSourceProvider = { _ in resolutions += 1; return nil }
         fixture.model.play(queue: [track("sample")], title: nil)
         #expect(fixture.model.isPlaying)
         fixture.model.seek(toFraction: 0.25)
@@ -833,7 +833,7 @@ import Testing
 
     @Test func missingSourceDoesNotClaimAPlaybackRequest() {
         let fixture = PlaybackFixture()
-        fixture.model.streamURLProvider = { _ in nil }
+        fixture.model.mediaSourceProvider = { _ in nil }
         fixture.model.play(queue: [track("first")], title: nil)
         #expect(!fixture.model.isPlaybackRequested)
         #expect(fixture.model.lastError != nil)
@@ -856,7 +856,7 @@ import Testing
         let fixture = PlaybackFixture()
         var address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
         let renewed = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=renewed"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         var asked: [URL] = []
         fixture.model.streamFailureRecovery = { url in
             asked.append(url)
@@ -889,7 +889,7 @@ import Testing
     @Test func streamRecoveryYieldsToALaterCommandAndToAnUnrecoverableFailure() async throws {
         let fixture = PlaybackFixture()
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         var answer = true
         var asked = 0
         fixture.model.streamFailureRecovery = { _ in
@@ -922,7 +922,7 @@ import Testing
         fixture.model.sourceIDProvider = { "source-a" }
         let songs = [track("first")]
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         var answer = false
         var asked = 0
         fixture.model.streamFailureRecovery = { _ in
@@ -987,7 +987,7 @@ import Testing
     @Test func streamRecoveryThatDoesNotAnswerShowsTheFailureAtItsDeadline() async throws {
         let fixture = PlaybackFixture()
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         fixture.model.streamRecoveryDeadline = .milliseconds(30)
         var held: CheckedContinuation<Void, Never>?
         fixture.model.streamFailureRecovery = { _ in
@@ -1018,7 +1018,7 @@ import Testing
 
         // Play again streams from the server; the item fails under the seek back to 0:40.
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         fixture.model.streamFailureRecovery = { _ in
             try? await Task.sleep(for: .milliseconds(20))
             return true
@@ -1043,7 +1043,7 @@ import Testing
         fixture.transports[0].positionChanged?(40)
         fixture.transports[0].status = .failed("Connection lost")
         let address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         var asked = 0
         fixture.model.streamFailureRecovery = { _ in
             asked += 1
@@ -1072,7 +1072,7 @@ import Testing
     @Test func playingARecoveredSongAgainInPlaceGetsItsOwnRecovery() async throws {
         let fixture = PlaybackFixture()
         var address = try #require(URL(string: "https://nas.example:5001/webapi/entry.cgi/first.m4a?_sid=ended"))
-        fixture.model.streamURLProvider = { _ in address }
+        fixture.model.mediaSourceProvider = { _ in .url(address) }
         var asked = 0
         fixture.model.streamFailureRecovery = { _ in
             asked += 1
@@ -1094,6 +1094,164 @@ import Testing
         try await playbackWaitUntil { fixture.transports.count == 3 }
         #expect(asked == 2)
         #expect(fixture.model.lastError == nil)
+    }
+
+    @Test func previousRestartsTheSongOnceItIsAFewSecondsIn() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first"), track("second"), track("third")], startingAt: 1, title: nil)
+        let transport = fixture.transports[0]
+        transport.positionChanged?(150)
+        fixture.model.previous()
+        #expect(fixture.model.index == 1, "Two minutes in, Previous restarts the song")
+        #expect(fixture.model.position == 0)
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.transports.count == 1, "The song restarts in place, without loading again")
+        #expect(transport.seeks.map(\.seconds) == [0])
+        transport.seeks[0].completion(true)
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.model.track?.id == "second")
+    }
+
+    @Test func previousNearTheStartGoesBackAndWrapsOnlyWithRepeatAll() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first"), track("second"), track("third")], startingAt: 1, title: nil)
+        fixture.transports[0].positionChanged?(2)
+        fixture.model.previous()
+        #expect(fixture.model.track?.id == "first")
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.transports.count == 2)
+
+        // The first song restarts rather than jumping to the end of the album.
+        fixture.transports[1].positionChanged?(1)
+        fixture.model.previous()
+        #expect(fixture.model.track?.id == "first")
+        #expect(fixture.transports.count == 2)
+        #expect(fixture.transports[1].seeks.map(\.seconds) == [0])
+
+        fixture.model.repeatMode = .all
+        fixture.model.previous()
+        #expect(fixture.model.track?.id == "third", "With Repeat All the queue wraps around")
+        #expect(fixture.model.isPlaybackRequested)
+        #expect(fixture.transports.count == 3)
+    }
+
+    @Test(arguments: PlayerModel.RepeatMode.allCases)
+    func nextOnTheLastSongWrapsOnlyWithRepeatAll(_ repeatMode: PlayerModel.RepeatMode) {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.repeatMode = repeatMode
+        fixture.model.play(queue: [track("first"), track("last")], startingAt: 1, title: nil)
+        fixture.transports[0].positionChanged?(30)
+        fixture.model.next()
+        #expect(fixture.transports.count == 2)
+        if repeatMode == .all {
+            #expect(fixture.model.track?.id == "first")
+            #expect(fixture.model.isPlaying)
+        } else {
+            // As when the last song plays out: it stays selected, at its start, and shows Play.
+            #expect(fixture.model.track?.id == "last")
+            #expect(fixture.model.position == 0)
+            #expect(!fixture.model.isPlaybackRequested)
+            #expect(!fixture.model.isPlaying)
+            #expect(fixture.transports[1].playCount == 0)
+        }
+    }
+
+    @Test func skipsWhilePausedStayPaused() {
+        let fixture = PlaybackFixture(status: .ready)
+        fixture.model.play(queue: [track("first"), track("second"), track("third")], title: nil)
+        fixture.transports[0].positionChanged?(30)
+        fixture.model.pause()
+        fixture.model.next()
+        #expect(fixture.model.track?.id == "second")
+        #expect(!fixture.model.isPlaybackRequested)
+        fixture.model.next()
+        #expect(fixture.model.track?.id == "third")
+        #expect(!fixture.model.isPlaybackRequested, "A second skip at 0:00 must not start the music")
+        fixture.model.previous()
+        #expect(fixture.model.track?.id == "second")
+        #expect(!fixture.model.isPlaybackRequested)
+        #expect(!fixture.model.isPlaying)
+        #expect(fixture.transports.dropFirst().allSatisfy { $0.playCount == 0 })
+    }
+
+    @Test func shuffleButtonTurnsShuffleOnAndTurningItOffRestoresTheCollectionOrder() {
+        let fixture = PlaybackFixture(status: .ready)
+        var saved: [String] = []
+        fixture.model.settingsChanged = { saved.append("\($0.rawValue) \($1)") }
+        let album = (0..<8).map { track("song-\($0)") }
+        fixture.model.shuffle(queue: album, title: "Album")
+        #expect(fixture.model.isShuffling, "Now Playing shows Shuffle on")
+        #expect(saved == ["off true"], "The profile remembers shuffle")
+        #expect(fixture.model.index == 0)
+        #expect(fixture.model.queue.map(\.id).sorted() == album.map(\.id).sorted())
+        #expect(fixture.model.queueTitle == "Album")
+        #expect(fixture.model.isPlaying)
+        let current = fixture.model.track
+        fixture.model.toggleShuffle()
+        #expect(!fixture.model.isShuffling)
+        #expect(fixture.model.queue == album, "Turning shuffle off restores the album's order")
+        #expect(fixture.model.track == current)
+        #expect(fixture.model.index == album.firstIndex(of: current!))
+        #expect(saved == ["off true", "off false"])
+        #expect(fixture.transports.count == 1)
+    }
+
+    @Test func shuffledPlaybackWithoutAChosenSongStartsAtARandomSong() {
+        let fixture = PlaybackFixture(status: .ready)
+        let songs = (0..<8).map { track("song-\($0)") }
+        var firstSongs: Set<String> = []
+        for _ in 0..<40 {
+            fixture.model.shuffle(queue: songs, title: nil)
+            firstSongs.insert(fixture.model.track?.id ?? "")
+        }
+        #expect(firstSongs.count > 1, "A shuffled start must not always be the first song")
+        firstSongs = []
+        for _ in 0..<40 {
+            fixture.model.play(queue: songs, title: nil)
+            firstSongs.insert(fixture.model.track?.id ?? "")
+        }
+        #expect(firstSongs.count > 1, "Play, or Siri, with shuffle on starts anywhere too")
+        fixture.model.play(queue: songs, startingAt: 5, title: nil)
+        #expect(fixture.model.track?.id == "song-5", "A chosen song still plays first")
+        fixture.model.toggleShuffle()
+        fixture.model.play(queue: songs, title: nil)
+        #expect(fixture.model.track?.id == "song-0", "Without shuffle a collection starts at its first song")
+    }
+
+    @Test func appliedProfileSettingsAreNotReportedBackButAListenersChoiceIsReportedOnce() {
+        let fixture = PlaybackFixture()
+        var saved: [String] = []
+        fixture.model.settingsChanged = { saved.append("\($0.rawValue) \($1)") }
+        // Opening a profile, a profile switch or another device's edit: nothing to save, and above
+        // all never the old shuffle beside the new repeat.
+        fixture.model.applySettings(repeatMode: .all, shuffle: true)
+        fixture.model.applySettings(repeatMode: .one, shuffle: false)
+        #expect(saved.isEmpty)
+        #expect(fixture.model.repeatMode == .one)
+        #expect(!fixture.model.isShuffling)
+        // Siri: both settings at once, in one report.
+        fixture.model.applySettings(repeatMode: .all, shuffle: true, notifying: true)
+        #expect(saved == ["all true"])
+        fixture.model.applySettings(repeatMode: .all, shuffle: true, notifying: true)
+        #expect(saved == ["all true"], "An unchanged choice is not saved again")
+        fixture.model.cycleRepeat()
+        #expect(saved == ["all true", "one true"])
+    }
+
+    @Test func systemPlaybackStateFollowsTheRequestAndStop() {
+        let fixture = PlaybackFixture()
+        fixture.model.play(queue: [track("first")], title: nil)
+        #expect(fixture.playbackStates.last == .playing, "A loading song keeps the media keys on this app")
+        fixture.transports[0].status = .ready
+        #expect(fixture.playbackStates.last == .playing)
+        fixture.model.pause()
+        #expect(fixture.playbackStates.last == .paused)
+        fixture.model.resume()
+        #expect(fixture.playbackStates.last == .playing)
+        fixture.transports[0].status = .failed("Connection lost")
+        #expect(fixture.playbackStates.last == .paused)
+        fixture.model.stop()
+        #expect(fixture.playbackStates.last == .stopped)
     }
 
     private func preparedRecovery() -> PlaybackFixture {
@@ -1127,6 +1285,7 @@ private final class PlaybackFixture {
     var transports: [FakePlaybackTransport] = []
     var urls: [URL] = []
     var nowPlaying: [String: Any]?
+    var playbackStates: [PlayerModel.NowPlayingPlaybackState] = []
     var startedTrackIDs: [String] = []
     var nextStatus: PlaybackTransportStatus
     var rate: Double? { nowPlaying?[MPNowPlayingInfoPropertyPlaybackRate] as? Double }
@@ -1137,9 +1296,10 @@ private final class PlaybackFixture {
             urls.append(url)
             transports.append(transport)
             return transport
-        }, publishNowPlaying: { [unowned self] in nowPlaying = $0 })
+        }, publishNowPlaying: { [unowned self] in nowPlaying = $0 },
+           publishPlaybackState: { [unowned self] in playbackStates.append($0) })
         model.allowsSimulation = { false }
-        model.streamURLProvider = { _ in URL(filePath: "/fixture/source.m4a") }
+        model.mediaSourceProvider = { _ in .url(URL(filePath: "/fixture/source.m4a")) }
         model.didStartTrack = { [unowned self] in startedTrackIDs.append($0.id) }
         return model
     }()

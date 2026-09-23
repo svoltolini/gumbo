@@ -35,10 +35,10 @@ private struct ArtistDetailContent: View {
 
                 PlayActions {
                     guard library.artist(named: artist.name) == artist else { return }
-                    player.play(queue: artist.albums.flatMap(\.tracks), startingAt: 0, title: artist.name)
+                    player.play(queue: artist.albums.flatMap(\.tracks), title: artist.name)
                 } shuffle: {
                     guard library.artist(named: artist.name) == artist else { return }
-                    player.play(queue: artist.albums.flatMap(\.tracks).shuffled(), startingAt: 0, title: artist.name)
+                    player.shuffle(queue: artist.albums.flatMap(\.tracks), title: artist.name)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
