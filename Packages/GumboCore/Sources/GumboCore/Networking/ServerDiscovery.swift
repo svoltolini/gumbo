@@ -197,7 +197,7 @@ nonisolated struct DiscoveryAttempts {
 
 /// Pure discovery policy: a generic SMB advertisement must never be reinterpreted as DSM.
 nonisolated enum DiscoveryService {
-    enum BrowserStatus: Equatable { case browsing, denied, failed }
+    nonisolated enum BrowserStatus: Equatable, Sendable { case browsing, denied, failed }
 
     /// `kDNSServiceErr_PolicyDenied`: the person turned off Local Network access for the app.
     static let policyDeniedCode: Int32 = -65570
