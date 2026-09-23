@@ -43,6 +43,7 @@ struct MacPlayerBar: View {
                     Button("Volume", systemImage: "speaker.wave.2.fill") { showsVolume.toggle() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
+                        .help("Volume")
                         .popover(isPresented: $showsVolume) { MacVolumeSlider().frame(width: 180).padding() }
                 }
                 MacRoutePicker()
@@ -81,7 +82,7 @@ struct MacPlayerBar: View {
                     Text(track.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    Text(player.album?.artist ?? player.queueTitle ?? track.artist ?? " ")
+                    Text(player.nowPlayingArtist ?? " ")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

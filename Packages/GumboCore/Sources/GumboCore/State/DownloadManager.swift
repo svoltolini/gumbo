@@ -226,6 +226,48 @@ public nonisolated struct DownloadJob: Codable, Sendable {
     }
 }
 
+/// The download state the widgets need, with the checks against the files on disk. Built on the main
+/// actor by `DownloadManager.widgetDownloadCheck()`; the checks themselves stat files and can run anywhere.
+public nonisolated struct WidgetDownloadCheck: Sendable {
+    let records: [String: DownloadRecord]
+    let driveID: String
+    let profileID: String
+    let listed: Set<String>
+    let directory: URL
+
+    /// The albums kept complete on this device by the active profile.
+    public func verifiedAlbums(_ albums: [Album]) -> [Album] {
+        guard !records.isEmpty else { return [] }
+        return albums.filter { album in
+            listed.contains(DownloadOwner(album: album, profileID: profileID).id) && !album.tracks.isEmpty
+                && album.tracks.allSatisfy { hasVerifiedFile(for: $0) }
+        }
+    }
+
+    /// Distinct songs with a complete file here. Only songs with a saved record are looked up, so a
+    /// large library with few downloads costs one dictionary lookup per song.
+    public func verifiedSongCount(_ tracks: [Track]) -> Int {
+        let saved = Set(records.values.lazy.filter { $0.driveID == driveID && !$0.fileName.isEmpty }.map(\.trackID))
+        guard !saved.isEmpty else { return 0 }
+        var counted = Set<String>()
+        for track in tracks where saved.contains(track.id) && !counted.contains(track.id) && hasVerifiedFile(for: track) {
+            counted.insert(track.id)
+        }
+        return counted.count
+    }
+
+    private func hasVerifiedFile(for track: Track) -> Bool {
+        let scope = DownloadOwner.scope(profileID)
+        guard let record = records[DownloadManager.cacheKey(trackID: track.id, driveID: driveID)],
+              !record.fileName.isEmpty, record.matches(track),
+              record.owners.contains(where: { $0.hasPrefix(scope) }),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: directory.appending(path: record.fileName).path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.int64Value else { return false }
+        return size > 0 && size == record.bytes
+    }
+}
+
 /// Downloads albums and playlists one song at a time through a background session, so leaving the app
 /// does not stop them, reports progress per song, shows a Live Activity, and hands the files back to
 /// the player. A song already on the device is never fetched twice.
@@ -367,6 +409,12 @@ public final class DownloadManager {
     private var initialPendingOwners: [String: Set<String>] = [:]
     private var migratesLegacySessionOwners = false
     private var cancelledInitialOwners: [String: Set<String>] = [:]
+    /// The manifest could not be read at launch, e.g. before the device's first unlock. Nothing
+    /// overwrites it until it reads again; its records are then merged back in.
+    private var manifestIsUnreadable = false
+    /// Records could not be restored this launch, so files missing from the manifest may still
+    /// belong to someone. They are not offered for deletion as unused.
+    private var manifestWasLost = false
     /// A sweep met partial transfers before the session's tasks were known; look again once they are.
     private var sweepDeferredByRestoration = false
 
@@ -454,9 +502,23 @@ public final class DownloadManager {
         delegate.onEventsFinished = { [weak self] in
             Task { @MainActor in self?.receive(.eventsFinished) }
         }
-        records = Self.loadManifest(at: manifestURL)
-        pruneMissingFiles()
-        saveManifest()
+        switch Self.loadManifest(at: manifestURL) {
+        case .loaded(let loaded):
+            records = loaded
+            pruneMissingFiles()
+            saveManifest()
+        case .unreadable:
+            manifestIsUnreadable = true
+            manifestWasLost = true
+        case .damaged:
+            // The only copy of owners, revisions and deletion epochs is set aside rather than
+            // replaced, like a damaged intent document. Saved files stay where they are.
+            let aside = cacheDirectory.appending(path: DownloadCacheInventory.damagedManifestFileName)
+            try? FileManager.default.removeItem(at: aside)
+            if (try? FileManager.default.moveItem(at: manifestURL, to: aside)) == nil { manifestIsUnreadable = true }
+            manifestWasLost = true
+            lastError = "Your downloads list couldn’t be restored. Your saved files are still available; download an album again to attach its songs."
+        }
         if let data = try? Data(contentsOf: intentURL), let saved = try? JSONDecoder().decode(SavedIntent.self, from: data) {
             pendingByOwner = saved.pending
             initialJobs = saved.jobs
@@ -690,6 +752,10 @@ public final class DownloadManager {
     /// Deletes what `unusedStorage` describes, judged again at this moment so nothing attached or
     /// downloaded since the last look is touched.
     public func removeUnused() {
+        guard !manifestWasLost else {
+            lastError = "Unused downloads can’t be removed until your downloads list is restored. Your saved files are still available."
+            return
+        }
         let unused = sweepFolder(driveID: driveIDProvider()).unused
         for name in unused.fileNames {
             try? FileManager.default.removeItem(at: cacheDirectory.appending(path: name))
@@ -729,6 +795,9 @@ public final class DownloadManager {
         var claimed: Set<String> = []
         var unused = UnusedDownloadStorage()
         var unusedNames: Set<String> = []
+        // Sizes by name, built once: thousands of songs kept from another library would otherwise
+        // each scan the whole folder listing.
+        var bytesByName: [String: Int64]?
         for (key, record) in records where !record.fileName.isEmpty {
             // Owners whose album or playlist no longer exists do not claim the file.
             let owners = record.owners.subtracting(unavailableOwners[record.driveID] ?? [])
@@ -742,7 +811,12 @@ public final class DownloadManager {
             } else {
                 unused.recordKeys.append(key)
                 unusedNames.insert(record.fileName)
-                if otherLibrary { unused.otherLibraryBytes += inventory.files.first { $0.fileName == record.fileName }?.bytes ?? record.bytes }
+                if otherLibrary {
+                    if bytesByName == nil {
+                        bytesByName = Dictionary(inventory.files.map { ($0.fileName, $0.bytes) }, uniquingKeysWith: { first, _ in first })
+                    }
+                    unused.otherLibraryBytes += bytesByName?[record.fileName] ?? record.bytes
+                }
             }
         }
         var protected: Set<String> = []
@@ -846,6 +920,24 @@ public final class DownloadManager {
                 keys: request.keys, total: request.total, errors: request.errors, cancelled: request.cancelled
             )
             changed = true
+        }
+        // Songs still on their way are recorded, and their errors reported, under the owner their
+        // transfer is pending for; that has to be the new id too.
+        func renamedKeys(_ owners: [String: Set<String>]) -> [String: Set<String>] {
+            var moved: [String: Set<String>] = [:]
+            for (owner, keys) in owners { moved[renamed(owner), default: []].formUnion(keys) }
+            return moved
+        }
+        if pendingByOwner.keys.contains(where: { renamed($0) != $0 }) {
+            pendingByOwner = renamedKeys(pendingByOwner)
+            changed = true
+        }
+        if initialPendingOwners.keys.contains(where: { renamed($0) != $0 }) {
+            initialPendingOwners = renamedKeys(initialPendingOwners)
+            changed = true
+        }
+        if cancelledInitialOwners.keys.contains(where: { renamed($0) != $0 }) {
+            cancelledInitialOwners = renamedKeys(cancelledInitialOwners)
         }
         guard changed else { return }
         saveManifest()
@@ -962,25 +1054,17 @@ public final class DownloadManager {
 
     /// Widget membership requires complete local audio, including files restored from disk.
     public func verifiedAlbumsForWidget(_ albums: [Album]) -> [Album] {
-        let listed = listedOwnerIDs
-        return albums.filter { album in
-            listed.contains(owner(for: album).id) && !album.tracks.isEmpty
-                && album.tracks.allSatisfy { verifiedLocalFile(for: $0) }
-        }
+        widgetDownloadCheck().verifiedAlbums(albums)
     }
 
     public func verifiedSongCountForWidget(_ tracks: [Track]) -> Int {
-        Set(tracks.filter { verifiedLocalFile(for: $0) }.map(\.id)).count
+        widgetDownloadCheck().verifiedSongCount(tracks)
     }
 
-    private func verifiedLocalFile(for track: Track) -> Bool {
-        guard let record = record(for: track),
-              record.owners.contains(where: { $0.hasPrefix(DownloadOwner.scope(activeProfileID)) }),
-              let url = localURL(for: track),
-              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = (attributes[.size] as? NSNumber)?.int64Value else { return false }
-        return size > 0 && size == record.bytes
+    /// What the widget checks against the files, taken here so the checks can run off the main actor.
+    public func widgetDownloadCheck() -> WidgetDownloadCheck {
+        WidgetDownloadCheck(records: records, driveID: driveIDProvider(), profileID: activeProfileID,
+                            listed: listedOwnerIDs, directory: cacheDirectory)
     }
 
     public var totalBytes: Int64 { records.values.reduce(0) { $0 + $1.bytes } }
@@ -1031,7 +1115,7 @@ public final class DownloadManager {
             if !driveID.isEmpty, records[key] == nil {
                 if inventory == nil { inventory = DownloadCacheInventory.read(directory: cacheDirectory) }
                 if let inventory, let file = validFile(for: track, key: key, in: inventory) {
-                    if let existing { retire(existing) }
+                    if let existing { replace(existing) }
                     records[key] = DownloadRecord(trackID: track.id, driveID: driveID, fileName: file.fileName, bytes: file.bytes, owners: [owner.id], fileRevision: DownloadFileRevision(track: track))
                     attached += 1
                     continue
@@ -1050,12 +1134,12 @@ public final class DownloadManager {
                 pendingByOwner[owner.id]?.remove(key)
                 initialPendingOwners[owner.id]?.remove(key)
                 if let existing, !pendingByOwner.values.contains(where: { $0.contains(key) }),
-                   !initialPendingOwners.values.contains(where: { $0.contains(key) }) { retire(existing) }
+                   !initialPendingOwners.values.contains(where: { $0.contains(key) }) { replace(existing) }
                 continue
             }
             // Enumeration can finish before an old completion callback arrives. Keep its saved
             // ownership until then, but an explicit retry with no live task starts a fresh transfer.
-            if let existing { retire(existing, preservingCheckpoint: true) }
+            if let existing { replace(existing, preservingCheckpoint: true) }
             let attemptID = UUID().uuidString
             let name = Self.fileName(for: track, driveID: driveID)
             var job = DownloadJob(
@@ -1725,6 +1809,17 @@ public final class DownloadManager {
         startNextIfIdle()
     }
 
+    /// Retires a job that a new request supersedes and stops its transfer, as `cancel(_:)` does.
+    /// With one connection per host, a stale task left running would hold up its replacement
+    /// until it had downloaded a file nobody accepts.
+    private func replace(_ job: DownloadJob, preservingCheckpoint: Bool = false) {
+        let task = tasks[job.cacheKey]
+        let simulation = simulations[job.cacheKey]
+        retire(job, preservingCheckpoint: preservingCheckpoint)
+        task?.cancel()
+        simulation?.cancel()
+    }
+
     private func retire(_ job: DownloadJob, preservingCheckpoint: Bool = false) {
         if !preservingCheckpoint { checkpoints.remove(key: job.cacheKey) }
         if foregroundAttempt == job.attemptID { foregroundTask?.cancel() }
@@ -1877,16 +1972,37 @@ public final class DownloadManager {
 
     // MARK: Manifest
 
-    private static func loadManifest(at url: URL) -> [String: DownloadRecord] {
-        guard let data = try? Data(contentsOf: url), let list = try? JSONDecoder().decode([DownloadRecord].self, from: data) else { return [:] }
+    enum ManifestLoad {
+        case loaded([String: DownloadRecord])
+        /// The file is there but could not be read, e.g. while the device is still locked.
+        case unreadable
+        /// The file was read but is not a manifest this build understands.
+        case damaged
+    }
+
+    static func loadManifest(at url: URL) -> ManifestLoad {
+        guard FileManager.default.fileExists(atPath: url.path) else { return .loaded([:]) }
+        guard let data = try? Data(contentsOf: url) else { return .unreadable }
+        guard let list = try? JSONDecoder().decode([DownloadRecord].self, from: data) else { return .damaged }
         // Existing manifests already contain their source drive. Retain valid files in place and
         // reindex by that source; discard old simulated/false records so they can be retried.
-        return Dictionary(list.filter { !$0.fileName.isEmpty && !$0.driveID.isEmpty && ($0.fileName as NSString).lastPathComponent == $0.fileName }.map {
+        return .loaded(Dictionary(list.filter { !$0.fileName.isEmpty && !$0.driveID.isEmpty && ($0.fileName as NSString).lastPathComponent == $0.fileName }.map {
             (cacheKey(trackID: $0.trackID, driveID: $0.driveID), $0)
-        }, uniquingKeysWith: { first, _ in first })
+        }, uniquingKeysWith: { first, _ in first }))
     }
 
     @discardableResult private func saveManifest() -> Bool {
+        if manifestIsUnreadable {
+            // Never replace records that could not be read; take them back once they can be.
+            guard case .loaded(let saved) = Self.loadManifest(at: manifestURL) else { return false }
+            manifestIsUnreadable = false
+            manifestWasLost = false
+            records.merge(saved) { current, saved in
+                var merged = current
+                merged.owners.formUnion(saved.owners)
+                return merged
+            }
+        }
         let list = records.values.filter { !$0.fileName.isEmpty }
         do {
             let data = try JSONEncoder().encode(list)

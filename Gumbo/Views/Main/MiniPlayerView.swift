@@ -30,7 +30,7 @@ struct MiniPlayerView: View {
                         .id(track.id)
                         .transition(.opacity)
                     if !isInline {
-                        FadingText(player.album?.artist ?? player.queueTitle ?? track.artist ?? " ", fadeWidth: 40)
+                        FadingText(player.nowPlayingArtist ?? " ", fadeWidth: 40)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

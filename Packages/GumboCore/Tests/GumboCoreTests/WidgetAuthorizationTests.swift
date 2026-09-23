@@ -153,3 +153,20 @@ nonisolated func widgetRejectsUnprovenancedArtworkBeforeTheAppRuns(version: Int?
     #expect(reader.load() != nil)
     #expect(reader.coverURL(key: "cover", pixels: WidgetStore.tilePixels) != nil)
 }
+
+@Test nonisolated func widgetWithoutAnOpenProfileReadsAsLockedNotEmpty() async throws {
+    let fixture = try WidgetFixture()
+    defer { fixture.cleanUp() }
+    let reader = WidgetStore.Storage(directory: fixture.directory)
+    #expect(reader.loadForDisplay().isLocked)
+    let session = UUID()
+    fixture.store.setSession(session)
+    #expect(!reader.loadForDisplay().isLocked)
+    let publication = try #require(fixture.store.publication(for: session))
+    #expect(await fixture.store.write(.sample, publication: publication, coverSources: [:], heroKeys: []))
+    #expect(reader.loadForDisplay().nowPlaying?.id == WidgetSnapshot.sample.nowPlaying?.id)
+    fixture.store.setSession(nil)
+    #expect(reader.loadForDisplay().isLocked)
+    try FileManager.default.removeItem(at: fixture.directory.appending(path: "widget-authorization.json"))
+    #expect(!reader.loadForDisplay().isLocked)
+}

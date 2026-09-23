@@ -125,6 +125,7 @@ public final class MetadataWriter {
             for track in tracks {
                 if Task.isCancelled { report.wasCancelled = true; break }
                 currentTitle = track.title
+                var unconfirmed = false
                 do {
                     guard authorized(), let path = track.path else { throw MetadataWriteError.notAuthorized }
                     let relative = try configuration.relativePath(path)
@@ -153,6 +154,8 @@ public final class MetadataWriter {
                         else { report.unchanged.append(updated) }
                     case .cancelled: report.wasCancelled = true
                     default:
+                        // Any unconfirmed file (including a helper restart's "interrupted") leaves its state unknown.
+                        unconfirmed = outcome.status == .unconfirmed
                         throw RemoteTagService.Error.service(code: outcome.error?.code ?? "unconfirmed",
                             message: outcome.error?.message ?? "The helper couldn't confirm this edit. Refresh song information before trying again.")
                     }
@@ -160,7 +163,7 @@ public final class MetadataWriter {
                     if Task.isCancelled || error is CancellationError { report.wasCancelled = true }
                     // A failed helper is never followed by a whole-file upload: its earlier request may have committed.
                     report.failures.append(MetadataWriteFailure(trackID: track.id, title: track.title, message: error.localizedDescription))
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || unconfirmed { break }
                     if case RemoteTagService.Error.service(let code, _) = error,
                        ["unconfirmed", "recovery_required", "recovery_needed"].contains(code) { break }
                 }

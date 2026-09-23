@@ -80,6 +80,11 @@ struct TVMainView: View {
             tab = .library
         }
         .onChange(of: model.playlistNavigationRequest) { _, _ in tab = .playlists }
+        .onChange(of: player.hasTrack) { _, hasTrack in
+            // The Now Playing tab goes away with the track; a leftover selection would jump back to it
+            // the next time anything plays.
+            if !hasTrack, tab == .nowPlaying { tab = .library }
+        }
         .onChange(of: tab) { _, tab in
             if tab != .playlists { model.cancelPendingPlaylistNavigation() }
             if tab != .library { model.cancelPendingAlbumNavigation() }

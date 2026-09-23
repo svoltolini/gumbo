@@ -28,6 +28,7 @@ struct ProfileEditorSheet: View {
     @State private var isConfirmingDelete = false
     @State private var isVerifyingPINForChange = false
     @State private var isVerifyingPINForRemoval = false
+    @State private var isVerifyingPINForBiometrics = false
     @State private var currentPINVerified = false
     @State private var problem: String?
     @State private var openingSession: UUID?
@@ -91,6 +92,21 @@ struct ProfileEditorSheet: View {
         return profile.id == profiles.activeID
     }
 
+    /// Turning biometric unlock on for a PIN-locked profile needs the PIN too, or anyone
+    /// whose finger or face is enrolled on this device could let themselves in later.
+    private var biometricsBinding: Binding<Bool> {
+        Binding(
+            get: { biometrics },
+            set: { enabled in
+                if enabled && !biometrics && requiresPINVerification {
+                    isVerifyingPINForBiometrics = true
+                } else {
+                    biometrics = enabled
+                }
+            }
+        )
+    }
+
     private func validateDraft() -> Bool {
         guard isCurrentDraft else {
             problem = "This profile or session changed. Close this editor and open it again."
@@ -144,7 +160,7 @@ struct ProfileEditorSheet: View {
                                 }
                                 if let biometry = profiles.biometryName {
                                     SettingsRow(symbol: biometry == "Face ID" ? "faceid" : "touchid", tint: .green, title: "Open with \(biometry)") {
-                                        Toggle("Open with \(biometry)", isOn: $biometrics)
+                                        Toggle("Open with \(biometry)", isOn: biometricsBinding)
                                             .labelsHidden()
                                     }
                                 }
@@ -220,7 +236,7 @@ struct ProfileEditorSheet: View {
                                 }
                             }
                             if let biometry = profiles.biometryName {
-                                Toggle("Open with \(biometry)", isOn: $biometrics)
+                                Toggle("Open with \(biometry)", isOn: biometricsBinding)
                             }
                         } else {
                             Button("Set a PIN", systemImage: "lock") { isSettingPIN = true }
@@ -311,6 +327,14 @@ struct ProfileEditorSheet: View {
                         currentPINVerified = true
                         pinChange = .remove
                         biometrics = false
+                    }
+                }
+            }
+            .sheet(isPresented: $isVerifyingPINForBiometrics) {
+                PINVerificationSheet(profile: profile!) { verified in
+                    if verified {
+                        currentPINVerified = true
+                        biometrics = true
                     }
                 }
             }

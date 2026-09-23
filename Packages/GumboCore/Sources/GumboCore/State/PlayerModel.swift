@@ -66,8 +66,42 @@ public final class PlayerModel {
         lastError = nil
         nowPlayingArtwork = nil
         artworkAlbumID = nil
+        artworkCacheKey = nil
+        isLoadingArtwork = false
         updateNowPlayingInfo()
     }
+
+    /// Drops songs that no longer exist, such as files deleted or renamed on the server, keeping the
+    /// rest of the queue, its order and the current song. Stops only when the current song is gone.
+    public func removeFromQueue(ids: Set<String>) {
+        guard queue.contains(where: { ids.contains($0.id) }) || orderedQueue.contains(where: { ids.contains($0.id) }) else { return }
+        if let track, ids.contains(track.id) {
+            stop()
+            return
+        }
+        // Where each surviving song of the original order ends up once the removed ones are gone.
+        var newOrigin: [Int: Int] = [:]
+        var keptOrdered: [Track] = []
+        for (origin, track) in orderedQueue.enumerated() where !ids.contains(track.id) {
+            newOrigin[origin] = keptOrdered.count
+            keptOrdered.append(track)
+        }
+        var keptQueue: [Track] = []
+        var keptOrigins: [Int] = []
+        var keptIndex = 0
+        for (position, track) in queue.enumerated() {
+            if position == index { keptIndex = keptQueue.count }
+            guard !ids.contains(track.id), queueOrigins.indices.contains(position),
+                  let origin = newOrigin[queueOrigins[position]] else { continue }
+            keptQueue.append(track)
+            keptOrigins.append(origin)
+        }
+        orderedQueue = keptOrdered
+        queueOrigins = keptOrigins
+        queue = keptQueue
+        index = keptIndex
+    }
+
     /// Audio is actually rolling: false while a song loads or a seek settles. The lock screen's rate
     /// follows this; Play/Pause controls follow `isPlaybackRequested`.
     public private(set) var isPlaying = false
@@ -128,6 +162,8 @@ public final class PlayerModel {
     private var interruptionResumeRevision: UUID?
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var artworkAlbumID: String?
+    /// A cover for `artworkCacheKey` is being read; a failed read lets the next song try again.
+    private var isLoadingArtwork = false
 
     public init() {
         makePlayer = { AVPlaybackTransport(url: $0) }
@@ -175,6 +211,12 @@ public final class PlayerModel {
 
     public var progress: Double { duration > 0 ? min(1, position / duration) : 0 }
     public var remaining: TimeInterval { max(0, duration - position) }
+    /// Who performs the current song: its own artist tag first, so a compilation's song names its
+    /// performer rather than "Various Artists"; then the album's artist, or the playlist's name.
+    public var nowPlayingArtist: String? {
+        if let artist = track?.artist, !artist.isEmpty { return artist }
+        return album?.artist ?? queueTitle
+    }
     /// Colour of the playing album as the library has it now, so cover colours read later still apply.
     public var tint: Color { (track.flatMap { albumProvider?($0) } ?? album)?.primaryColor ?? Palette.neutralTint }
 
@@ -506,7 +548,6 @@ public final class PlayerModel {
         recoverableStream = nil
         currentStream = nil
         pendingStreamFailure = nil
-        if nowPlayingArtwork == nil { artworkAlbumID = nil }
         stopTicker()
         anchorDate = nil
         player?.invalidate()
@@ -724,7 +765,7 @@ public final class PlayerModel {
         publishPlaybackState(wantsToPlay ? .playing : .paused)
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
-            MPMediaItemPropertyArtist: album?.artist ?? track.artist ?? "",
+            MPMediaItemPropertyArtist: (track.artist?.isEmpty == false ? track.artist : nil) ?? album?.artist ?? "",
             MPMediaItemPropertyAlbumTitle: album?.title ?? queueTitle ?? "",
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
@@ -752,14 +793,18 @@ public final class PlayerModel {
         guard let artwork else { nowPlayingArtwork = nil; artworkAlbumID = nil; artworkCacheKey = nil; return }
         let url = artwork.url
         let key = "\(url.absoluteString)|\(artwork.version)|lockscreen"
-        guard artworkCacheKey != key else { return }
+        // Already showing, or on its way: a load for this cover is still current while the album and
+        // key stay put, however many songs of the album start meanwhile.
+        if artworkAlbumID == album.id, artworkCacheKey == key, nowPlayingArtwork != nil || isLoadingArtwork { return }
         nowPlayingArtwork = nil
         artworkAlbumID = album.id
         artworkCacheKey = key
-        let generation = playbackGeneration
+        isLoadingArtwork = true
         Task { [weak self] in
-            guard let image = await CoverImageCache.shared.image(url: url, key: key, maxPixelSize: CoverImageCache.largePixels) else { return }
-            guard let self, playbackGeneration == generation, artworkAlbumID == album.id, artworkCacheKey == key else { return }
+            let image = await CoverImageCache.shared.image(url: url, key: key, maxPixelSize: CoverImageCache.largePixels)
+            guard let self, artworkAlbumID == album.id, artworkCacheKey == key else { return }
+            isLoadingArtwork = false
+            guard let image else { return }
             let size = CGSize(width: image.width, height: image.height)
             // Requested on a background thread by the system; only the CGImage crosses into the closure.
             nowPlayingArtwork = MPMediaItemArtwork(boundsSize: size) { @Sendable _ in

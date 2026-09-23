@@ -211,7 +211,7 @@ public actor RemoteTagService {
                 throw Error.invalidRequest
             }
             guard !values.isEmpty, values.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && $0.utf8.count <= 1024 && !$0.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) }) else { throw Error.invalidRequest }
+                && $0.utf8.count <= 1024 && !Self.containsControl($0) }) else { throw Error.invalidRequest }
         }
         let value: Job = try await request("PUT", path: "v1/jobs/" + jobID.uuidString.lowercased(),
                                            body: JSONEncoder().encode(SubmitRequest(files: files, dryRun: dryRun)))
@@ -292,10 +292,16 @@ public actor RemoteTagService {
             && value.sha256.utf8.count == 64 && value.sha256.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
+    /// Matches the helper's rule in engine.py: only U+0000–U+001F and U+007F are refused.
+    /// Format characters such as ZWNJ, ZWJ, LRM, soft hyphen and BOM are ordinary text in names and tags.
+    nonisolated static func containsControl(_ value: String) -> Bool {
+        value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
+    }
+
     private nonisolated static func validate(path: String, deletion: Bool = false) throws {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, path.utf8.count <= 4096, !path.contains("\\"),
-              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              !Self.containsControl(path),
               !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasPrefix(".gumbo-tag-") }),
               (deletion ? RemoteDriveSupport.audioExtensions : ["mp3", "flac", "m4a"]).contains((path as NSString).pathExtension.lowercased()) else { throw Error.invalidPath }
     }
@@ -318,7 +324,8 @@ public actor RemoteTagService {
                   http.value(forHTTPHeaderField: "Content-Type")?.lowercased().hasPrefix("application/json") == true else {
                 bytes.task.cancel(); throw Error.invalidResponse
             }
-            if http.statusCode == 401 || http.statusCode == 403 { bytes.task.cancel(); throw Error.unauthorized }
+            // Only 401 means a rejected token. The helper's 403 carries a specific reason, such as deletion_disabled.
+            if http.statusCode == 401 { bytes.task.cancel(); throw Error.unauthorized }
             guard !(300...399).contains(http.statusCode), http.expectedContentLength <= 2 * 1024 * 1024 else {
                 bytes.task.cancel(); throw Error.invalidResponse
             }
@@ -334,7 +341,7 @@ public actor RemoteTagService {
                 if let value = try? decoder.decode(ErrorEnvelope.self, from: data), value.error.message.utf8.count <= 1024 {
                     throw Error.service(code: value.error.code, message: value.error.message)
                 }
-                throw Error.unavailable
+                throw http.statusCode == 403 ? Error.unauthorized : Error.unavailable
             }
             guard let value = try? decoder.decode(Response.self, from: data) else { throw Error.invalidResponse }
             return value

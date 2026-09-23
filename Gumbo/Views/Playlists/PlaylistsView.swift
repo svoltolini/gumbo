@@ -454,10 +454,19 @@ private struct PlaylistTrackRow: View {
 
             TrackActionsMenu(
                 track: track,
-                onRemove: isLocal ? { withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) { library.remove(track, fromPlaylist: playlist.id) } } : nil,
+                onRemove: isLocal ? removeEntry : nil,
                 isAddingToPlaylist: Binding(get: { addingTrack?.id == track.id }, set: { addingTrack = $0 ? track : nil })
             )
             .padding(.leading, 2)
+        }
+    }
+
+    /// Removes only this occurrence, so another copy of the same song stays. A row drawn for an
+    /// earlier version of the playlist could point at a different song, so it does nothing.
+    private func removeEntry() {
+        guard library.playlist(id: playlist.id) == playlist else { return }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
+            library.removeEntries(at: IndexSet(integer: position), fromPlaylist: playlist.id)
         }
     }
 }

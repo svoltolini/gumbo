@@ -111,10 +111,13 @@ public nonisolated final class SynologyDrive: RemoteDrive {
 
     public func list(_ path: String) async throws -> [RemoteEntry] {
         do {
-            return try await list(path, minimal: false, rawPath: false)
+            return try await fullListing(path)
         } catch {
             try Task.checkCancellation()
-            guard Self.mayRetryListing(after: error) else { throw error }
+            // A minimal listing has no sizes or dates, so its songs would all be read again and
+            // its album would drop out of Recently Added. It is for servers that turn down the
+            // full parameters, not for a request that timed out or met a busy server.
+            guard Self.mayRetryListing(after: error), !Self.isConnectionFailure(error) else { throw error }
             diagnostics("List failed for \(path): \(error.localizedDescription). Retrying with minimal parameters.")
             do {
                 let entries = try await list(path, minimal: true, rawPath: false)
@@ -132,6 +135,35 @@ public nonisolated final class SynologyDrive: RemoteDrive {
                     throw finalError
                 }
             }
+        }
+    }
+
+    /// The listing with sizes and dates, asked for a second time after a failure that says nothing
+    /// about the parameters.
+    private func fullListing(_ path: String) async throws -> [RemoteEntry] {
+        do {
+            return try await list(path, minimal: false, rawPath: false)
+        } catch where Self.isTransient(error) {
+            try Task.checkCancellation()
+            diagnostics("List failed for \(path): \(error.localizedDescription). Trying again.")
+            return try await list(path, minimal: false, rawPath: false)
+        }
+    }
+
+    /// No answer, a server error, or DSM's unknown error (100): the same request may work next time.
+    static func isTransient(_ error: any Error) -> Bool {
+        if case .api(100, _)? = error as? SynologyError { return true }
+        return isConnectionFailure(error)
+    }
+
+    /// The request got no usable answer at all, which weaker parameters can't change.
+    static func isConnectionFailure(_ error: any Error) -> Bool {
+        if error is URLError { return true }
+        guard let error = error as? SynologyError else { return false }
+        switch error {
+        case .unreachable: return true
+        case .http(let status): return status >= 500 || status == 408 || status == 429
+        default: return false
         }
     }
 

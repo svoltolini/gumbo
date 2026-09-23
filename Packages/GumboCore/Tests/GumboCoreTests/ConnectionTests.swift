@@ -91,6 +91,42 @@ import Testing
     #expect(!model.isSigningIn)
 }
 
+@Test @MainActor func repeatedSubmitDuringSignInKeepsTheFirstAttempt() async throws {
+    let fixture = ConnectionFixture()
+    defer { fixture.cleanUp() }
+    let login = PendingLogin()
+    var attempts = 0
+    fixture.services.login = { url, account, password, otp in
+        attempts += 1
+        return try await login.login(url, account, password, otp)
+    }
+    let model = fixture.model()
+    #expect(model.enterAddress("https://nas.example:5001"))
+    let task = Task { await model.signIn(account: "listener", password: "test", otpCode: "", remember: false) }
+    try await waitUntil { login.continuation != nil }
+    await model.signIn(account: "listener", password: "test", otpCode: "", remember: false)
+    #expect(model.isSigningIn)
+    login.finish()
+    await task.value
+    #expect(attempts == 1)
+    #expect(model.isConnected)
+    #expect(fixture.loggedOut.isEmpty)
+}
+
+@Test @MainActor func rejectedTwoFactorCodeSaysSo() async {
+    let fixture = ConnectionFixture()
+    defer { fixture.cleanUp() }
+    fixture.services.login = { _, _, _, _ in throw SynologyError.twoFactorRequired }
+    let model = fixture.model()
+    #expect(model.enterAddress("https://nas.example:5001"))
+    await model.signIn(account: "listener", password: "test", otpCode: "", remember: false)
+    #expect(model.needsOTP)
+    #expect(model.signInError == "Enter the code from your authenticator app.")
+    await model.signIn(account: "listener", password: "test", otpCode: "000000", remember: false)
+    #expect(model.needsOTP)
+    #expect(model.signInError?.hasPrefix("That code didn’t work.") == true)
+}
+
 @Test @MainActor func ordinarySignInOpensFolderSelection() async {
     let fixture = ConnectionFixture()
     defer { fixture.cleanUp() }

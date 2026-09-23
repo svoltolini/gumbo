@@ -33,7 +33,7 @@ enum MacSection: Hashable {
     }
 }
 
-/// The sidebar selection, shared with the menu bar so ⌘1 to ⌘5 and ⌘F land in the same place.
+/// The sidebar selection, shared with the menu bar so ⌘1 to ⌘7 and ⌘F land in the same place.
 @Observable
 final class MacNavigation {
     var selection: MacSection? = .recentlyAdded
@@ -80,6 +80,19 @@ struct MacCommands: Commands {
     let navigation: MacNavigation
     let player: PlayerModel
     let model: AppModel
+    let profiles: ProfileStore
+
+    /// Setup and the profile picker have no sidebar: commands that drive it would only queue
+    /// a surprise (such as a New Playlist alert) for when the library opens.
+    private var isLibraryShown: Bool { model.stage == .ready && !profiles.isLocked }
+
+    private var shuffle: Binding<Bool> {
+        Binding(get: { player.isShuffling }, set: { if $0 != player.isShuffling { player.toggleShuffle() } })
+    }
+
+    private var repeatMode: Binding<PlayerModel.RepeatMode> {
+        Binding(get: { player.repeatMode }, set: { player.repeatMode = $0 })
+    }
 
     var body: some Commands {
         CommandMenu("Playback") {
@@ -93,34 +106,48 @@ struct MacCommands: Commands {
                 .keyboardShortcut(.leftArrow, modifiers: .command)
                 .disabled(!player.hasTrack)
             Divider()
-            Button("Shuffle", systemImage: "shuffle") { player.toggleShuffle() }
+            Toggle("Shuffle", systemImage: "shuffle", isOn: shuffle)
                 .keyboardShortcut("s", modifiers: [.command, .option])
-            Button("Repeat", systemImage: "repeat") { player.cycleRepeat() }
+            Picker("Repeat", systemImage: "repeat", selection: repeatMode) {
+                Text("Off").tag(PlayerModel.RepeatMode.off)
+                Text("All").tag(PlayerModel.RepeatMode.all)
+                Text("One").tag(PlayerModel.RepeatMode.one)
+            }
+            Button("Change Repeat Mode", systemImage: "repeat") { player.cycleRepeat() }
                 .keyboardShortcut("r", modifiers: [.command, .option])
             Divider()
             Button(navigation.isShowingNowPlaying ? "Hide Now Playing" : "Show Now Playing", systemImage: "sidebar.right") { navigation.isShowingNowPlaying.toggle() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(!isLibraryShown)
         }
         CommandMenu("Library") {
-            Button("Recently Added", systemImage: "clock") { navigation.selection = .recentlyAdded }
-                .keyboardShortcut("1", modifiers: .command)
-            Button("Artists", systemImage: "music.microphone") { navigation.selection = .artists }
-                .keyboardShortcut("2", modifiers: .command)
-            Button("Genres", systemImage: "guitars") { navigation.selection = .genres }
-                .keyboardShortcut("3", modifiers: .command)
-            Button("Playlists", systemImage: "music.note.list") { navigation.selection = .playlists }
-                .keyboardShortcut("4", modifiers: .command)
-            Button("Downloads", systemImage: "arrow.down.circle") { navigation.selection = .downloads }
-                .keyboardShortcut("5", modifiers: .command)
-            Divider()
-            Button("Search", systemImage: "magnifyingglass") { navigation.focusSearch() }
-                .keyboardShortcut("f", modifiers: .command)
-            Divider()
-            Button("New Playlist…", systemImage: "plus") {
-                navigation.selection = .playlists
-                navigation.isNamingPlaylist = true
+            // Numbered in sidebar order.
+            Group {
+                Button("Recently Added", systemImage: "clock") { navigation.selection = .recentlyAdded }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Albums", systemImage: "square.stack") { navigation.selection = .albums }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("Songs", systemImage: "music.note") { navigation.selection = .songs }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("Artists", systemImage: "music.microphone") { navigation.selection = .artists }
+                    .keyboardShortcut("4", modifiers: .command)
+                Button("Genres", systemImage: "guitars") { navigation.selection = .genres }
+                    .keyboardShortcut("5", modifiers: .command)
+                Button("Downloads", systemImage: "arrow.down.circle") { navigation.selection = .downloads }
+                    .keyboardShortcut("6", modifiers: .command)
+                Button("Playlists", systemImage: "music.note.list") { navigation.selection = .playlists }
+                    .keyboardShortcut("7", modifiers: .command)
+                Divider()
+                Button("Search", systemImage: "magnifyingglass") { navigation.focusSearch() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Divider()
+                Button("New Playlist…", systemImage: "plus") {
+                    navigation.selection = .playlists
+                    navigation.isNamingPlaylist = true
+                }
+                .keyboardShortcut("n", modifiers: .command)
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .disabled(!isLibraryShown)
             Divider()
             Button("Scan for New Music", systemImage: "arrow.clockwise") { model.rescan() }
                 .keyboardShortcut("r", modifiers: .command)

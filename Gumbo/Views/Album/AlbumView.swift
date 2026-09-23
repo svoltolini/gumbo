@@ -828,8 +828,8 @@ struct TrackRow: View {
                 .animation(.easeInOut(duration: 0.25), value: isCurrent)
             }
             .buttonStyle(RowPressStyle())
-            .accessibilityLabel("\(track.number). \(track.title), \(TimeText.clock(track.duration))")
-            .accessibilityValue(playbackState.accessibilityDescription)
+            .accessibilityLabel("\(track.number). \(track.title), \(performer.map { "\($0), " } ?? "")\(TimeText.clock(track.duration))")
+            .accessibilityValue(accessibilityStatus)
 
             TrackActionsMenu(track: track, isAddingToPlaylist: $isAddingToPlaylist)
                 .padding(.leading, 2)
@@ -839,9 +839,37 @@ struct TrackRow: View {
         }
     }
 
+    /// The song's own artist, shown only when it differs from the album's, as on a compilation.
+    private var performer: String? {
+        guard let artist = track.artist, !artist.isEmpty,
+              artist.caseInsensitiveCompare(album.artist) != .orderedSame else { return nil }
+        return artist
+    }
+
+    /// The row's label replaces its badges' own labels, so VoiceOver hears them here with the playback state.
+    private var accessibilityStatus: String {
+        var parts = [playbackState.accessibilityDescription]
+        if library.isFavourite(track) { parts.append("Favourite") }
+        if let fraction = downloads.progress[track.id] {
+            parts.append("Downloading, \(Int((fraction * 100).rounded())) percent")
+        } else if downloads.isQueued(track) {
+            parts.append("Waiting to download")
+        } else if downloads.isDownloaded(track) {
+            parts.append("Downloaded")
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
     private var title: some View {
-        LibraryRowText(track.title)
-            .font(.body.weight(isCurrent ? .semibold : .regular))
+        VStack(alignment: .leading, spacing: 2) {
+            LibraryRowText(track.title)
+                .font(.body.weight(isCurrent ? .semibold : .regular))
+            if let performer {
+                LibraryRowText(performer)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     /// The favourite and download badges, then the duration.

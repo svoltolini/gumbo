@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import hashlib
 import hmac
+import io
 import json
 import os
 import queue
@@ -20,6 +21,14 @@ from pathlib import Path
 from engine import Cancelled, FileEngine, ServiceError, validate_request, MAX_FILES, MAX_FILE_BYTES
 
 MAX_BODY = 256 * 1024
+# One absolute budget for the TLS handshake, request line, headers and body together, so a peer
+# that drips a byte at a time can't hold a connection past it (a per-recv timeout alone can't).
+REQUEST_DEADLINE = 15
+# Unauthenticated peers can only occupy connection slots, and each address gets a share of them.
+# Authenticated work has its own smaller limit that job status/cancel polls never wait for.
+MAX_CONNECTIONS = 32
+MAX_CONNECTIONS_PER_ADDRESS = 8
+MAX_ACTIVE_REQUESTS = 8
 
 
 def job_identifier(value):
@@ -184,28 +193,60 @@ class HTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address, engine, jobs, token):
         self.engine, self.jobs, self.token = engine, jobs, token
-        self.slots = threading.BoundedSemaphore(8)
+        self.admission = threading.Lock()
+        self.connections = {}
+        self.work = threading.BoundedSemaphore(MAX_ACTIVE_REQUESTS)
         super().__init__(address, Handler)
 
+    def _admit(self, host):
+        with self.admission:
+            if sum(self.connections.values()) >= MAX_CONNECTIONS or self.connections.get(host, 0) >= MAX_CONNECTIONS_PER_ADDRESS:
+                return False
+            self.connections[host] = self.connections.get(host, 0) + 1
+            return True
+
+    def _release(self, host):
+        with self.admission:
+            remaining = self.connections.pop(host) - 1
+            if remaining:
+                self.connections[host] = remaining
+
     def process_request(self, request, address):
-        if not self.slots.acquire(blocking=False):
+        if not self._admit(address[0]):
             self.shutdown_request(request)
             return
         try:
             super().process_request(request, address)
         except Exception:
-            self.slots.release()
+            self._release(address[0])
             raise
 
     def process_request_thread(self, request, address):
         try:
             super().process_request_thread(request, address)
         finally:
-            self.slots.release()
+            self._release(address[0])
 
     def handle_error(self, request, address):
         # Never emit request contents or bearer tokens through default traceback logging.
         pass
+
+
+class DeadlineReader(io.RawIOBase):
+    """Socket reads that share one absolute monotonic deadline instead of a per-recv timeout."""
+    def __init__(self, connection, deadline):
+        self.connection, self.deadline = connection, deadline
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("The request deadline passed.")
+        # A TLS socket negotiates inside its first read, bounded by the same remaining time.
+        self.connection.settimeout(remaining)
+        return self.connection.recv_into(buffer)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -216,12 +257,16 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(15)
+        # Close the default reader too, or the socket's file references never reach zero.
+        self.rfile.close()
+        self.rfile = io.BufferedReader(DeadlineReader(self.connection, time.monotonic() + REQUEST_DEADLINE))
 
     def log_message(self, format, *args):
         pass
 
     def respond(self, status, value):
         body = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        self.connection.settimeout(15)  # The request deadline doesn't cover processing or the reply.
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -241,7 +286,10 @@ class Handler(BaseHTTPRequestHandler):
             raise ServiceError("invalid_body", "The request body is too large or empty.", 413)
         if self.headers.get_content_type() != "application/json":
             raise ServiceError("invalid_body", "Use application/json.", 415)
-        data = self.rfile.read(length)
+        try:
+            data = self.rfile.read(length)
+        except TimeoutError as error:
+            raise ServiceError("invalid_body", "The request body arrived too slowly.", 408) from error
         if len(data) != length:
             raise ServiceError("invalid_body", "The request body was incomplete.")
         try:
@@ -250,12 +298,21 @@ class Handler(BaseHTTPRequestHandler):
             raise ServiceError("invalid_body", "Invalid JSON.") from error
 
     def handle_api(self):
+        working = False
         try:
             authorizations = self.headers.get_all("Authorization", [])
             if len(authorizations) != 1 or not hmac.compare_digest(authorizations[0].encode(), ("Bearer " + self.server.token).encode()):
                 raise ServiceError("unauthorized", "A valid helper token is required.", 401)
             if "?" in self.path or "%" in self.path or "#" in self.path:
                 raise ServiceError("not_found", "Unknown endpoint.", 404)
+            parts = self.path.split("/")
+            poll = parts[1:3] == ["v1", "jobs"] and ((len(parts) == 4 and self.command == "GET")
+                                                    or (len(parts) == 5 and parts[4] == "cancel" and self.command == "POST"))
+            # Status and cancel polls are cheap; keep them available while every work slot is busy.
+            if not poll:
+                if not self.server.work.acquire(blocking=False):
+                    raise ServiceError("busy", "The helper is handling other requests. Try again shortly.", 503)
+                working = True
             if self.command == "GET" and self.path == "/v1/capabilities":
                 self.respond(200, {"version": 1, "service": "GumboTagService", "fields": ["album", "albumArtist", "genre"],
                                    "formats": ["mp3", "flac", "m4a"], "maxFiles": MAX_FILES, "maxFileBytes": MAX_FILE_BYTES,
@@ -278,7 +335,6 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "POST" and self.path == "/v1/files/inspect-range":
                 self.respond(200, {"version": 1, **self.server.engine.inspection_read(self.body())})
                 return
-            parts = self.path.split("/")
             if len(parts) in (4, 5) and parts[1:3] == ["v1", "jobs"]:
                 identifier = job_identifier(parts[3])
                 if len(parts) == 4 and self.command == "PUT":
@@ -298,6 +354,9 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(error.status, {"version": 1, "error": {"code": error.code, "message": error.message}})
         except (OSError, ValueError, sqlite3.Error):
             self.respond(500, {"version": 1, "error": {"code": "service_error", "message": "The helper could not complete the request."}})
+        finally:
+            if working:
+                self.server.work.release()
 
     do_GET = handle_api
     do_POST = handle_api

@@ -73,13 +73,19 @@ def check_cancel(cancelled):
         raise Cancelled()
 
 
+def has_control(text):
+    """Only ASCII controls are refused. Format characters such as ZWNJ, ZWJ, LRM, soft hyphen
+    and BOM are ordinary text; RemoteTagService.containsControl in the app applies the same rule."""
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
 def relative_parts(path, deletion=False):
     if not isinstance(path, str) or not path or len(path.encode("utf-8")) > 4096:
         raise ServiceError("invalid_path", "Use a relative music file path.")
     parts = path.split("/")
     if any(part in ("", ".", "..") or part.startswith(".gumbo-tag-") for part in parts):
         raise ServiceError("invalid_path", "Empty, parent and reserved path components are not allowed.")
-    if "\\" in path or any(ord(char) < 32 or ord(char) == 127 for char in path):
+    if "\\" in path or has_control(path):
         raise ServiceError("invalid_path", "The path contains unsupported characters.")
     if PurePosixPath(path).suffix.lower() not in (DELETE_SUFFIXES if deletion else SUFFIXES):
         raise ServiceError("unsupported_format", "Only recognized music files can be deleted." if deletion else "Only MP3, FLAC and M4A files can be edited.")
@@ -130,7 +136,7 @@ def validate_request(value):
         for text in changes.values():
             if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 1024:
                 raise ServiceError("invalid_request", "Tag values must contain between 1 and 1024 UTF-8 bytes.")
-            if any(ord(char) < 32 or ord(char) == 127 for char in text):
+            if has_control(text):
                 raise ServiceError("invalid_request", "Tag values may not contain control characters.")
     return value
 

@@ -1,8 +1,12 @@
 import GumboCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct ServerDiscoveryView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isEnteringAddress = false
     @State private var suggestedServer: DiscoveredServer?
     @State private var suggestionError: String?
@@ -22,6 +26,10 @@ struct ServerDiscoveryView: View {
         .task {
             try? await Task.sleep(for: .seconds(4))
             hasWaited = true
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Coming back from Settings with Local Network access turned on.
+            if phase == .active, model.discovery.isLocalNetworkDenied { model.discovery.start() }
         }
         .sheet(isPresented: $isEnteringAddress) {
             ConnectSheet(server: suggestedServer, error: suggestionError)
@@ -49,7 +57,24 @@ struct ServerDiscoveryView: View {
                     }
                     .disabled(checkingServerID != nil)
                 }
-                if servers.isEmpty, hasWaited {
+                if servers.isEmpty, model.discovery.isLocalNetworkDenied {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Allow Local Network access")
+                            .font(.body.weight(.medium))
+                        Text("Gumbo needs Local Network access to find your NAS. Turn it on for Gumbo in Settings, or enter its address below.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        #if os(iOS)
+                        Button("Open Settings") {
+                            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                            UIApplication.shared.open(url)
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.borderless)
+                        #endif
+                    }
+                    .padding(.vertical, 6)
+                } else if servers.isEmpty, hasWaited {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No servers found yet")
                             .font(.body.weight(.medium))
@@ -77,7 +102,8 @@ struct ServerDiscoveryView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(servers.isEmpty ? "Looking for music servers…" : "Found on your network")
+                    Text(!servers.isEmpty ? "Found on your network"
+                         : model.discovery.isBrowsing ? "Looking for music servers…" : "No servers found")
                 }
                 .textCase(nil)
                 .font(.subheadline)

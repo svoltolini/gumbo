@@ -11,7 +11,8 @@ import WidgetKit
 /// WidgetKit to redraw. It watches the models directly rather than a screen, so a play started from
 /// a widget while the app sits in the background updates the widgets too.
 public final class WidgetFeed {
-    /// Everything the widgets depend on. Reading it inside observation tracking registers the properties.
+    /// Everything the widgets show. Reading it inside observation tracking registers the properties;
+    /// a change that leaves it equal, such as download progress or queue bookkeeping, is ignored.
     public struct Signature: Equatable {
         public let nowPlayingID: String?
         public let trackTitle: String?
@@ -19,10 +20,10 @@ public final class WidgetFeed {
         public let recentlyPlayed: [String]
         public let recentlyAdded: [String]
         public let coverKeys: [String?]
-        public let albumCount: Int
+        public let artworkRevision: UInt64
+        public let contentRevision: Int
         public let downloadOwners: [String]
         public let downloadedSongs: Int
-        public let downloadRevision: UInt64
         public let playlists: [String]
 
         public init(library: LibraryStore, player: PlayerModel, downloads: DownloadManager) {
@@ -35,11 +36,12 @@ public final class WidgetFeed {
             recentlyPlayed = played.map(\.id)
             recentlyAdded = added.map(\.id)
             coverKeys = ([player.album].compactMap { $0 } + played + added).map { WidgetFeed.coverKey(for: $0, in: library) }
-            albumCount = library.albums.count
+            artworkRevision = library.artworkRevision
+            // Rediscover and the downloads shelf read the whole library, so any published change counts.
+            contentRevision = library.contentRevision
             downloadOwners = downloads.listedOwnerIDs.sorted() + [downloads.activeProfileID]
             downloadedSongs = downloads.records.count
-            downloadRevision = downloads.stateRevision
-            playlists = ([library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist] + library.playlists).map { $0.id + $0.summary }
+            playlists = ([library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist] + library.playlists).map { $0.id + $0.name + $0.summary }
         }
     }
 
@@ -48,6 +50,13 @@ public final class WidgetFeed {
     private var downloads: DownloadManager?
     private var profiles: ProfileStore?
     private var pending: Task<Void, Never>?
+    /// What was last observed, so a change the widgets don't show does not rebuild the snapshot.
+    private var observed: (signature: Signature, sessionID: UUID?)?
+    /// The last snapshot written for the current authorization, without its timestamp. Writing the
+    /// same content again would only spend WidgetKit's reload budget.
+    private var lastWritten: Data?
+    /// Rediscover's daily order of the whole library, kept until the library or the day changes.
+    private var rediscoverOrder: (revision: Int, day: String, albums: [Album])?
 
     public init() {
         // A saved widget is not evidence that the profile opened in this app launch.
@@ -68,31 +77,51 @@ public final class WidgetFeed {
 
     private func observe() {
         guard let library, let player, let downloads, let profiles else { return }
-        withObservationTracking {
-            _ = Signature(library: library, player: player, downloads: downloads)
-            _ = profiles.sessionID
+        let current = withObservationTracking {
+            (signature: Signature(library: library, player: player, downloads: downloads), sessionID: profiles.sessionID)
         } onChange: { [weak self] in
             // Fires before the change lands; the hop lets it finish before anything is read.
             Task { @MainActor in
                 guard let self else { return }
-                self.refresh()
+                let previous = self.observed
                 self.observe()
+                if let previous, let now = self.observed, previous.signature == now.signature, previous.sessionID == now.sessionID { return }
+                self.refresh()
             }
         }
+        observed = current
     }
 
-    /// Writes a fresh snapshot shortly after being called; repeated calls within the delay coalesce.
+    /// Writes a fresh snapshot shortly after being called; repeated calls within the delay coalesce,
+    /// and so does the work of building it.
     public func refresh() {
         pending?.cancel()
         guard let library, let player, let downloads, let profiles else { return }
         let sessionID = profiles.sessionID
         let changed = WidgetStore.setSession(sessionID)
         if changed {
+            lastWritten = nil
             #if canImport(WidgetKit)
             WidgetCenter.shared.reloadAllTimelines()
             #endif
         }
         guard let sessionID, let publication = WidgetStore.publication(for: sessionID) else { return }
+        pending = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, profiles.sessionID == sessionID else { return }
+            // Checking the downloaded files stats each of them, so it runs off the main actor.
+            let check = downloads.widgetDownloadCheck()
+            let newest = library.recentlyAdded
+            let tracks = library.tracks
+            let (keptAlbums, songCount) = await Task.detached(priority: .utility) {
+                (Array(check.verifiedAlbums(newest).prefix(12)), check.verifiedSongCount(tracks))
+            }.value
+            guard !Task.isCancelled, profiles.sessionID == sessionID else { return }
+            await publish(library: library, player: player, kept: keptAlbums, downloadedSongCount: songCount, publication: publication)
+        }
+    }
+
+    private func publish(library: LibraryStore, player: PlayerModel, kept: [Album], downloadedSongCount: Int, publication: WidgetStore.Publication) async {
         var sources: [String: URL] = [:]
         var heroKeys: Set<String> = []
         func describe(_ album: Album) -> WidgetSnapshot.Album {
@@ -117,44 +146,49 @@ public final class WidgetFeed {
         let lead = player.album
         let played = Array(library.recentlyPlayed.prefix(8))
         let added = Array(library.recentlyAdded.prefix(8))
-        let kept = Array(downloads.verifiedAlbumsForWidget(library.recentlyAdded).prefix(12))
         let playlists = [library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist, library.libraryShufflePlaylist] + library.playlists.prefix(8)
         // Albums not played lately, in an order that stays put for the day and changes overnight.
-        let day = Date.now.formatted(.iso8601.year().month().day())
         let recent = Set(played.map(\.id) + [lead?.id].compactMap { $0 })
-        let rediscover = library.albums
-            .filter { !recent.contains($0.id) }
-            .sorted { Self.stableHash($0.id + day) < Self.stableHash($1.id + day) }
-            .prefix(24)
-            .map(describe)
+        let rediscover = Array(dailyOrder(of: library).lazy.filter { !recent.contains($0.id) }.prefix(24))
 
-        let snapshot = WidgetSnapshot(
+        var snapshot = WidgetSnapshot(
             nowPlaying: lead.map(describe),
             trackTitle: player.track?.title,
             isPlaying: player.isPlaybackRequested,
             recentlyPlayed: played.map(describe),
             recentlyAdded: added.map(describe),
             downloads: kept.map(describe),
-            downloadedSongCount: downloads.verifiedSongCountForWidget(library.tracks),
+            downloadedSongCount: downloadedSongCount,
             playlists: playlists.map(describe),
-            rediscover: Array(rediscover),
-            updated: .now
+            rediscover: rediscover.map(describe)
         )
         // Lead albums get the big copy: the small widgets fill their whole face with them.
-        for album in ([lead, played.first, added.first, kept.first].compactMap { $0 }) + Array(library.albums.filter { candidate in rediscover.contains { $0.id == candidate.id } }) {
+        for album in [lead, played.first, added.first, kept.first].compactMap({ $0 }) + rediscover {
             if let key = Self.coverKey(for: album, in: library) { heroKeys.insert(key) }
         }
-        let coverSources = sources
-        let heroes = heroKeys
-        pending = Task {
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled, profiles.sessionID == sessionID else { return }
-            let published = await WidgetStore.write(snapshot, publication: publication, coverSources: coverSources, heroKeys: heroes)
-            guard published else { return }
-            #if canImport(WidgetKit)
-            WidgetCenter.shared.reloadAllTimelines()
-            #endif
-        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let content = try? encoder.encode(snapshot)
+        if let content, content == lastWritten { return }
+        snapshot.updated = .now
+        let published = await WidgetStore.write(snapshot, publication: publication, coverSources: sources, heroKeys: heroKeys)
+        guard published else { return }
+        lastWritten = content
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
+    /// Every album in the day's Rediscover order, with each hash worked out once per album.
+    private func dailyOrder(of library: LibraryStore) -> [Album] {
+        let day = DailySeed.dayKey()
+        if let cached = rediscoverOrder, cached.revision == library.contentRevision, cached.day == day { return cached.albums }
+        let albums = library.albums
+            .map { (key: DailySeed.stableHash($0.id + day), album: $0) }
+            .sorted { $0.key < $1.key }
+            .map(\.album)
+        rediscoverOrder = (library.contentRevision, day, albums)
+        return albums
     }
 
     /// File stem for an album's cover copies, changing when the cover itself is replaced.
@@ -162,15 +196,5 @@ public final class WidgetFeed {
         guard let url = library.coverURL(for: album) else { return nil }
         let digest = SHA256.hash(data: Data((url.absoluteString + "|" + album.id).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         return "\(digest)-v\(library.coverVersion(for: album))"
-    }
-
-    /// FNV-1a: the same order for the same day on every launch, unlike `hashValue`.
-    nonisolated private static func stableHash(_ text: String) -> UInt64 {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        return hash
     }
 }

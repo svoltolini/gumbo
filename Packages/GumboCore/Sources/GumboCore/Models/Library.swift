@@ -245,6 +245,12 @@ public nonisolated struct Artist: Identifiable, Hashable, Sendable {
     }
 
     public var topTracks: [Track] { Array(albums.flatMap(\.tracks).prefix(5)) }
+
+    /// How artist names are matched: "Pink Floyd", "PINK FLOYD" and "Pínk Floyd" are one artist,
+    /// as they already are for album ids and Siri.
+    public static func key(for name: String) -> String {
+        name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
 }
 
 public nonisolated struct Genre: Identifiable, Hashable, Sendable {
@@ -487,10 +493,12 @@ public nonisolated enum AppTab: Hashable, Sendable {
 // MARK: - Formatting helpers
 
 public nonisolated enum TimeText {
-    /// "5:31" style clock text.
+    /// "5:31" style clock text, or "1:15:12" once it reaches an hour.
     public static func clock(_ seconds: TimeInterval) -> String {
         let total = Int(max(0, seconds).rounded(.down))
-        return "\(total / 60):" + String(format: "%02d", total % 60)
+        let secondsText = String(format: "%02d", total % 60)
+        guard total >= 3600 else { return "\(total / 60):" + secondsText }
+        return "\(total / 3600):" + String(format: "%02d", total / 60 % 60) + ":" + secondsText
     }
 
     /// "6 h 12 min" style duration.

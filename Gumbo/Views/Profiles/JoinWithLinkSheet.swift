@@ -11,12 +11,12 @@ struct JoinWithLinkSheet: View {
     @State private var isJoining = false
     @State private var problem: String?
 
-    private var url: URL? {
-        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A pasted message may carry the link inside other words.
-        let candidate = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).first { $0.contains("icloud.com/share") }.map(String.init) ?? trimmed
-        guard let url = URL(string: candidate), CloudSync.isInvitation(url) else { return nil }
-        return url
+    private var url: URL? { CloudSync.invitationURL(in: link) }
+
+    /// Shown once something is typed that can't be an invitation, so Join isn't greyed out unexplained.
+    private var linkProblem: String? {
+        guard url == nil, !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return "This isn't a Gumbo invitation link. It starts with icloud.com/share."
     }
 
     var body: some View {
@@ -43,7 +43,7 @@ struct JoinWithLinkSheet: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                         }
-                        if let problem {
+                        if let problem = problem ?? linkProblem {
                             Text(problem)
                                 .font(.footnote)
                                 .foregroundStyle(.red)
@@ -77,7 +77,7 @@ struct JoinWithLinkSheet: View {
                     } footer: {
                         Text("The link starts with icloud.com/share. It works with any Apple Account, in any country; you don't need to be in the owner's Family Sharing group. If the link opened in your browser and said it wasn't valid, paste it here instead.")
                     }
-                    if let problem {
+                    if let problem = problem ?? linkProblem {
                         Section { Text(problem).font(.callout).foregroundStyle(.red) }
                     }
                     if isJoining {

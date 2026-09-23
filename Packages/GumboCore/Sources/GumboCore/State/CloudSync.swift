@@ -63,6 +63,9 @@ public final class CloudSync {
     /// The Family record being sent by this refresh. It counts as uploaded only once CloudKit accepts it.
     private var familyInFlight: FamilyRecordPlan?
     private var uploads: [String: Task<Void, Never>] = [:]
+    /// The refresh promised by "It will try again" after a transient failure.
+    private var retryTask: Task<Void, Never>?
+    private var retryAttempt = 0
     private var isStarted = false
     private var isRefreshing = false
     private var wantsAnotherRefresh = false
@@ -305,6 +308,9 @@ public final class CloudSync {
             try await pushLocal()
             try check(expected)
             status = .synced(.now)
+            retryAttempt = 0
+            retryTask?.cancel()
+            retryTask = nil
             if let profiles, profiles.isLocked {
                 let eligible = profiles.profiles.filter { accountState?.profileIDs.contains($0.id) == true }
                 if eligible.contains(where: { $0.userRecordName == currentUserRecordName }) || (profiles.profiles.count == 1 && eligible.count == 1) {
@@ -317,6 +323,36 @@ public final class CloudSync {
             guard generation == expected else { return }
             status = .failed(Self.describe(error))
             services.log("iCloud sync (\(reason)) failed: \(Self.describe(error))")
+            scheduleRetry(after: error)
+        }
+    }
+
+    /// Busy, rate-limited or offline: refresh again after the wait iCloud asks for, or with backoff.
+    /// Edits made meanwhile are skipped by `schedule` while sync is failed; the refresh pushes them,
+    /// since it sends everything newer on this device.
+    private func scheduleRetry(after error: any Error) {
+        guard let delay = Self.retryDelay(for: error, attempt: retryAttempt) else { return }
+        retryAttempt += 1
+        let expected = generation
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, generation == expected, !Task.isCancelled else { return }
+            retryTask = nil
+            services.log("Retrying iCloud sync")
+            await refresh(reason: "retry")
+        }
+    }
+
+    /// How long to wait before retrying after `error`, or nil when retrying would not help.
+    nonisolated static func retryDelay(for error: any Error, attempt: Int) -> Duration? {
+        guard let ckError = error as? CKError else { return nil }
+        switch ckError.code {
+        case .zoneBusy, .requestRateLimited, .serviceUnavailable, .networkUnavailable, .networkFailure:
+            if let seconds = ckError.retryAfterSeconds, seconds > 0 { return .seconds(min(seconds, 3600)) }
+            return .seconds(min(5 * pow(2, Double(min(attempt, 10))), 300))
+        default:
+            return nil
         }
     }
 
@@ -849,6 +885,7 @@ public final class CloudSync {
                 guard generation == expected else { return }
                 status = .failed(Self.describe(error))
                 services.log("iCloud upload failed: \(Self.describe(error))")
+                scheduleRetry(after: error)
             }
             if generation == expected { uploads[key] = nil }
         }
@@ -1327,6 +1364,18 @@ public final class CloudSync {
     public nonisolated static func isInvitation(_ url: URL) -> Bool {
         guard let host = url.host()?.lowercased() else { return false }
         return (host == "www.icloud.com" || host == "icloud.com") && url.path().hasPrefix("/share/")
+    }
+
+    /// The invitation in text someone typed or pasted: a message may carry the link among other
+    /// words, and a typed link often leaves out `https://`. Nil when there is no invitation.
+    public nonisolated static func invitationURL(in text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidate = trimmed.split(whereSeparator: \.isWhitespace)
+            .first { $0.lowercased().contains("icloud.com/share") }
+            .map(String.init) ?? trimmed
+        if !candidate.contains("://") { candidate = "https://" + candidate }
+        guard let url = URL(string: candidate), ["https", "http"].contains(url.scheme?.lowercased()), isInvitation(url) else { return nil }
+        return url
     }
 
     private nonisolated static func describeInvitation(_ error: any Error) -> String {

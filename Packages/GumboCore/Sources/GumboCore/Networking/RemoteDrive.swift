@@ -141,6 +141,18 @@ public nonisolated enum RemoteDriveSupport {
     /// "._01 - Song.flac" keeps the song's name and extension but holds only Finder metadata.
     public static func isHidden(_ name: String) -> Bool { name.hasPrefix(".") }
 
+    /// Folders a NAS keeps for itself: thumbnails, recycle bins and visible snapshots. A snapshot
+    /// folder holds a full copy of the share at one moment, so scanning it would list every song
+    /// again once per snapshot.
+    public static let systemFolderNames: Set<String> = [
+        "@eadir", "#recycle", "#snapshot", "@recycle", "@recently-snapshot", "@__thumb", "@tmp", "@sharebin", "~snapshot",
+    ]
+
+    /// Hidden or system folders, never scanned or offered as a music folder.
+    public static func isSystemFolder(_ name: String) -> Bool {
+        isHidden(name) || systemFolderNames.contains(name.lowercased())
+    }
+
     /// Picks the image most likely to be the album cover from a folder listing.
     public static func coverImage(in entries: [RemoteEntry]) -> RemoteEntry? {
         let images = entries.filter(\.isImage)
@@ -151,5 +163,13 @@ public nonisolated enum RemoteDriveSupport {
             if let hit = images.first(where: { $0.name.lowercased().contains(name) }) { return hit }
         }
         return images.count == 1 ? images[0] : nil
+    }
+
+    /// Downloaded cover bytes that could be an image. A server's error reply (DSM's JSON envelope, an
+    /// HTML error page) sometimes arrives with a success status; saved as the cover, it would never be
+    /// fetched again. No supported image format starts with text.
+    public static func mayBeImage(_ data: Data) -> Bool {
+        guard let first = data.first(where: { ![0x20, 0x09, 0x0A, 0x0D].contains($0) }) else { return false }
+        return first != UInt8(ascii: "{") && first != UInt8(ascii: "[") && first != UInt8(ascii: "<")
     }
 }

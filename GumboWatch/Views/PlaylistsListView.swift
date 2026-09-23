@@ -7,12 +7,37 @@ struct PlaylistsListView: View {
     @Environment(WatchDownloads.self) private var downloads
 
     var body: some View {
-        List(store.catalogue?.playlists ?? []) { playlist in
-            NavigationLink(value: playlist) {
-                PlaylistRow(playlist: playlist, state: downloads.state(of: playlist))
+        Group {
+            if let playlists = store.catalogue?.playlists, !playlists.isEmpty {
+                List(playlists) { playlist in
+                    NavigationLink(value: playlist) {
+                        PlaylistRow(playlist: playlist, state: downloads.state(of: playlist))
+                    }
+                }
+                .listStyle(.carousel)
+            } else {
+                // Only playlists with songs come over, so a new library syncs none at first.
+                ScrollView {
+                    VStack(spacing: 8) {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("No Playlists Yet")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        Text("Favourite or play songs on your iPhone to bring playlists here.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Sync now") { store.requestSync() }
+                            .font(.caption)
+                            .padding(.top, 2)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 6)
+                }
             }
         }
-        .listStyle(.carousel)
         .navigationTitle("Playlists")
         .navigationDestination(for: WatchPlaylist.self) { playlist in
             PlaylistDetailView(playlist: playlist)

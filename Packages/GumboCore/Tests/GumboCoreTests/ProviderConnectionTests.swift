@@ -74,6 +74,15 @@ private func withPath(_ track: Track, _ path: String) throws -> Track {
         await model.signOut()
     }
 
+    @Test func smbShareAndDomainAreTrimmed() async throws {
+        let f = ProviderConnectionFixture(); defer { f.cleanUp() }
+        let model = f.model()
+        try await model.connect(to: " smb://nas.example ", provider: .smb, share: "Music \n", domain: " WORK ")
+        let provider = try #require(model.pendingServer?.provider)
+        #expect(provider.share == "Music")
+        #expect(provider.domain == "WORK")
+    }
+
     @Test func delayedProviderLoginCannotReplaceNewSelection() async throws {
         let f = ProviderConnectionFixture(); defer { f.cleanUp() }
         f.hold = true

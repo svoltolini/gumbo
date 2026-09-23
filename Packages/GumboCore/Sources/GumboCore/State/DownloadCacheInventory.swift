@@ -19,7 +19,9 @@ nonisolated struct DownloadCacheInventory: Sendable {
     private(set) var filesByKey: [String: [File]] = [:]
 
     /// The manager's own documents, which live next to the songs.
-    static let bookkeepingFiles: Set<String> = ["downloads.json", "pending.json", "download-intent.json"]
+    static let bookkeepingFiles: Set<String> = ["downloads.json", "pending.json", "download-intent.json", damagedManifestFileName]
+    /// An unreadable manifest set aside at launch; kept, never counted as unused storage.
+    static let damagedManifestFileName = "downloads.damaged.json"
     static let incomingPrefix = "incoming-"
 
     var totalBytes: Int64 { files.reduce(0) { $0 + $1.bytes } }

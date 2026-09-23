@@ -51,8 +51,20 @@ public nonisolated enum CoverStore {
     }
 
     public static func fileURL(for albumID: String) -> URL {
-        let digest = SHA256.hash(data: Data(albumID.utf8)).map { String(format: "%02x", $0) }.joined()
-        return directory.appending(path: "\(digest).img")
+        directory.appending(path: fileName(for: albumID))
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    /// The cover's file name: a hash of the album id, spelled out without a formatter per byte.
+    private static func fileName(for albumID: String) -> String {
+        var name: [UInt8] = []
+        name.reserveCapacity(68)
+        for byte in SHA256.hash(data: Data(albumID.utf8)) {
+            name.append(hexDigits[Int(byte >> 4)])
+            name.append(hexDigits[Int(byte & 0x0f)])
+        }
+        return String(decoding: name, as: UTF8.self) + ".img"
     }
 
     public static func hasCover(for albumID: String) -> Bool {
@@ -222,8 +234,11 @@ public nonisolated enum CoverStore {
     }
 
     /// Album ids that already have a cover on disk.
+    /// Lists the folder once rather than asking the file system about every album.
     public static func coveredAlbumIDs(among albums: [Album]) -> Set<String> {
-        Set(albums.filter { hasCover(for: $0.id) }.map(\.id))
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return [] }
+        let present = Set(names)
+        return Set(albums.lazy.filter { present.contains(fileName(for: $0.id)) }.map(\.id))
     }
 
 }

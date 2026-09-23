@@ -18,6 +18,7 @@ struct MacNowPlayingInspector: View {
                 Button("Close Now Playing", systemImage: "xmark") { navigation.isShowingNowPlaying = false }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
+                    .help("Close Now Playing")
             }
             .padding(16)
             Divider()
@@ -91,7 +92,7 @@ private struct MacCurrentTrackDetails: View {
                         .padding(.bottom, 8)
                 }
                 Text(track.title).font(.headline).lineLimit(2)
-                Text(player.album?.artist ?? track.artist ?? "Unknown Artist").foregroundStyle(.secondary).lineLimit(2)
+                Text(track.artist ?? player.album?.artist ?? "Unknown Artist").foregroundStyle(.secondary).lineLimit(2)
                 Text(track.format).font(.caption).foregroundStyle(.secondary)
                 if let album = player.album {
                     Button("Go to Album", systemImage: "square.stack") { model.showAlbum(album) }

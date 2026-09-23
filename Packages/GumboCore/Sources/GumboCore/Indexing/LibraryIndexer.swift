@@ -298,7 +298,7 @@ public final class LibraryIndexer {
                 }
                 let entries = listing.entries
                 isFirst = false
-                let directories = entries.filter { $0.isDirectory && !$0.name.hasPrefix(".") && $0.name != "@eaDir" && $0.name != "#recycle" }
+                let directories = entries.filter { $0.isDirectory && !RemoteDriveSupport.isSystemFolder($0.name) }
                 queue.append(contentsOf: directories.map(\.path))
                 for directory in directories { parents[directory.path] = path }
                 let cover = RemoteDriveSupport.coverImage(in: entries)
@@ -522,7 +522,9 @@ public final class LibraryIndexer {
         if let coverPath = album.coverPath {
             do {
                 let data = try await drive.download(coverPath, maxBytes: ArtworkPolicy.maxArtworkDownloadBytes)
-                if !data.isEmpty { return .found(data, "folder image \(coverPath)") }
+                if RemoteDriveSupport.mayBeImage(data) { return .found(data, "folder image \(coverPath)") }
+                // An error reply in place of the picture says nothing about whether there is a cover.
+                if !data.isEmpty, failure == nil { failure = "\(coverPath): the server answered with an error instead of the image" }
             } catch {
                 note(error, coverPath)
             }
@@ -555,7 +557,7 @@ public final class LibraryIndexer {
     nonisolated private static func enrich(track: Track, coverPath: String?, wantsEmbeddedArt: Bool, drive: any RemoteDrive) async -> EnrichmentResult {
         var updated = track
         var cover: Data?
-        if let coverPath, let data = try? await drive.download(coverPath, maxBytes: ArtworkPolicy.maxArtworkDownloadBytes), !data.isEmpty {
+        if let coverPath, let data = try? await drive.download(coverPath, maxBytes: ArtworkPolicy.maxArtworkDownloadBytes), RemoteDriveSupport.mayBeImage(data) {
             cover = data
         }
         guard let path = track.path else {

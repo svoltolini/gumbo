@@ -26,6 +26,7 @@ private struct ArtistDetailContent: View {
     @State private var pull: CGFloat = 0
 
     private var featuredAlbum: Album { artist.albums[0] }
+    private var artistTracks: [Track] { artist.albums.flatMap(\.tracks) }
     private var relatedArtists: [Artist] { library.artists.filter { $0.id != artist.id }.prefix(8).map { $0 } }
 
     var body: some View {
@@ -33,9 +34,9 @@ private struct ArtistDetailContent: View {
             VStack(alignment: .leading, spacing: 0) {
                 hero
 
-                PlayActions {
+                PlayActions(playbackState: player.playbackState(for: artistTracks, sourceID: library.catalogue.driveID)) {
                     guard library.artist(named: artist.name) == artist else { return }
-                    player.play(queue: artist.albums.flatMap(\.tracks), title: artist.name)
+                    player.togglePlayback(of: artistTracks, sourceID: library.catalogue.driveID, title: artist.name)
                 } shuffle: {
                     guard library.artist(named: artist.name) == artist else { return }
                     player.shuffle(queue: artist.albums.flatMap(\.tracks), title: artist.name)

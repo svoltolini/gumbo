@@ -72,6 +72,9 @@ public nonisolated struct WidgetSnapshot: Codable, Sendable {
     /// Albums not played lately in an order that changes daily; the Rediscover widget walks through them.
     public var rediscover: [Album]
     public var updated: Date
+    /// Stands in for content the widgets may not show: the app has no profile open, as after a
+    /// relaunch in the background. The widgets then ask to open Gumbo rather than read as empty.
+    public var isLocked = false
 
     public init(
         nowPlaying: Album? = nil, trackTitle: String? = nil, isPlaying: Bool = false,
@@ -103,9 +106,16 @@ public nonisolated struct WidgetSnapshot: Codable, Sendable {
         playlists = try container.decodeIfPresent([PlaylistInfo].self, forKey: .playlists) ?? []
         rediscover = try container.decodeIfPresent([Album].self, forKey: .rediscover) ?? []
         updated = try container.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
     }
 
     public static let empty = WidgetSnapshot()
+
+    public static let locked: WidgetSnapshot = {
+        var snapshot = WidgetSnapshot()
+        snapshot.isLocked = true
+        return snapshot
+    }()
 
     /// The album the widgets lead with, and why.
     public enum Lead: Sendable {
@@ -184,6 +194,8 @@ public nonisolated enum WidgetStore {
     private static let storage = Storage(directory: containerURL)
 
     public static func load() -> WidgetSnapshot? { storage.load() }
+    /// What a widget shows: the snapshot, `.locked` while no profile is open, otherwise `.empty`.
+    public static func loadForDisplay() -> WidgetSnapshot { storage.loadForDisplay() }
     public static func coverURL(key: String, pixels: Int) -> URL? { storage.coverURL(key: key, pixels: pixels) }
     public static func resetAuthorization() { storage.resetAuthorization() }
     @discardableResult public static func setSession(_ sessionID: UUID?) -> Bool { storage.setSession(sessionID) }
@@ -263,6 +275,14 @@ public nonisolated enum WidgetStore {
         public func load() -> WidgetSnapshot? {
             guard let envelope = authorizedEnvelope() else { return nil }
             return envelope.snapshot
+        }
+
+        /// The app writes a marker without a session while no profile is open, including right after
+        /// launch. Only a missing marker (the app never ran) or a session still publishing reads as empty.
+        public func loadForDisplay() -> WidgetSnapshot {
+            if let snapshot = load() { return snapshot }
+            if let access = readAuthorization(), access.sessionID == nil { return .locked }
+            return .empty
         }
 
         public func coverURL(key: String, pixels: Int) -> URL? {

@@ -266,7 +266,8 @@ struct SettingsView: View {
         Group {
             Section {
                 LabeledContent("Server", value: model.serverTitle)
-                LabeledContent("Status", value: model.isConnected ? "Connected" : "Offline")
+                LabeledContent("Status", value: model.isConnected ? "Connected"
+                               : model.isRestoring || model.isReconnecting ? "Connecting…" : "Offline")
                 if model.connection != nil, permissions.canManageServer {
                     NavigationLink { FolderPickerView(mode: .settings) } label: {
                         LabeledContent("Music Folder", value: model.musicFolderLabel)
@@ -275,7 +276,7 @@ struct SettingsView: View {
                 // Reconnecting only restores the saved sign-in, so every profile may retry.
                 if model.connection != nil {
                     if !model.isConnected {
-                        Button(model.isReconnecting || model.isRestoring ? "Reconnecting…" : "Reconnect") {
+                        Button(model.isRestoring ? "Connecting…" : model.isReconnecting ? "Reconnecting…" : "Reconnect") {
                             Task { await model.reconnect() }
                         }
                         .disabled(model.isReconnecting || model.isRestoring)

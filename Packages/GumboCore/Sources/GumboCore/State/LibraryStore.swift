@@ -18,17 +18,19 @@ public nonisolated struct DerivedLibrary: Sendable {
     public var recentlyAdded: [Album]
     public var coveredAlbumIDs: Set<String>
     public var palettes: [String: CoverPalette.Pair]
-    /// Only rebuilt when the catalogue itself changed; it depends on nothing else.
-    public var folderRoot: FolderNode?
 
+    /// `readsStoredPalettes` is off on the launch path, which runs on the main thread: reading a
+    /// colour file per album is left to the background backfill in `LibraryStore.readPalettes`.
     public static func make(
         catalogue: Catalogue, hidesBrackets: Bool, genreAliases: [String: String],
-        knownPalettes: [String: CoverPalette.Pair], includeFolders: Bool
+        knownPalettes: [String: CoverPalette.Pair], readsStoredPalettes: Bool = true
     ) -> DerivedLibrary {
         let covered = catalogue.driveID.isEmpty ? [] : CoverStore.coveredAlbumIDs(among: catalogue.albums)
         var palettes = knownPalettes.filter { covered.contains($0.key) }
-        for id in covered where palettes[id] == nil {
-            if let pair = CoverStore.palette(for: id) { palettes[id] = pair }
+        if readsStoredPalettes {
+            for id in covered where palettes[id] == nil {
+                if let pair = CoverStore.palette(for: id) { palettes[id] = pair }
+            }
         }
         let albums = catalogue.albums.map { album in
             var shown = album
@@ -50,8 +52,9 @@ public nonisolated struct DerivedLibrary: Sendable {
         let genres = Dictionary(grouping: albums, by: \.genre)
             .map { Genre(name: $0.key, albums: $0.value.sorted(by: byRecency)) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        let artists = Dictionary(grouping: albums, by: \.artist)
-            .map { Artist(name: $0.key, albums: $0.value.sorted { $0.year < $1.year }) }
+        // One artist however the tags spell its case or accents, shown under its most common spelling.
+        let artists = Dictionary(grouping: albums, by: { Artist.key(for: $0.artist) })
+            .map { Artist(name: Album.mostCommon($0.value.map(\.artist)) ?? $0.value[0].artist, albums: $0.value.sorted { $0.year < $1.year }) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         return DerivedLibrary(
             sourceID: catalogue.driveID,
@@ -75,8 +78,7 @@ public nonisolated struct DerivedLibrary: Sendable {
             hiResAlbums: albums.filter(\.isHiRes),
             recentlyAdded: albums.sorted(by: byRecency),
             coveredAlbumIDs: covered,
-            palettes: palettes,
-            folderRoot: includeFolders ? catalogue.folderTree() : nil
+            palettes: palettes
         )
     }
 }
@@ -122,7 +124,8 @@ public final class LibraryStore {
     public private(set) var decades: [Decade] = []
     public private(set) var hiResAlbums: [Album] = []
     public private(set) var recentlyAdded: [Album] = []
-    public private(set) var folderRoot = FolderNode(name: "music", path: "", subfolders: [], tracks: [])
+    /// The catalogue as folders, built only when asked for rather than with every derivation.
+    public var folderRoot: FolderNode { catalogue.folderTree() }
     private var albumsByID: [String: Album] = [:]
     private var tracksByID: [String: Track] = [:]
     private var allTracks: [Track] = []
@@ -212,7 +215,6 @@ public final class LibraryStore {
         if driveChanged || catalogue.rootPath != previous.rootPath {
             CatalogueCache.shared.invalidatePendingWrites()
         }
-        let sameAlbums = !firstLoad && !artworkScopeChanged && catalogue.albums == previous.albums
         self.catalogue = catalogue
         self.drive = drive
         if firstLoad || driveChanged {
@@ -226,13 +228,13 @@ public final class LibraryStore {
             derivationTask?.cancel()
             derivationTask = nil
             let derived = CoverStore.$directoryOverride.withValue(artworkDirectory) {
-                DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hidesBracketedTitleParts, genreAliases: genreAliases, knownPalettes: palettes, includeFolders: true)
+                DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hidesBracketedTitleParts, genreAliases: genreAliases, knownPalettes: palettes, readsStoredPalettes: false)
             }
             apply(derived)
         } else {
             // Later catalogues (refreshes, tags settling) are derived in the background so the screen
             // never waits; when nothing changed only the cover index is looked at again.
-            rebuildDerivedInBackground(includeFolders: !sameAlbums)
+            rebuildDerivedInBackground()
         }
     }
 
@@ -252,10 +254,10 @@ public final class LibraryStore {
 
     /// Recomputes everything derived from the catalogue off the main thread and applies what changed.
     private func rebuildDerived() {
-        rebuildDerivedInBackground(includeFolders: false)
+        rebuildDerivedInBackground()
     }
 
-    private func rebuildDerivedInBackground(includeFolders: Bool) {
+    private func rebuildDerivedInBackground() {
         derivationGeneration &+= 1
         derivationTask?.cancel()
         let generation = derivationGeneration
@@ -269,7 +271,7 @@ public final class LibraryStore {
             let started = ContinuousClock.now
             let derived = await Task.detached(priority: .userInitiated) {
                 CoverStore.$directoryOverride.withValue(coverDirectory) {
-                    DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hides, genreAliases: aliases, knownPalettes: known, includeFolders: includeFolders)
+                    DerivedLibrary.make(catalogue: catalogue, hidesBrackets: hides, genreAliases: aliases, knownPalettes: known)
                 }
             }.value
             guard let self, !Task.isCancelled, generation == derivationGeneration else { return }
@@ -317,7 +319,6 @@ public final class LibraryStore {
         }
         if coveredAlbumIDs != derived.coveredAlbumIDs { coveredAlbumIDs = derived.coveredAlbumIDs }
         if palettes != derived.palettes { palettes = derived.palettes }
-        if let root = derived.folderRoot { folderRoot = root }
         if sourceChanged {
             contentSourceID = derived.sourceID
             contentRootPath = derived.rootPath
@@ -332,12 +333,18 @@ public final class LibraryStore {
         if !unread.isEmpty { readPalettes(for: unread) }
     }
 
-    /// Reads colours for covers saved before palettes existed, off the main thread, then refreshes the albums.
+    /// Reads the colours saved beside covers, and works them out for covers saved before palettes
+    /// existed, off the main thread, then refreshes the albums.
     private func readPalettes(for albumIDs: Set<String>) {
         let coverDirectory = artworkDirectory
         Task { [weak self] in
             let found = await Task.detached(priority: .utility) {
-                CoverStore.$directoryOverride.withValue(coverDirectory) { CoverStore.computePalettes(for: albumIDs) }
+                CoverStore.$directoryOverride.withValue(coverDirectory) {
+                    var found = CoverStore.storedPalettes(for: albumIDs)
+                    let missing = albumIDs.subtracting(found.keys)
+                    if !missing.isEmpty { found.merge(CoverStore.computePalettes(for: missing)) { stored, _ in stored } }
+                    return found
+                }
             }.value
             guard let self, self.artworkDirectory == coverDirectory, !found.isEmpty else { return }
             palettes.merge(found) { _, new in new }
@@ -888,7 +895,10 @@ public final class LibraryStore {
     public var albumLookup: [String: Album] { albumsByID }
     /// Catalogue order, prepared with the other derived content rather than flattened by each screen.
     public var tracks: [Track] { allTracks }
-    public func artist(named name: String) -> Artist? { artists.first { $0.name == name } }
+    public func artist(named name: String) -> Artist? {
+        let key = Artist.key(for: name)
+        return artists.first { $0.name == name } ?? artists.first { Artist.key(for: $0.name) == key }
+    }
 
     public var recentlyPlayed: [Album] { recentlyPlayedIDs.compactMap { albumsByID[$0] } }
 
@@ -905,11 +915,11 @@ public final class LibraryStore {
 
     /// Fifty songs from across the library, chosen again each day.
     public var libraryShuffle: [Track] {
-        let day = Date.now.formatted(.iso8601.year().month().day())
+        let day = DailySeed.dayKey()
         if day == shuffleDay, !shuffleCache.isEmpty { return shuffleCache }
         let all = allTracks
         guard !all.isEmpty else { return [] }
-        var generator = SeededGenerator(seed: UInt64(truncatingIfNeeded: (day + catalogue.driveID).hashValue))
+        var generator = SeededGenerator(seed: DailySeed.stableHash(day + catalogue.driveID))
         var picks: [Track] = []
         var used = Set<Int>()
         let wanted = min(50, all.count)
