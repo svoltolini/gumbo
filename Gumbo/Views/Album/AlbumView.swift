@@ -828,7 +828,7 @@ struct TrackRow: View {
                 .animation(.easeInOut(duration: 0.25), value: isCurrent)
             }
             .buttonStyle(RowPressStyle())
-            .accessibilityLabel("\(track.number). \(track.title), \(TimeText.clock(track.duration))")
+            .accessibilityLabel("\(track.number). \(track.title), \(performer.map { "\($0), " } ?? "")\(TimeText.clock(track.duration))")
             .accessibilityValue(playbackState.accessibilityDescription)
 
             TrackActionsMenu(track: track, isAddingToPlaylist: $isAddingToPlaylist)
@@ -839,9 +839,23 @@ struct TrackRow: View {
         }
     }
 
+    /// The song's own artist, shown only when it differs from the album's, as on a compilation.
+    private var performer: String? {
+        guard let artist = track.artist, !artist.isEmpty,
+              artist.caseInsensitiveCompare(album.artist) != .orderedSame else { return nil }
+        return artist
+    }
+
     private var title: some View {
-        LibraryRowText(track.title)
-            .font(.body.weight(isCurrent ? .semibold : .regular))
+        VStack(alignment: .leading, spacing: 2) {
+            LibraryRowText(track.title)
+                .font(.body.weight(isCurrent ? .semibold : .regular))
+            if let performer {
+                LibraryRowText(performer)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     /// The favourite and download badges, then the duration.

@@ -905,11 +905,11 @@ public final class LibraryStore {
 
     /// Fifty songs from across the library, chosen again each day.
     public var libraryShuffle: [Track] {
-        let day = Date.now.formatted(.iso8601.year().month().day())
+        let day = DailySeed.dayKey()
         if day == shuffleDay, !shuffleCache.isEmpty { return shuffleCache }
         let all = allTracks
         guard !all.isEmpty else { return [] }
-        var generator = SeededGenerator(seed: UInt64(truncatingIfNeeded: (day + catalogue.driveID).hashValue))
+        var generator = SeededGenerator(seed: DailySeed.stableHash(day + catalogue.driveID))
         var picks: [Track] = []
         var used = Set<Int>()
         let wanted = min(50, all.count)

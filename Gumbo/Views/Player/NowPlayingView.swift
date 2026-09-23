@@ -84,7 +84,7 @@ struct NowPlayingView: View {
                             .font(.title2.weight(.semibold))
                             .lineLimit(1)
                             .contentTransition(.opacity)
-                        Text(player.album?.artist ?? player.queueTitle ?? " ")
+                        Text(player.nowPlayingArtist ?? " ")
                             .font(.body)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

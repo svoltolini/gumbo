@@ -1254,6 +1254,51 @@ import Testing
         #expect(fixture.playbackStates.last == .stopped)
     }
 
+    @Test func songsGoneFromTheServerLeaveTheQueueWithoutStoppingTheCurrentOne() {
+        let fixture = PlaybackFixture(status: .ready)
+        let songs = (0..<6).map { track("song-\($0)") }
+        fixture.model.play(queue: songs, startingAt: 3, title: "Shuffle")
+        fixture.transports[0].positionChanged?(42)
+        fixture.model.removeFromQueue(ids: ["song-1", "song-4", "elsewhere"])
+        #expect(fixture.model.queue.map(\.id) == ["song-0", "song-2", "song-3", "song-5"])
+        #expect(fixture.model.track?.id == "song-3")
+        #expect(fixture.model.isPlaying)
+        #expect(fixture.model.position == 42)
+        #expect(fixture.transports.count == 1, "The playing song is not reloaded")
+        fixture.model.next()
+        #expect(fixture.model.track?.id == "song-5")
+
+        // Shuffled, turning shuffle off afterwards restores the order of what is left.
+        fixture.model.toggleShuffle()
+        let current = fixture.model.track
+        fixture.model.removeFromQueue(ids: ["song-0"])
+        #expect(fixture.model.track == current)
+        fixture.model.toggleShuffle()
+        #expect(fixture.model.queue.map(\.id) == ["song-2", "song-3", "song-5"])
+        #expect(fixture.model.track == current)
+
+        // The playing song itself is gone: nothing is left to play.
+        fixture.model.removeFromQueue(ids: [current!.id])
+        #expect(fixture.model.queue.isEmpty)
+        #expect(!fixture.model.hasTrack)
+    }
+
+    @Test func nowPlayingNamesTheSongsOwnArtistBeforeTheAlbums() {
+        let fixture = PlaybackFixture(status: .ready)
+        var performed = track("performed")
+        performed.artist = "Nina Simone"
+        let compilation = Album(id: "album", title: "Jazz Hits", artist: "Various Artists", year: 2026, genre: "Jazz",
+                                tracks: [performed, track("untagged")], colorA: "000000", colorB: "333333", addedRank: 0,
+                                folderTitle: "Jazz Hits", folderArtist: "Various Artists")
+        fixture.model.albumProvider = { _ in compilation }
+        fixture.model.play(album: compilation)
+        #expect(fixture.model.nowPlayingArtist == "Nina Simone")
+        #expect(fixture.nowPlaying?[MPMediaItemPropertyArtist] as? String == "Nina Simone")
+        fixture.model.next()
+        #expect(fixture.model.nowPlayingArtist == "Various Artists")
+        #expect(fixture.nowPlaying?[MPMediaItemPropertyArtist] as? String == "Various Artists")
+    }
+
     private func preparedRecovery() -> PlaybackFixture {
         let fixture = PlaybackFixture(status: .ready)
         fixture.model.play(queue: [track("first")], title: nil)

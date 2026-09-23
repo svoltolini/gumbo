@@ -98,9 +98,8 @@ struct GumboTVApp: App {
         library.onAlbumRenamed = { [downloads] oldID, newID in downloads.reassignAlbum(from: oldID, to: newID) }
         library.onServerTracksDeleted = { [library, downloads, player] sourceID, trackIDs in
             downloads.removeServerTracks(sourceID: sourceID, trackIDs: trackIDs)
-            if library.catalogue.driveID == sourceID, player.queue.contains(where: { trackIDs.contains($0.id) }) {
-                player.stop()
-            }
+            // Only those songs leave the queue; the music stops only if the playing one is among them.
+            if library.catalogue.driveID == sourceID { player.removeFromQueue(ids: trackIDs) }
         }
 
         player.mediaSourceProvider = { [library, downloads] track in downloads.localURL(for: track).map(RemoteMediaSource.url) ?? library.mediaSource(for: track) }
@@ -110,7 +109,9 @@ struct GumboTVApp: App {
             library.coverURL(for: album).map { ($0, library.coverVersion(for: album)) }
         }
         player.sourceIDProvider = { [library] in library.catalogue.driveID }
-        player.albumProvider = { [library] track in library.album(for: track) }
+        // Through the song as the library has it now: a queued copy keeps its album's old identity
+        // after the album is renamed or regrouped.
+        player.albumProvider = { [library] track in library.track(id: track.id).flatMap { library.album(for: $0) } ?? library.album(for: track) }
         player.allowsSimulation = { [library] in library.isDemo }
         player.didStartAlbum = { [library] album in library.notePlayed(album) }
         player.didStartTrack = { [library] track in library.notePlayed(track) }

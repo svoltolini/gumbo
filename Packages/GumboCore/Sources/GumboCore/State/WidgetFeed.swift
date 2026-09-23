@@ -120,11 +120,11 @@ public final class WidgetFeed {
         let kept = Array(downloads.verifiedAlbumsForWidget(library.recentlyAdded).prefix(12))
         let playlists = [library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist, library.libraryShufflePlaylist] + library.playlists.prefix(8)
         // Albums not played lately, in an order that stays put for the day and changes overnight.
-        let day = Date.now.formatted(.iso8601.year().month().day())
+        let day = DailySeed.dayKey()
         let recent = Set(played.map(\.id) + [lead?.id].compactMap { $0 })
         let rediscover = library.albums
             .filter { !recent.contains($0.id) }
-            .sorted { Self.stableHash($0.id + day) < Self.stableHash($1.id + day) }
+            .sorted { DailySeed.stableHash($0.id + day) < DailySeed.stableHash($1.id + day) }
             .prefix(24)
             .map(describe)
 
@@ -162,15 +162,5 @@ public final class WidgetFeed {
         guard let url = library.coverURL(for: album) else { return nil }
         let digest = SHA256.hash(data: Data((url.absoluteString + "|" + album.id).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         return "\(digest)-v\(library.coverVersion(for: album))"
-    }
-
-    /// FNV-1a: the same order for the same day on every launch, unlike `hashValue`.
-    nonisolated private static func stableHash(_ text: String) -> UInt64 {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        return hash
     }
 }
