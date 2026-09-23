@@ -18,7 +18,10 @@ private struct MaintenanceContext: Equatable {
 struct MissingGenresView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(ProfileStore.self) private var profiles
+    /// Stays true while another tab is shown; false once the screen is closed.
+    @Environment(\.isPresented) private var isPresented
     @State private var rows: [GenreReviewRow] = []
+    @State private var hasLoaded = false
     @State private var job: Task<Void, Never>?
     @State private var isWorking = false
     @State private var isSaving = false
@@ -108,9 +111,16 @@ struct MissingGenresView: View {
         .groupedForm()
         .navigationTitle("Find Missing Genres")
         .inlineTitle()
-        .onAppear { loadAlbums() }
+        // Switching tabs hides and shows this screen again. The review and any lookup or save in
+        // progress carry on; only closing the screen stops them.
+        .onAppear {
+            guard !hasLoaded else { return }
+            hasLoaded = true
+            loadAlbums()
+        }
         .onChange(of: context) { _, _ in stop(); rows = []; failures = []; summary = nil; loadAlbums() }
-        .onDisappear { stop() }
+        .onChange(of: isPresented) { _, presented in if !presented { stop() } }
+        .onDisappear { if !isPresented { stop() } }
         .confirmationDialog("Save genres to your music files?", isPresented: $confirmingSave, titleVisibility: .visible) {
             Button("Save to NAS") { saveSelected() }
             Button("Cancel", role: .cancel) { }

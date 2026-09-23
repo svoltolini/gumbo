@@ -526,4 +526,58 @@ struct DownloadReconcileTests {
         #expect(harness.manager.state(for: albumOwner) == .downloaded)
         #expect(harness.manager.unusedStorage.isEmpty)
     }
+
+    @Test func aDamagedManifestIsSetAsideAndItsFilesAreNotRemovedAsUnused() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        let album = reconcileAlbum(sizes: [8192])
+        let name = try harness.writeFile(for: album.tracks[0], contents: bytes(8192))
+        let damaged = Data("[{\"trackID\":".utf8)
+        try damaged.write(to: harness.directory.appending(path: "downloads.json"))
+        harness.stop()
+        harness.open()
+        try await harness.restore()
+
+        #expect(harness.manager.records.isEmpty)
+        #expect(harness.manager.lastError != nil)
+        let aside = DownloadCacheInventory.damagedManifestFileName
+        #expect(try Data(contentsOf: harness.directory.appending(path: aside)) == damaged)
+        let report = harness.reconcile(albums: [])
+        #expect(report.unused.fileCount == 1)
+        harness.manager.removeUnused()
+        #expect(harness.exists(name) && harness.exists(aside))
+    }
+
+    @Test func aDownloadReplacedByANewerRevisionCancelsTheStaleTransfer() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        var album = reconcileAlbum(sizes: [8192])
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        #expect(harness.started.count == 1)
+        let stale = try #require(harness.started.first)
+
+        // The file changed on the NAS and the catalogue caught up before the user tapped again.
+        album.tracks[0].fileSize = 9000
+        harness.queue(DownloadOwner(album: album, profileID: "listener"))
+        #expect(stale.state != .suspended && stale.state != .running)
+        #expect(harness.started.count == 2)
+        #expect(harness.started.last?.state == .suspended)
+    }
+
+    @Test func renamingAnAlbumWhileItDownloadsMovesItsPendingSongs() async throws {
+        let harness = try ReconcileHarness()
+        defer { harness.close() }
+        try await harness.restore()
+        let album = reconcileAlbum(sizes: [8192, 4096])
+        let owner = DownloadOwner(album: album, profileID: "listener")
+        harness.queue(owner)
+        let pending = try #require(harness.manager.pendingByOwner[owner.id])
+
+        harness.manager.reassignAlbum(from: album.id, to: "renamed")
+        let renamed = DownloadOwner.scope("listener") + DownloadOwner.albumPrefix + "renamed"
+        #expect(harness.manager.pendingByOwner[owner.id] == nil)
+        #expect(harness.manager.pendingByOwner[renamed] == pending)
+        #expect(harness.manager.downloadMembership(driveID: "nas-a").albums == ["renamed"])
+    }
 }
