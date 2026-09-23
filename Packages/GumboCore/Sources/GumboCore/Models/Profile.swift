@@ -1,3 +1,4 @@
+import CommonCrypto
 import CryptoKit
 import Foundation
 
@@ -140,22 +141,85 @@ public nonisolated struct ProfileAvatar: Codable, Hashable, Sendable {
     }
 }
 
-/// A salted hash of a four digit PIN; the PIN itself is never stored.
+/// A salted, deliberately slow hash of a four digit PIN; the PIN itself is never stored.
+///
+/// `hash` is self-describing: `pbkdf2-sha256$<iterations>$<base64 key>` for PBKDF2-HMAC-SHA256, or,
+/// for records made by earlier versions, 64 hex digits of one salted SHA-256. Both still open the
+/// profile; an earlier record is derived again the slow way, under the same salt, once its PIN is
+/// entered correctly (#257). The saved JSON shape (`salt`, `hash`) stays the same.
 public nonisolated struct PINRecord: Codable, Hashable, Sendable {
     public let salt: String
     public let hash: String
 
+    /// About 50–100 ms on a recent iPhone or Apple TV: unnoticeable at the keypad, and 10,000 PINs
+    /// cost far more than one salted SHA-256 each.
+    static let iterations = 200_000
+    /// Bounds on what a record may ask for, so a damaged or hostile record can't freeze the device.
+    private static let acceptedIterations = 10_000...2_000_000
+    private static let scheme = "pbkdf2-sha256"
+
     public static func make(_ pin: String) -> PINRecord {
         let salt = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
-        return PINRecord(salt: salt, hash: digest(salt: salt, pin: pin))
+        // The derivation can't fail with these arguments; were it to, the older digest still works.
+        return PINRecord(salt: salt, hash: derivedHash(salt: salt, pin: pin, iterations: iterations) ?? legacyDigest(salt: salt, pin: pin))
     }
 
     public func matches(_ pin: String) -> Bool {
-        hash == Self.digest(salt: salt, pin: pin)
+        let expected: String?
+        if isLegacy {
+            expected = Self.legacyDigest(salt: salt, pin: pin)
+        } else if let iterations = derivationIterations {
+            expected = Self.derivedHash(salt: salt, pin: pin, iterations: iterations)
+        } else {
+            expected = nil // Neither format: nothing opens it.
+        }
+        guard let expected else { return false }
+        return Self.constantTimeEquals(expected, hash)
     }
 
-    private static func digest(salt: String, pin: String) -> String {
+    /// Made by an earlier version: one salted SHA-256, cheap to try every PIN against.
+    public var isLegacy: Bool {
+        hash.utf8.count == 64 && hash.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+
+    /// The same PIN derived the slow way under the same salt, for a legacy record the PIN matches.
+    public func upgraded(with pin: String) -> PINRecord? {
+        guard isLegacy, matches(pin), let derived = Self.derivedHash(salt: salt, pin: pin, iterations: Self.iterations) else { return nil }
+        return PINRecord(salt: salt, hash: derived)
+    }
+
+    /// Whether this record is `earlier` derived again the slow way: the same salt, so the same PIN
+    /// as far as this device can tell, rather than a new PIN that would call for a new opening.
+    public func isUpgrade(of earlier: PINRecord) -> Bool {
+        earlier.isLegacy && !isLegacy && derivationIterations != nil && salt == earlier.salt
+    }
+
+    private var derivationIterations: Int? {
+        let parts = hash.split(separator: "$", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == Self.scheme, let iterations = Int(parts[1]),
+              Self.acceptedIterations.contains(iterations), !parts[2].isEmpty else { return nil }
+        return iterations
+    }
+
+    private static func derivedHash(salt: String, pin: String, iterations: Int) -> String? {
+        let password = Array(pin.utf8).map { CChar(bitPattern: $0) }
+        let saltBytes = Array(salt.utf8)
+        let length = 32
+        var key = [UInt8](repeating: 0, count: length)
+        let status = CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), password, password.count, saltBytes, saltBytes.count,
+                                          CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), UInt32(iterations), &key, length)
+        guard status == kCCSuccess else { return nil }
+        return "\(scheme)$\(iterations)$\(Data(key).base64EncodedString())"
+    }
+
+    private static func legacyDigest(salt: String, pin: String) -> String {
         SHA256.hash(data: Data((salt + ":" + pin).utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+        let left = Array(lhs.utf8), right = Array(rhs.utf8)
+        guard left.count == right.count else { return false }
+        return zip(left, right).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
     }
 }
 

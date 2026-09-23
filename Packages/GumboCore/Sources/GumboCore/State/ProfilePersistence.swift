@@ -237,6 +237,22 @@ nonisolated final class ProfilePersistence: @unchecked Sendable {
         workLock.withLock { _ = pending.removeValue(forKey: id) }
     }
 
+    /// A retired profile that comes back in the same process, such as with a family left and joined
+    /// again (#251), starts over with no files. The fresh generation still rejects any checkpoint
+    /// prepared before it was retired. Does nothing for a profile that was never retired.
+    func reinstate(id: String) {
+        let context = context(id)
+        context.lock.withLock {
+            guard context.retired else { return }
+            context.retired = false
+            context.initialized = false
+            context.generation = UUID()
+            context.latest = 0
+            context.checkpoint = 0
+            context.hasSnapshot = false
+        }
+    }
+
     /// Moves a document that cannot be read, and its journal, next to where they were so the
     /// profile can start again from nothing. Nothing is deleted: the files keep their bytes under a
     /// name that says when they were set aside, for a later repair or a bug report.

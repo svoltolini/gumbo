@@ -41,6 +41,7 @@ The separate Gumbo identity is registered and distributed through TestFlight. Bu
 
 The identity work is tracked in [#118](https://github.com/svoltolini/gumbo/issues/118). The following distinct release gates remain open:
 
+- [ ] Deploy the encrypted `Profile.pinVerifierSalt` and `Profile.pinVerifierHash` fields to the Production schema before shipping the #257 build; see [PIN verifier deployment](CLOUDKIT-PIN-VERIFIER-DEPLOYMENT.md).
 - [ ] Complete physical NAS, CloudKit owner/member, phone, Mac, TV, Watch, widget and CarPlay journeys in [#123](https://github.com/svoltolini/gumbo/issues/123).
 - [ ] Complete public App Store privacy/support metadata and app-level privacy answers in [#119](https://github.com/svoltolini/gumbo/issues/119). The public website policy is live, but the store privacy URL, TV text and support URLs were still blank at the 21 September read-back.
 

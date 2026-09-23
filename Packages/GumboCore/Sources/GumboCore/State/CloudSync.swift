@@ -203,6 +203,10 @@ public final class CloudSync {
         do {
             let isNew = !persistence.hasSnapshot(account: identity)
             var loaded = try persistence.load(account: identity, defaultOwner: CKCurrentUserDefaultName)
+            if loaded.membership == Membership.member.rawValue, Self.isOwnZone(loaded.zoneOwner, account: identity) {
+                Self.restoreOwnership(of: &loaded)
+                services.log("This device had joined its own family as a member; it is the owner again")
+            }
             if isNew, try persistence.claimsLegacyProfiles(account: identity) {
                 loaded.profileIDs = Set(profiles?.profiles.map(\.id) ?? [])
             }
@@ -223,6 +227,24 @@ public final class CloudSync {
         membership = Membership(rawValue: snapshot.membership) ?? .owner
         zoneOwnerName = snapshot.zoneOwner
         loadZoneState()
+    }
+
+    /// The owner's own family zone, however CloudKit names it: never one to join as a member (#252).
+    private static func isOwnZone(_ owner: String, account: String?) -> Bool {
+        owner == CKCurrentUserDefaultName || owner == account
+    }
+
+    /// An earlier version let an owner who opened their own invitation become a "member" of their own
+    /// zone, which no shared database holds, so every sync failed and nothing could undo it (#252).
+    /// Back to owning it: deletions asked for meanwhile never reached the zone and are sent again there.
+    private static func restoreOwnership(of snapshot: inout CloudAccountState) {
+        if snapshot.zoneOwner != CKCurrentUserDefaultName, let stray = snapshot.zones.removeValue(forKey: snapshot.zoneOwner) {
+            var zone = snapshot.zones[CKCurrentUserDefaultName] ?? .init()
+            for id in stray.deletions.keys where zone.deletions[id] == nil { zone.deletions[id] = [id, "state-\(id)"] }
+            snapshot.zones[CKCurrentUserDefaultName] = zone
+        }
+        snapshot.membership = Membership.owner.rawValue
+        snapshot.zoneOwner = CKCurrentUserDefaultName
     }
 
     private func loadZoneState() {
@@ -303,17 +325,23 @@ public final class CloudSync {
         guard membership != .member else { return }
         let owners = try await services.sharedZones()
         try check(expected)
-        guard let owner = owners.first else { return }
+        guard let owner = owners.first(where: { !Self.isOwnZone($0, account: currentUserRecordName) }) else { return }
         try join(zoneOwnerName: owner)
         services.log("Following the shared family")
     }
 
     func join(zoneOwnerName: String) throws {
+        // The owner's own zone is in their private database, never their shared one (#252).
+        guard !Self.isOwnZone(zoneOwnerName, account: currentUserRecordName) else { return }
         try persistState()
         guard var snapshot = accountState else { throw CKError(.notAuthenticated) }
+        let entering = membership != .member || self.zoneOwnerName != zoneOwnerName
         if membership == .member, self.zoneOwnerName != zoneOwnerName {
             excludeFormerFamily(from: &snapshot)
         }
+        // A family joined before, and left, may have changed since: what this device fetched from it
+        // then must not stand in for a full fetch now, or its people never come back (#251).
+        if entering { snapshot.zones[zoneOwnerName]?.forgetFetchedRecords() }
         snapshot.membership = Membership.member.rawValue
         snapshot.zoneOwner = zoneOwnerName
         try installFamilyScope(snapshot)
@@ -327,6 +355,8 @@ public final class CloudSync {
         let retired = snapshot.profileIDs.subtracting(own)
         snapshot.profileIDs.subtract(retired)
         snapshot.retiredFamilyProfileIDs = (snapshot.retiredFamilyProfileIDs ?? []).union(retired)
+        // Its cursor would only bring back what changed after it, never the retired profiles (#251).
+        snapshot.zones[snapshot.zoneOwner]?.forgetFetchedRecords()
     }
 
     private func installFamilyScope(_ snapshot: CloudAccountState) throws {
@@ -350,7 +380,7 @@ public final class CloudSync {
         guard let profiles, let snapshot = accountState else { return }
         let saved = membership == .member
             ? profiles.markAllAsMembers(in: snapshot.profileIDs)
-            : profiles.ensurePersonalOwner(in: snapshot.profileIDs)
+            : profiles.ensurePersonalOwner(in: snapshot.profileIDs, preferring: currentUserRecordName)
         guard saved else { throw SyncFailure.message("The family membership could not be saved on this device.") }
     }
 
@@ -1041,8 +1071,7 @@ public final class CloudSync {
         record["name"] = profile.name
         record["symbol"] = profile.avatar.symbol
         record["colorHex"] = profile.avatar.colorHex
-        record["pinSalt"] = profile.pin?.salt
-        record["pinHash"] = profile.pin?.hash
+        Self.writePIN(profile.pin, to: record)
         record["role"] = profile.role.rawValue
         record["createdAt"] = profile.createdAt
         record["updatedAt"] = profile.updatedAt
@@ -1112,10 +1141,36 @@ public final class CloudSync {
         )
     }
 
+    /// What earlier versions find in `pinSalt` and `pinHash` once the verifier is encrypted: a PIN
+    /// is set, and nothing typed matches it. They keep the profile locked rather than opening it.
+    static let encryptedPINMarker = "encrypted"
+
+    /// The PIN verifier travels end-to-end encrypted, like the family password, in fields of its own:
+    /// an existing plain field can't become encrypted (#257). They must be in the production schema
+    /// before a build that writes them ships; see docs/CLOUDKIT-PIN-VERIFIER-DEPLOYMENT.md.
+    static func writePIN(_ pin: PINRecord?, to record: CKRecord) {
+        record["pinSalt"] = pin.map { _ in encryptedPINMarker }
+        record["pinHash"] = pin.map { _ in encryptedPINMarker }
+        record.encryptedValues["pinVerifierSalt"] = pin?.salt
+        record.encryptedValues["pinVerifierHash"] = pin?.hash
+    }
+
+    /// The plain fields say whether there is a PIN, as they did for earlier versions, which may still
+    /// write them: a PIN they set or remove wins over an encrypted verifier left from before.
+    static func pin(from record: CKRecord) -> PINRecord? {
+        guard let salt = record["pinSalt"] as? String, let hash = record["pinHash"] as? String else { return nil }
+        guard hash == encryptedPINMarker else { return PINRecord(salt: salt, hash: hash) }
+        if let salt = record.encryptedValues["pinVerifierSalt"] as? String,
+           let hash = record.encryptedValues["pinVerifierHash"] as? String {
+            return PINRecord(salt: salt, hash: hash)
+        }
+        // Marked but unreadable here: the profile stays locked until its PIN is set again.
+        return PINRecord(salt: salt, hash: hash)
+    }
+
     private static func profile(from record: CKRecord) -> Profile? {
         guard let name = record["name"] as? String else { return nil }
-        var pin: PINRecord?
-        if let salt = record["pinSalt"] as? String, let hash = record["pinHash"] as? String { pin = PINRecord(salt: salt, hash: hash) }
+        let pin = Self.pin(from: record)
         return Profile(
             id: record.recordID.recordName,
             name: name,
@@ -1246,10 +1301,17 @@ public final class CloudSync {
                 try await verifyIdentity(expected)
             }
             expected = generation
+            let owner = metadata.share.recordID.zoneID.ownerName
+            if metadata.participantRole == .owner || Self.isOwnZone(owner, account: currentUserRecordName) {
+                // The owner opened their own invitation: they already have the family (#252).
+                services.log("Opened this family's own invitation; syncing instead of joining")
+                await refresh(reason: "own invitation")
+                return nil
+            }
             _ = try await container.accept(metadata)
             try check(expected)
-            try join(zoneOwnerName: metadata.share.recordID.zoneID.ownerName)
-            services.log("Joined the family shared by \(metadata.share.recordID.zoneID.ownerName)")
+            try join(zoneOwnerName: owner)
+            services.log("Joined the family shared by \(owner)")
             await refresh(reason: "joined family")
             return nil
         } catch {

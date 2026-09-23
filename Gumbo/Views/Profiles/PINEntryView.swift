@@ -2,13 +2,16 @@ import GumboCore
 import SwiftUI
 
 /// Four dots and a keypad. `submit` gets the four digits and returns false to shake and start over.
+/// `retryDate` says until when too many wrong PINs keep the keypad waiting; it counts down meanwhile.
 struct PINEntryView: View {
+    var retryDate: () -> Date? = { nil }
     let submit: (String) -> Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var digits = ""
     @State private var shakes = 0
     @State private var isBusy = false
     @State private var isInvalid = false
+    @State private var waitUntil: Date?
 
     private let keys: [String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"]
 
@@ -35,7 +38,14 @@ struct PINEntryView: View {
                     CubicKeyframe(0, duration: 0.05)
                 }
             }
-            if isInvalid {
+            if let waitUntil {
+                Text("Too many wrong PINs. Try again in \(Text(timerInterval: Date.now...max(waitUntil, .now), countsDown: true)).")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .monospacedDigit()
+                    .accessibilityAddTraits(.updatesFrequently)
+            } else if isInvalid {
                 Text("That PIN didn’t match. Try again.")
                     .font(.footnote)
                     .foregroundStyle(.red)
@@ -63,7 +73,7 @@ struct PINEntryView: View {
                         }
                         .buttonStyle(.plain)
                         .glassEffect(.regular.interactive(), in: Circle())
-                        .disabled(isBusy)
+                        .disabled(isBusy || waitUntil != nil)
                         .accessibilityLabel(key == "⌫" ? "Delete" : key)
                     }
                 }
@@ -72,10 +82,17 @@ struct PINEntryView: View {
         .sensoryFeedback(.selection, trigger: digits)
         .sensoryFeedback(.error, trigger: shakes)
         .pinKeyboard(tap)
+        .onAppear { waitUntil = retryDate() }
+        .task(id: waitUntil) {
+            guard let waitUntil else { return }
+            try? await Task.sleep(for: .seconds(max(0, waitUntil.timeIntervalSinceNow)))
+            guard !Task.isCancelled else { return }
+            self.waitUntil = retryDate()
+        }
     }
 
     private func tap(_ key: String) {
-        guard !isBusy else { return }
+        guard !isBusy, waitUntil == nil else { return }
         isInvalid = false
         if key == "⌫" {
             if !digits.isEmpty { digits.removeLast() }
@@ -91,6 +108,7 @@ struct PINEntryView: View {
             try? await Task.sleep(for: .milliseconds(120))
             if !submit(entered) {
                 isInvalid = true
+                waitUntil = retryDate()
                 shakes += 1
                 try? await Task.sleep(for: .milliseconds(350))
                 digits = ""
@@ -226,7 +244,7 @@ struct PINVerificationSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 22)
-                PINEntryView { pin in
+                PINEntryView(retryDate: { profiles.pinRetryDate(for: profile) }) { pin in
                     guard profiles.verify(pin: pin, for: profile) else { return false }
                     onVerified(true)
                     dismiss()
@@ -269,7 +287,7 @@ struct UnlockSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 22)
-                PINEntryView { pin in
+                PINEntryView(retryDate: { profiles.pinRetryDate(for: profile) }) { pin in
                     guard profiles.activate(profile, pin: pin) else {
                         // The PIN was right; the saved document was not. The alert takes it from here.
                         guard profiles.canOpenWithoutSavedData(profile) else { return false }

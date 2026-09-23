@@ -14,6 +14,16 @@ struct CloudAccountState: Codable {
         /// What this device last sent in the Family record (or found iCloud already holding), recorded
         /// only once CloudKit has accepted it, so a failed upload is sent again.
         var familyUpload: FamilyRecordUpload? = nil
+
+        /// Forgets what was fetched from the zone, so the next pull reads every record in it again.
+        /// Deletion intents stay: a profile deleted here must not come back with the rest.
+        mutating func forgetFetchedRecords() {
+            changeToken = nil
+            systemFields = [:]
+            remoteStamps = [:]
+            remoteStateDigests = nil
+            familyUpload = nil
+        }
     }
 
     var account: String
