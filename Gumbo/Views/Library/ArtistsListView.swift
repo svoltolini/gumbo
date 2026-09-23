@@ -14,7 +14,7 @@ struct ArtistsListView: View {
                         .frame(width: 46, height: 46)
                         .zoomSource(id: destination.sourceID, shape: .circle(46))
                     VStack(alignment: .leading, spacing: 2) {
-                        FadingText(artist.name)
+                        LibraryRowText(artist.name)
                             .font(.body.weight(.medium))
                         Text(artist.summary)
                             .font(.footnote)
