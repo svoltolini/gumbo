@@ -6,12 +6,7 @@ import GumboCore
 @Observable
 @MainActor
 final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
-    enum State: Equatable {
-        case none
-        case downloading(done: Int, total: Int)
-        case downloaded
-        case failed(String)
-    }
+    typealias State = WatchDownloadStatus
 
     static let shared = WatchDownloads()
     nonisolated static let sessionIdentifier = "com.samuelvoltolini.gumbo.watch.downloads"
@@ -24,6 +19,8 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     var relayRequest: ((WatchAudioRelayRequest) -> Void)?
     var relayCancellation: ((WatchAudioRelayRequest) -> Void)?
     private var relayJobs: [String: [WatchAudioRelayRequest]] = [:]
+    /// Views ask for state on every draw; reopening each saved song there made scrolling hitch.
+    @ObservationIgnored private var validation = WatchFileValidationCache()
 
     private nonisolated static let root = AppDirectories.support.appending(path: "Gumbo/watch-playlists", directoryHint: .isDirectory)
     // The old manifest had no source identity. Keep its files untouched, but require a fresh download.
@@ -49,38 +46,12 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         restoreTasks()
     }
 
+    /// A partly saved playlist still plays its saved songs; only the rest need downloading.
     func state(of playlist: WatchPlaylist) -> State {
-        guard let key = playlist.cacheID else { return .none }
-        guard let manifest = manifests[key] else {
-            return .none
-        }
-
-        let validatedFiles = manifest.validatedFileIDs(for: playlist, root: Self.root)
-        let desiredTracks = Set(playlist.tracks.map(\.id))
-        let relevantValidated = validatedFiles.intersection(desiredTracks)
-        let done = relevantValidated.count
-        let total = desiredTracks.count
-
-        if !playlist.tracks.isEmpty, done == total { return .downloaded }
-
-        if let pending = expected[key], !pending.isEmpty {
-            return .downloading(done: done, total: total)
-        }
-
-        if let error = errors[key] { return .failed(error) }
-
-        if done > 0 {
-            return .failed("\(done) of \(total) songs are available. Download again to finish.")
-        }
-
-        if manifest.hasStoredFiles, !manifest.desired.isEmpty {
-            let outstanding = manifest.outstandingTrackIDs(for: playlist, root: Self.root)
-            if !outstanding.isEmpty {
-                return .failed("Download again to finish.")
-            }
-        }
-
-        return .none
+        guard let key = playlist.cacheID, let manifest = manifests[key] else { return .none }
+        let validated = manifest.validatedFileIDs(for: playlist, root: Self.root) { self.validation.isValid($0, expectedBytes: $1) }
+        return .resolve(trackIDs: Set(playlist.tracks.map(\.id)), manifest: manifest, validated: validated,
+                        pending: expected[key], error: errors[key])
     }
 
     func isDownloaded(_ playlist: WatchPlaylist) -> Bool { state(of: playlist) == .downloaded }
@@ -93,7 +64,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     /// Only verified files from this source and profile are handed to the player, in playlist order.
     func files(for playlist: WatchPlaylist) -> [(track: WatchTrack, url: URL)] {
         guard let key = playlist.cacheID, let manifest = manifests[key] else { return [] }
-        return manifest.availableFiles(for: playlist, root: Self.root)
+        return manifest.availableFiles(for: playlist, root: Self.root) { self.validation.isValid($0, expectedBytes: $1) }
     }
 
     func allowsPlayback(_ files: [(track: WatchTrack, url: URL)]) -> Bool {
@@ -136,55 +107,68 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         errors[key] = nil
         saveManifests()
         do {
-            if credentials.providerKind == .smb {
-                guard let relayRequest else { throw ProviderError.unavailableOnDevice }
-                for track in missing {
-                    guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation) else { continue }
-                    let request = WatchAudioRelayRequest(playlist: playlist, job: job)
-                    relayJobs[key, default: []].append(request)
-                    relayRequest(request)
-                }
-                return
-            }
-            let synology: SynologyDrive?
-            let webDAV: WebDAVDrive?
-            switch credentials.providerKind {
-            case .synology:
-                let dsm = try await SynologyClient.login(baseURL: credentials.baseURL, account: credentials.account, password: credentials.password, otpCode: nil)
-                synology = SynologyDrive(session: dsm, displayName: "NAS")
-                webDAV = nil
-            case .webDAV:
-                synology = nil
-                webDAV = try WebDAVDrive(baseURL: credentials.baseURL, username: credentials.account,
-                                        password: credentials.password, sourceID: credentials.driveID!)
-            default: throw ProviderError.unsupportedVersion
-            }
-            guard manifests[key]?.generation == generation else { return }
-            for track in missing {
-                guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation) else { continue }
-                let request: URLRequest
-                if let webDAV {
-                    var authenticated = try webDAV.authenticatedRequest(for: track.path)
-                    // Background redirects are controlled by the OS. Supply the password only
-                    // for an exact-origin challenge instead of a replayable Authorization header.
-                    authenticated.setValue(nil, forHTTPHeaderField: "Authorization")
-                    request = authenticated
-                } else if let url = synology?.streamURL(for: track.path) {
-                    request = URLRequest(url: url)
-                } else {
-                    fail(job: job, message: "The server could not provide “\(track.title)”. Try again after reconnecting.")
-                    continue
-                }
-                let task = session.downloadTask(with: request)
-                task.taskDescription = job.encoded
-                task.resume()
-            }
+            try await startTransfers(missing, in: playlist, key: key, generation: generation, credentials: credentials)
         } catch {
             guard manifests[key]?.generation == generation else { return }
             errors[key] = error.localizedDescription
             expected[key] = nil
             manifests[key]?.generation = nil
             saveManifests()
+        }
+    }
+
+    /// Starts transfers for songs already listed as expected under this generation. A song that
+    /// left the playlist or changed while signing in is skipped; the edit stopped counting it.
+    private func startTransfers(_ tracks: [WatchTrack], in playlist: WatchPlaylist, key: String, generation: UUID,
+                                credentials: WatchCredentials) async throws {
+        if credentials.providerKind == .smb {
+            guard let relayRequest else { throw ProviderError.unavailableOnDevice }
+            for track in tracks {
+                guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation) else { continue }
+                let request = WatchAudioRelayRequest(playlist: playlist, job: job)
+                relayJobs[key, default: []].append(request)
+                relayRequest(request)
+            }
+            return
+        }
+        let synology: SynologyDrive?
+        let webDAV: WebDAVDrive?
+        switch credentials.providerKind {
+        case .synology:
+            let dsm = try await SynologyClient.login(baseURL: credentials.baseURL, account: credentials.account, password: credentials.password, otpCode: nil)
+            synology = SynologyDrive(session: dsm, displayName: "NAS")
+            webDAV = nil
+        case .webDAV:
+            synology = nil
+            webDAV = try WebDAVDrive(baseURL: credentials.baseURL, username: credentials.account,
+                                    password: credentials.password, sourceID: credentials.driveID!)
+        default: throw ProviderError.unsupportedVersion
+        }
+        guard manifests[key]?.generation == generation else { return }
+        for track in tracks {
+            guard let job = WatchDownloadJob(playlist: playlist, track: track, generation: generation),
+                  expected[key]?.contains(track.id) == true else { continue }
+            guard currentCatalogue?.isCurrent(job) == true else {
+                expected[key]?.remove(track.id)
+                if expected[key]?.isEmpty == true { expected[key] = nil }
+                continue
+            }
+            let request: URLRequest
+            if let webDAV {
+                var authenticated = try webDAV.authenticatedRequest(for: track.path)
+                // Background redirects are controlled by the OS. Supply the password only
+                // for an exact-origin challenge instead of a replayable Authorization header.
+                authenticated.setValue(nil, forHTTPHeaderField: "Authorization")
+                request = authenticated
+            } else if let url = synology?.streamURL(for: track.path) {
+                request = URLRequest(url: url)
+            } else {
+                fail(job: job, message: "The server could not provide “\(track.title)”. Try again after reconnecting.")
+                continue
+            }
+            let task = session.downloadTask(with: request)
+            task.taskDescription = job.encoded
+            task.resume()
         }
     }
 
@@ -208,6 +192,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         guard let key = playlist.cacheID else { return }
         cancel(playlist)
         try? FileManager.default.removeItem(at: Self.root.appending(path: key))
+        validation.removeAll()
         manifests[key] = nil
         errors[key] = nil
         saveManifests()
@@ -224,6 +209,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         expected.removeAll()
         errors.removeAll()
         manifests.removeAll()
+        validation.removeAll()
         currentCatalogue = nil
         try? FileManager.default.removeItem(at: Self.root)
         try? FileManager.default.removeItem(at: Self.manifestURL)
@@ -241,6 +227,8 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     func reconcile(_ catalogue: WatchCatalogue) {
         let previous = currentCatalogue
         currentCatalogue = catalogue
+        // Each sync checks every saved file on disk once again; views then reuse the results.
+        validation.removeAll()
         removeConfirmedServerFiles(catalogue, previous: previous)
         for playlist in previous?.playlists ?? [] where catalogue.playlist(matching: playlist) == nil {
             cancel(playlist)
@@ -253,7 +241,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
             if var saved = manifests[key] {
                 saved.adoptFileRevisions(from: previous?.playlist(matching: playlist) ?? playlist)
                 let previousFiles = saved.files
-                let pruned = saved.pruneInvalidFiles(for: playlist, root: Self.root)
+                let pruned = saved.pruneInvalidFiles(for: playlist, root: Self.root) { self.validation.isValid($0, expectedBytes: $1) }
                 manifests[key] = saved
                 if !pruned.isEmpty {
                     for id in pruned {
@@ -268,21 +256,64 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
                 }
 
                 if saved.desired != desired || (previousTracks != nil && previousTracks != playlist.tracks) {
-                    cancel(playlist)
-                    manifests[key]?.desired = desired
-                    errors[key] = nil
-                } else if saved.generation == nil, !saved.desired.isEmpty {
-                    let outstanding = saved.outstandingTrackIDs(for: playlist, root: Self.root)
-                    if !outstanding.isEmpty, expected[key] == nil {
-                        let validated = saved.validatedFileIDs(for: playlist, root: Self.root)
-                        if validated.count < desired.count, validated.count > 0 {
-                            errors[key] = "\(validated.count) of \(desired.count) songs are available. Download again to finish."
-                        }
+                    if saved.generation != nil, expected[key]?.isEmpty == false {
+                        retarget(playlist, previous: previous?.playlist(matching: playlist), key: key)
+                    } else {
+                        cancel(playlist)
+                        manifests[key]?.desired = desired
+                        errors[key] = nil
                     }
                 }
             }
         }
         saveManifests()
+    }
+
+    /// Keeps a running download going against the playlist's new membership. Transfers for songs
+    /// that left or changed stop; songs that joined are requested in the same generation.
+    private func retarget(_ playlist: WatchPlaylist, previous: WatchPlaylist?, key: String) {
+        guard let generation = manifests[key]?.generation, let catalogue = currentCatalogue else { return }
+        manifests[key]?.desired = Set(playlist.tracks.map(\.id))
+        let plan = WatchDownloadRetarget(previous: previous, current: playlist, pending: expected[key] ?? [],
+                                         available: Set(files(for: playlist).map(\.track.id)), generation: generation)
+        let added = Set(plan.added.map(\.id))
+        expected[key] = plan.kept.union(added)
+        if expected[key]?.isEmpty == true { expected[key] = nil }
+
+        let relay = relayJobs[key] ?? []
+        relayJobs[key] = relay.filter { $0.isCurrent(in: catalogue, manifest: manifests[key]) }
+        for request in relay where request.job.generation == generation && !request.isCurrent(in: catalogue, manifest: manifests[key]) {
+            relayCancellation?(request)
+        }
+        session.getAllTasks { @Sendable [weak self] tasks in
+            Task { @MainActor in
+                // Decide against the catalogue current when the tasks arrive, not when they were requested.
+                guard let self else { return }
+                for task in tasks {
+                    guard let job = WatchDownloadJob.decode(task.taskDescription), job.playlistKey == key,
+                          job.generation == generation, self.currentCatalogue?.isCurrent(job) != true else { continue }
+                    task.cancel()
+                }
+            }
+        }
+
+        guard !plan.added.isEmpty else { return }
+        guard let credentials = credentialsProvider?(), credentials.matches(playlist) else {
+            expected[key]?.subtract(added)
+            if expected[key]?.isEmpty == true { expected[key] = nil }
+            errors[key] = "Open Gumbo on your iPhone to sync the sign-in for this playlist’s NAS."
+            return
+        }
+        Task {
+            do {
+                try await startTransfers(plan.added, in: playlist, key: key, generation: generation, credentials: credentials)
+            } catch {
+                guard manifests[key]?.generation == generation else { return }
+                expected[key]?.subtract(added)
+                if expected[key]?.isEmpty == true { expected[key] = nil }
+                errors[key] = error.localizedDescription
+            }
+        }
     }
 
     /// A missing playlist is not evidence of deleted audio. Only explicit source-scoped NAS
@@ -331,6 +362,11 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
                         task.cancel()
                         continue
                     }
+                    // A transfer for a song that has since left the playlist or changed could never complete it.
+                    if let catalogue = self.currentCatalogue, !catalogue.isCurrent(job) {
+                        task.cancel()
+                        continue
+                    }
                     guard let original = task.originalRequest?.url, let current = task.currentRequest?.url,
                           NASTransportSecurity.permitsRedirect(from: original, to: current) else {
                         task.cancel()
@@ -347,6 +383,7 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     }
 
     private func record(job: WatchDownloadJob) {
+        validation.forget(job.destination(in: Self.root))
         guard currentCatalogue?.deletedCacheKeys.contains((job.fileName as NSString).deletingPathExtension) != true,
               manifests[job.playlistKey]?.generation == job.generation,
               manifests[job.playlistKey]?.desired.contains(job.trackID) == true else {
@@ -356,7 +393,8 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
         guard let currentTrack = currentCatalogue?.playlists.first(where: { $0.cacheID == job.playlistKey })?.tracks.first(where: { $0.id == job.trackID }) else {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root)); return
         }
-        guard job.fileRevision == currentTrack.fileRevision else {
+        // A transfer for an older copy of this song must not stand in for the current one.
+        guard job.fileRevision == currentTrack.fileRevision, currentCatalogue?.isCurrent(job) == true else {
             try? FileManager.default.removeItem(at: job.destination(in: Self.root))
             fail(job: job, message: "This song changed on your server. Download it again to update your saved copy.")
             return
@@ -396,9 +434,13 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     }
 
     private func fail(job: WatchDownloadJob, message: String) {
+        validation.forget(job.destination(in: Self.root))
         guard manifests[job.playlistKey]?.generation == job.generation else { return }
         expected[job.playlistKey]?.remove(job.trackID)
         if expected[job.playlistKey]?.isEmpty == true { expected[job.playlistKey] = nil }
+        // A song that left the playlist or changed since this transfer began only stops counting;
+        // cancelling its transfer after a playlist edit is not a failure the listener must act on.
+        guard currentCatalogue?.isCurrent(job) == true else { return }
         errors[job.playlistKey] = message
     }
 

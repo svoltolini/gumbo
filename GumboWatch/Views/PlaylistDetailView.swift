@@ -16,7 +16,6 @@ struct PlaylistDetailView: View {
     private var playlist: WatchPlaylist { currentPlaylist ?? initialPlaylist }
 
     private var state: WatchDownloads.State { downloads.state(of: playlist) }
-    private var isOnWatch: Bool { downloads.isDownloaded(playlist) }
 
     var body: some View {
         Group {
@@ -89,6 +88,7 @@ struct PlaylistDetailView: View {
     }
 
     @ViewBuilder private var controls: some View {
+        let state = self.state
         switch state {
         case .none, .failed:
             if case .failed(let message) = state {
@@ -97,41 +97,7 @@ struct PlaylistDetailView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
             }
-            if store.isSample {
-                Text("Downloads need a server; this is the sample library.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-            } else if playlist.cacheID == nil {
-                Text("Open Gumbo on your iPhone to refresh this playlist before downloading.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            } else if let credentials = store.credentials(), credentials.matches(playlist) {
-                if credentials.providerKind == .smb {
-                    Text("Keep Gumbo open on your iPhone while songs are prepared. They transfer to your Watch for offline listening.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                Button {
-                    if credentials.providerKind == .synology, NASOrigin(url: credentials.baseURL)?.isHTTPS == false, !NASTransportSecurity.isAllowed(credentials.baseURL) {
-                        pendingHTTPCredentials = credentials
-                    } else {
-                        Task { await downloads.download(playlist, credentials: credentials) }
-                    }
-                } label: {
-                    Label(state == .none ? "Download" : "Try Again", systemImage: "arrow.down.circle.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Palette.accent)
-                .foregroundStyle(Palette.onAccent)
-            } else {
-                Text("Open Gumbo on your iPhone to sign the watch in.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
+            downloadControls(title: state == .none ? "Download" : "Try Again")
         case .downloading(let done, let total):
             ProgressView(value: Double(done), total: Double(max(total, 1))) {
                 Text("Downloading \(done) of \(total)")
@@ -140,26 +106,84 @@ struct PlaylistDetailView: View {
             .tint(Palette.accent)
             Button("Cancel", role: .cancel) { downloads.cancel(playlist) }
                 .font(.caption)
-        case .downloaded:
-            HStack(spacing: 8) {
-                Button {
-                    Task { await player.play(downloads.files(for: playlist), title: playlist.name) }
-                } label: {
-                    Label("Play", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Palette.accent)
-                .foregroundStyle(Palette.onAccent)
-                Button {
-                    Task { await player.play(downloads.files(for: playlist), title: playlist.name, shuffled: true) }
-                } label: {
-                    Image(systemName: "shuffle")
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Shuffle")
+            if done > 0 {
+                playControls
             }
+        case .downloaded:
+            playControls
+        case .partial(let available, let total, let message):
+            Text("\(available) of \(total) songs are on this Watch.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if let message {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+            playControls
+            downloadControls(title: "Download the Rest")
         }
         removalButton
+    }
+
+    private var playControls: some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await player.play(downloads.files(for: playlist), title: playlist.name) }
+            } label: {
+                Label("Play", systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .foregroundStyle(Palette.onAccent)
+            Button {
+                Task { await player.play(downloads.files(for: playlist), title: playlist.name, shuffled: true) }
+            } label: {
+                Image(systemName: "shuffle")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Shuffle")
+        }
+    }
+
+    @ViewBuilder private func downloadControls(title: String) -> some View {
+        if store.isSample {
+            Text("Downloads need a server; this is the sample library.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        } else if playlist.cacheID == nil {
+            Text("Open Gumbo on your iPhone to refresh this playlist before downloading.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        } else if let credentials = store.credentials(), credentials.matches(playlist) {
+            if credentials.providerKind == .smb {
+                Text("Keep Gumbo open on your iPhone while songs are prepared. They transfer to your Watch for offline listening.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                if credentials.providerKind == .synology, NASOrigin(url: credentials.baseURL)?.isHTTPS == false, !NASTransportSecurity.isAllowed(credentials.baseURL) {
+                    pendingHTTPCredentials = credentials
+                } else {
+                    Task { await downloads.download(playlist, credentials: credentials) }
+                }
+            } label: {
+                Label(title, systemImage: "arrow.down.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .foregroundStyle(Palette.onAccent)
+        } else {
+            Text("Open Gumbo on your iPhone to sign the watch in.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
     }
 
     @ViewBuilder private var removalButton: some View {
@@ -172,13 +196,16 @@ struct PlaylistDetailView: View {
     }
 
     private var songs: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+        // Saved songs play even while others are missing; each row maps to its saved file, if any.
+        let positions = playlist.playbackPositions(available: downloads.files(for: playlist).map(\.track))
+        return LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(Array(playlist.tracks.enumerated()), id: \.offset) { index, track in
+                let position = positions.indices.contains(index) ? positions[index] : nil
                 Button {
-                    guard isOnWatch else { return }
+                    guard let position else { return }
                     let files = downloads.files(for: playlist)
-                    guard files.indices.contains(index), files[index].track == track else { return }
-                    Task { await player.play(files, title: playlist.name, startingAt: index) }
+                    guard files.indices.contains(position), files[position].track == track else { return }
+                    Task { await player.play(files, title: playlist.name, startingAt: position) }
                 } label: {
                     HStack(spacing: 8) {
                         if player.current?.id == track.id {
@@ -208,7 +235,7 @@ struct PlaylistDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .opacity(isOnWatch ? 1 : 0.55)
+                .opacity(position != nil ? 1 : 0.55)
                 if index < playlist.tracks.count - 1 {
                     Divider().padding(.leading, 24)
                 }

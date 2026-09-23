@@ -212,60 +212,72 @@ public nonisolated struct WatchDownloadManifest: Codable, Sendable {
     /// Includes partial or invalid saved files so the user can always remove their storage.
     public var hasStoredFiles: Bool { !files.isEmpty }
 
-    public func availableFiles(for playlist: WatchPlaylist, root: URL) -> [(track: WatchTrack, url: URL)] {
+    /// The on-disk check every saved file must pass. Callers may pass a cached version of it
+    /// (`WatchFileValidationCache`) so drawing a list does not reopen every saved song.
+    public static func isValidFile(_ url: URL, expectedBytes: Int64?) -> Bool {
+        WatchDownloadValidation.failure(for: url, expectedBytes: expectedBytes) == nil
+    }
+
+    public func availableFiles(for playlist: WatchPlaylist, root: URL,
+                               validFile: (URL, Int64?) -> Bool = WatchDownloadManifest.isValidFile) -> [(track: WatchTrack, url: URL)] {
         guard let key = playlist.cacheID else { return [] }
         return playlist.tracks.compactMap { track in
             guard let path = files[track.id], matches(track) else { return nil }
-            guard validateFilePath(path, trackID: track.id, key: key, root: root, expectedBytes: track.fileSize) else { return nil }
+            guard validateFilePath(path, key: key, root: root, expectedBytes: track.fileSize, validFile: validFile) else { return nil }
             let url = root.appending(path: key).appending(path: path)
             return (track, url)
         }
     }
 
     /// Validates a file entry and returns true if the file exists, has correct format, and passes validation.
-    private func validateFilePath(_ path: String, trackID: String, key: String, root: URL, expectedBytes: Int64?) -> Bool {
+    private func validateFilePath(_ path: String, key: String, root: URL, expectedBytes: Int64?,
+                                  validFile: (URL, Int64?) -> Bool) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
               !parts[1].isEmpty, parts[1] != ".", parts[1] != ".." else { return false }
         let url = root.appending(path: key).appending(path: path)
-        return WatchDownloadValidation.failure(for: url, expectedBytes: expectedBytes) == nil
+        return validFile(url, expectedBytes)
     }
 
     /// Returns the set of track IDs in `files` that pass validation for the given playlist.
     /// This validates both path format and actual file existence/integrity.
-    public func validatedFileIDs(for playlist: WatchPlaylist, root: URL) -> Set<String> {
+    public func validatedFileIDs(for playlist: WatchPlaylist, root: URL,
+                                 validFile: (URL, Int64?) -> Bool = WatchDownloadManifest.isValidFile) -> Set<String> {
         guard let key = playlist.cacheID else { return [] }
         let tracksByID = Dictionary(playlist.tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID],
                   let track = tracksByID[trackID], matches(track) else { return false }
-            return validateFilePath(path, trackID: trackID, key: key, root: root, expectedBytes: track.fileSize)
+            return validateFilePath(path, key: key, root: root, expectedBytes: track.fileSize, validFile: validFile)
         })
     }
 
     /// Returns the set of track IDs that have manifest entries but fail validation (missing/corrupt files).
     /// These entries should be pruned from the manifest to avoid stale state.
-    public func invalidFileIDs(for playlist: WatchPlaylist, root: URL) -> Set<String> {
+    public func invalidFileIDs(for playlist: WatchPlaylist, root: URL,
+                               validFile: (URL, Int64?) -> Bool = WatchDownloadManifest.isValidFile) -> Set<String> {
         guard let key = playlist.cacheID else { return [] }
         let tracksByID = Dictionary(playlist.tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return Set(files.keys.filter { trackID in
             guard let path = files[trackID] else { return false }
             let track = tracksByID[trackID]
             if let track, !matches(track) { return true }
-            return !validateFilePath(path, trackID: trackID, key: key, root: root, expectedBytes: track?.fileSize)
+            return !validateFilePath(path, key: key, root: root, expectedBytes: track?.fileSize, validFile: validFile)
         })
     }
 
     /// Returns track IDs in `desired` that are not in `files` or whose files fail validation.
     /// These represent incomplete downloads that should be resumed.
-    public func outstandingTrackIDs(for playlist: WatchPlaylist, root: URL) -> Set<String> {
-        let validated = validatedFileIDs(for: playlist, root: root)
+    public func outstandingTrackIDs(for playlist: WatchPlaylist, root: URL,
+                                    validFile: (URL, Int64?) -> Bool = WatchDownloadManifest.isValidFile) -> Set<String> {
+        let validated = validatedFileIDs(for: playlist, root: root, validFile: validFile)
         return desired.subtracting(validated)
     }
 
     /// Removes invalid file entries and returns the pruned track IDs.
-    public mutating func pruneInvalidFiles(for playlist: WatchPlaylist, root: URL) -> Set<String> {
-        let invalid = invalidFileIDs(for: playlist, root: root)
+    public mutating func pruneInvalidFiles(for playlist: WatchPlaylist, root: URL,
+                                           validFile: (URL, Int64?) -> Bool = WatchDownloadManifest.isValidFile) -> Set<String> {
+        let invalid = invalidFileIDs(for: playlist, root: root, validFile: validFile)
         for trackID in invalid {
             files.removeValue(forKey: trackID)
             fileRevisions.removeValue(forKey: trackID)
