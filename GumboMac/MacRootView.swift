@@ -70,6 +70,7 @@ struct MacMainView: View {
                 } label: {
                     Image(systemName: "person.crop.circle")
                 }
+                .accessibilityLabel("Profile and Settings")
                 .help("Profile and Settings")
             }
         }

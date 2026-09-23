@@ -137,6 +137,7 @@ struct MacAlbumDetailView: View {
                         Image(systemName: "ellipsis")
                     }
                     .accessibilityLabel("More")
+                    .help("More album actions")
                 }
             }
         }
@@ -212,11 +213,13 @@ struct MacPlaylistDetailView: View {
                         renameText = live.name
                         isRenaming = true
                     }
+                    .help("Rename playlist")
                     Button("Delete Playlist…", systemImage: "trash", role: .destructive) {
                         editingPlaylist = live
                         editingScope = scope
                         isConfirmingDelete = true
                     }
+                    .help("Delete playlist")
                 }
             }
         }

@@ -18,6 +18,7 @@ struct MacNowPlayingInspector: View {
                 Button("Close Now Playing", systemImage: "xmark") { navigation.isShowingNowPlaying = false }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
+                    .help("Close Now Playing")
             }
             .padding(16)
             Divider()

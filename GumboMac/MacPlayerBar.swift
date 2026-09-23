@@ -43,6 +43,7 @@ struct MacPlayerBar: View {
                     Button("Volume", systemImage: "speaker.wave.2.fill") { showsVolume.toggle() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
+                        .help("Volume")
                         .popover(isPresented: $showsVolume) { MacVolumeSlider().frame(width: 180).padding() }
                 }
                 MacRoutePicker()
