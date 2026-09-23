@@ -42,6 +42,16 @@ Without this step, every Profile upload from the new build is rejected in Produc
 - A wrong PIN is free four times, then the keypad waits 30 s, 1 min, 5 min, 15 min, then 1 h.
 - After relaunching the iPhone app, the Watch keeps its sign-in. It is no longer signed out on every relaunch.
 
-## 6. Items added by the P3 batch
+## 6. Upload the new build to TestFlight (same version 1.0, new build number)
+
+The build number (`CURRENT_PROJECT_VERSION`) is raised in the final audit PR. `MARKETING_VERSION` stays at `1.0`. Complete steps 1 to 3 first.
+
+- [ ] In Xcode, choose the **Any iOS Device** destination, then Product > Archive. Repeat for GumboMac and GumboTV if you ship them. The Watch app and the widgets are embedded in the iOS archive.
+- [ ] In the Organizer, choose Distribute App > App Store Connect > Upload.
+- [ ] Wait for App Store Connect to finish processing the build (about 5 to 30 minutes). Answer the export-compliance question the same way as for the last build.
+- [ ] In App Store Connect, open TestFlight and add the build to the internal group, then to each external tester group. Internal testers get it straight away. External testers usually get it without a new Beta App Review, because version 1.0 was already approved. Apple can still review any build, though, so if it shows "Waiting for Review", it just needs time.
+- [ ] Fill in "What to Test" with a short summary of the audit fixes.
+
+## 7. Items added by the P3 batch
 
 _Filled in when the P3 batch is merged._
