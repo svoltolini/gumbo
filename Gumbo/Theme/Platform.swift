@@ -101,7 +101,7 @@ enum Hints {
         #if os(macOS)
         "choose Library › Scan for New Music"
         #elseif os(tvOS)
-        "use Scan now in Settings"
+        "choose Update Library in Settings › Music Library"
         #else
         "pull down to scan again"
         #endif
@@ -112,7 +112,7 @@ enum Hints {
         #if os(macOS)
         "Choose Library › Scan for New Music to try again."
         #elseif os(tvOS)
-        "Use Scan now in Settings to try again."
+        "Choose Update Library in Settings › Music Library to try again."
         #else
         "Pull down to try again."
         #endif

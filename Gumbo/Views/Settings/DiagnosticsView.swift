@@ -41,11 +41,14 @@ struct DiagnosticsView: View {
         .navigationTitle("Diagnostics")
         .inlineTitle()
         .toolbar {
+            #if !os(tvOS)
+            // A television has no clipboard to copy to.
             ToolbarItem(placement: .trailingBar) {
                 Button("Copy", systemImage: "doc.on.doc") {
                     Clipboard.copy(log.text)
                 }
             }
+            #endif
             ToolbarItem(placement: .trailingBar) {
                 Button("Clear", systemImage: "trash", role: .destructive) {
                     log.clear()
