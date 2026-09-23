@@ -159,7 +159,9 @@ struct PlaylistDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-        } else if let credentials = store.credentials(), credentials.matches(playlist) {
+        } else if store.hasCredentials, let credentials = store.credentials(), credentials.matches(playlist) {
+            // credentials() reads UserDefaults and the Keychain, which aren't observed; hasCredentials
+            // is, so a sign-in arriving while this page is open replaces the hint with Download.
             if credentials.providerKind == .smb {
                 Text("Keep Gumbo open on your iPhone while songs are prepared. They transfer to your Watch for offline listening.")
                     .font(.caption2)

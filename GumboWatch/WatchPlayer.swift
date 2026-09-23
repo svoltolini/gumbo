@@ -17,6 +17,10 @@ final class WatchPlayer {
     private var pendingActivation = false
     private var pendingFileKeys: Set<String> = []
     private var itemPositions: [ObjectIdentifier: Int] = [:]
+    /// Whether the listener last asked to play; an interruption resumes only then.
+    private var wantsToPlay = false
+    private var interruptionResumeRevision: UInt64?
+    private var interruptionObservers: [any NSObjectProtocol] = []
 
     private(set) var current: WatchTrack?
     private(set) var isPlaying = false
@@ -62,28 +66,7 @@ final class WatchPlayer {
         }
         pendingFileKeys = Set(order.map { $0.url.deletingPathExtension().lastPathComponent })
         setupRemoteCommands()
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
-            guard try await session.activate(options: []) else {
-                if intent.accepts(command) {
-                    pendingActivation = false
-                    pendingFileKeys = []
-                    if !Task.isCancelled { lastError = "Audio couldn't start. Connect your headphones and try again." }
-                }
-                return
-            }
-        } catch {
-            if intent.accepts(command) {
-                pendingActivation = false
-                pendingFileKeys = []
-                if !Task.isCancelled { lastError = "Audio couldn't start. \(error.localizedDescription)" }
-            }
-            return
-        }
-        guard intent.accepts(command) else { return }
-        pendingActivation = false
-        pendingFileKeys = []
+        guard await activateSession(for: command) else { return }
         guard !Task.isCancelled, authorization.isGranted,
               WatchDownloads.shared.allowsPlayback(order) else { return }
         queue = order
@@ -97,7 +80,36 @@ final class WatchPlayer {
             itemPositions[ObjectIdentifier(item)] = position
             player.insert(item, after: nil)
         }
+        wantsToPlay = true
         player.play()
+    }
+
+    /// Brings the audio session up, again after another app or an interruption took it. False when
+    /// it couldn't, or a newer command replaced this one while the system connected the headphones.
+    private func activateSession(for command: UInt64) async -> Bool {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+            guard try await session.activate(options: []) else {
+                if intent.accepts(command) {
+                    pendingActivation = false
+                    pendingFileKeys = []
+                    if !Task.isCancelled { lastError = "Audio couldn't start. Connect your headphones and try again." }
+                }
+                return false
+            }
+        } catch {
+            if intent.accepts(command) {
+                pendingActivation = false
+                pendingFileKeys = []
+                if !Task.isCancelled { lastError = "Audio couldn't start. \(error.localizedDescription)" }
+            }
+            return false
+        }
+        guard intent.accepts(command) else { return false }
+        pendingActivation = false
+        pendingFileKeys = []
+        return true
     }
 
     func setAuthorization(_ value: WatchAuthorization) {
@@ -123,6 +135,8 @@ final class WatchPlayer {
 
     func stop() {
         intent.advance()
+        wantsToPlay = false
+        interruptionResumeRevision = nil
         pendingActivation = false
         pendingFileKeys = []
         player.pause()
@@ -141,17 +155,40 @@ final class WatchPlayer {
 
     private func pause() {
         intent.advance()
+        wantsToPlay = false
+        interruptionResumeRevision = nil
         pendingActivation = false
         pendingFileKeys = []
         player.pause()
     }
 
+    /// Reactivates the session first: after an interruption or another app's audio, play() alone is silent.
     private func resume() {
         guard authorization.isGranted, player.currentItem != nil else { return }
-        intent.advance()
-        pendingActivation = false
+        let command = intent.advance()
+        wantsToPlay = true
+        interruptionResumeRevision = nil
+        pendingActivation = true
         pendingFileKeys = []
-        player.play()
+        Task {
+            guard await activateSession(for: command), !Task.isCancelled,
+                  authorization.isGranted, player.currentItem != nil else { return }
+            player.play()
+        }
+    }
+
+    /// A call, Siri or a timer pauses playback; it comes back only if nothing was pressed meanwhile.
+    private func interruptionBegan() {
+        let shouldResume = wantsToPlay && player.currentItem != nil
+        pause()
+        interruptionResumeRevision = shouldResume ? intent.value : nil
+    }
+
+    private func interruptionEnded(shouldResume: Bool) {
+        let interrupted = interruptionResumeRevision
+        interruptionResumeRevision = nil
+        guard shouldResume, let interrupted, intent.accepts(interrupted) else { return }
+        resume()
     }
 
     func togglePlayPause() {
@@ -171,7 +208,10 @@ final class WatchPlayer {
         pendingActivation = false
         pendingFileKeys = []
         if player.currentTime().seconds > 3 || index == 0 {
-            player.seek(to: .zero)
+            // A seek changes neither observed property, so Now Playing would keep counting from the old time.
+            player.seek(to: .zero) { @Sendable [weak self] _ in
+                Task { @MainActor in self?.updateNowPlaying() }
+            }
         } else {
             let files = queue
             let title = queueTitle ?? ""
@@ -207,6 +247,32 @@ final class WatchPlayer {
         centre.togglePlayPauseCommand.addTarget(handler: onMain { $0.togglePlayPause() })
         centre.nextTrackCommand.addTarget(handler: onMain { $0.next() })
         centre.previousTrackCommand.addTarget(handler: onMain { $0.previous() })
+
+        let notifications = NotificationCenter.default
+        interruptionObservers.append(notifications.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            // Read the plain values first; the notification itself must not cross into the actor.
+            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init(rawValue:))
+            let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            MainActor.assumeIsolated {
+                guard let self, let type else { return }
+                switch type {
+                case .began:
+                    self.interruptionBegan()
+                case .ended:
+                    self.interruptionEnded(shouldResume: options.contains(.shouldResume))
+                @unknown default:
+                    break
+                }
+            }
+        })
+        // Headphones gone: stay paused rather than resume later on another route.
+        interruptionObservers.append(notifications.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            MainActor.assumeIsolated {
+                guard let self, reason == .oldDeviceUnavailable else { return }
+                self.pause()
+            }
+        })
     }
 
     private func updateNowPlaying() {

@@ -14,7 +14,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
     private var expected: [String: Set<String>] = [:]
     private var errors: [String: String] = [:]
     private var currentCatalogue: WatchCatalogue?
-    private var backgroundCompletion: (() -> Void)?
+    /// Every refresh task the system handed over for the download session, all completed together.
+    @ObservationIgnored private var backgroundCompletions: [() -> Void] = []
+    /// The session is created at launch, so its events can finish before the refresh task arrives.
+    @ObservationIgnored private var backgroundEventsFinished = false
     var credentialsProvider: (() -> WatchCredentials?)?
     var relayRequest: ((WatchAudioRelayRequest) -> Void)?
     var relayCancellation: ((WatchAudioRelayRequest) -> Void)?
@@ -218,7 +221,12 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
 
     func reconnect(identifier: String, completion: @escaping () -> Void) {
         guard identifier == Self.sessionIdentifier else { completion(); return }
-        backgroundCompletion = completion
+        guard !backgroundEventsFinished else {
+            backgroundEventsFinished = false
+            completion()
+            return
+        }
+        backgroundCompletions.append(completion)
         _ = session
     }
 
@@ -482,8 +490,10 @@ final class WatchDownloads: NSObject, URLSessionDownloadDelegate {
 
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
         Task { @MainActor in
-            self.backgroundCompletion?()
-            self.backgroundCompletion = nil
+            let completions = self.backgroundCompletions
+            self.backgroundCompletions = []
+            self.backgroundEventsFinished = completions.isEmpty
+            for completion in completions { completion() }
         }
     }
 

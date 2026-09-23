@@ -48,6 +48,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private var holdsCatalogueForCovers: Bool { awaitsCoversSinceLaunch && artworkTask != nil }
     private var lastCatalogueKey: Data?
     private var lastCredentials: WatchCredentials?
+    /// The revocation already queued, so a locked profile doesn't queue it again on every sync.
+    private var sentRevocation: WatchAuthorization?
     private static let deletionKey = "watch.serverDeletions.v1"
     private var serverDeletions: [String: [String]] = [:]
     private var deletionRevision: UInt64 = 0
@@ -163,8 +165,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     private func sendRevocation() {
         // Revision zero: nothing was ever granted from this install, and the Watch ignores it.
         guard authorization.revision > 0, WCSession.isSupported(), WCSession.default.activationState == .activated,
-              WCSession.default.isPaired, WCSession.default.isWatchAppInstalled else { return }
+              WCSession.default.isPaired, WCSession.default.isWatchAppInstalled,
+              sentRevocation != authorization else { return }
         _ = WCSession.default.transferUserInfo(["kind": "revoke", "authorization": authorization.encoded!])
+        sentRevocation = authorization
     }
 
     /// Moves the grant with the library now open: kept for the same one, granted anew for any
@@ -234,6 +238,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         Task { @MainActor in
             self.lastCatalogueKey = nil
             self.lastCredentials = nil
+            self.sentRevocation = nil
             self.sync()
         }
     }
@@ -267,15 +272,17 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         }
         guard message["kind"] as? String == "requestSync" else { reply([:]); return }
         Task { @MainActor in
+            // syncReply records what the reply carried, so sync() queues only what it left out.
             reply(self.syncReply())
-            self.lastCatalogueKey = nil
-            self.lastCredentials = nil
             self.sync()
         }
     }
 
+    /// Whatever the reply carries counts as sent; anything it leaves out is queued again by sync().
     private func syncReply() -> [String: Any] {
         followLibrary()
+        lastCatalogueKey = nil
+        lastCredentials = nil
         guard authorization.isGranted else { return ["status": "revoked", "authorization": authorization.encoded!] }
         guard let state = provider?(), state.scope == authorizationScope else {
             // Relaunched before the granted library is open: the same revision tells the Watch to
@@ -291,13 +298,16 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         } else if let data = try? JSONEncoder().encode(catalogue),
                   let packed = try? (data as NSData).compressed(using: .lzfse) as Data, packed.count <= 60_000 {
             reply["catalogue"] = packed
+            lastCatalogueKey = catalogue.contentKey
             DiagnosticsLog.shared.record("Watch sync: answered with \(state.catalogue.playlists.count) playlists (\(packed.count) bytes packed)")
         } else {
             reply["status"] = "tooLarge"
             DiagnosticsLog.shared.record("Watch sync: catalogue too large for a message; queued as a file")
         }
         if let credentials = state.credentials {
-            reply.merge(credentialPayload(credentials), uniquingKeysWith: { _, new in new })
+            let payload = credentialPayload(credentials)
+            reply.merge(payload, uniquingKeysWith: { _, new in new })
+            if !payload.isEmpty { lastCredentials = credentials }
         }
         return reply
     }
