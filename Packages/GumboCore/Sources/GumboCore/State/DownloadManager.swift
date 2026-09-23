@@ -226,6 +226,48 @@ public nonisolated struct DownloadJob: Codable, Sendable {
     }
 }
 
+/// The download state the widgets need, with the checks against the files on disk. Built on the main
+/// actor by `DownloadManager.widgetDownloadCheck()`; the checks themselves stat files and can run anywhere.
+public nonisolated struct WidgetDownloadCheck: Sendable {
+    let records: [String: DownloadRecord]
+    let driveID: String
+    let profileID: String
+    let listed: Set<String>
+    let directory: URL
+
+    /// The albums kept complete on this device by the active profile.
+    public func verifiedAlbums(_ albums: [Album]) -> [Album] {
+        guard !records.isEmpty else { return [] }
+        return albums.filter { album in
+            listed.contains(DownloadOwner(album: album, profileID: profileID).id) && !album.tracks.isEmpty
+                && album.tracks.allSatisfy { hasVerifiedFile(for: $0) }
+        }
+    }
+
+    /// Distinct songs with a complete file here. Only songs with a saved record are looked up, so a
+    /// large library with few downloads costs one dictionary lookup per song.
+    public func verifiedSongCount(_ tracks: [Track]) -> Int {
+        let saved = Set(records.values.lazy.filter { $0.driveID == driveID && !$0.fileName.isEmpty }.map(\.trackID))
+        guard !saved.isEmpty else { return 0 }
+        var counted = Set<String>()
+        for track in tracks where saved.contains(track.id) && !counted.contains(track.id) && hasVerifiedFile(for: track) {
+            counted.insert(track.id)
+        }
+        return counted.count
+    }
+
+    private func hasVerifiedFile(for track: Track) -> Bool {
+        let scope = DownloadOwner.scope(profileID)
+        guard let record = records[DownloadManager.cacheKey(trackID: track.id, driveID: driveID)],
+              !record.fileName.isEmpty, record.matches(track),
+              record.owners.contains(where: { $0.hasPrefix(scope) }),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: directory.appending(path: record.fileName).path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.int64Value else { return false }
+        return size > 0 && size == record.bytes
+    }
+}
+
 /// Downloads albums and playlists one song at a time through a background session, so leaving the app
 /// does not stop them, reports progress per song, shows a Live Activity, and hands the files back to
 /// the player. A song already on the device is never fetched twice.
@@ -1012,25 +1054,17 @@ public final class DownloadManager {
 
     /// Widget membership requires complete local audio, including files restored from disk.
     public func verifiedAlbumsForWidget(_ albums: [Album]) -> [Album] {
-        let listed = listedOwnerIDs
-        return albums.filter { album in
-            listed.contains(owner(for: album).id) && !album.tracks.isEmpty
-                && album.tracks.allSatisfy { verifiedLocalFile(for: $0) }
-        }
+        widgetDownloadCheck().verifiedAlbums(albums)
     }
 
     public func verifiedSongCountForWidget(_ tracks: [Track]) -> Int {
-        Set(tracks.filter { verifiedLocalFile(for: $0) }.map(\.id)).count
+        widgetDownloadCheck().verifiedSongCount(tracks)
     }
 
-    private func verifiedLocalFile(for track: Track) -> Bool {
-        guard let record = record(for: track),
-              record.owners.contains(where: { $0.hasPrefix(DownloadOwner.scope(activeProfileID)) }),
-              let url = localURL(for: track),
-              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = (attributes[.size] as? NSNumber)?.int64Value else { return false }
-        return size > 0 && size == record.bytes
+    /// What the widget checks against the files, taken here so the checks can run off the main actor.
+    public func widgetDownloadCheck() -> WidgetDownloadCheck {
+        WidgetDownloadCheck(records: records, driveID: driveIDProvider(), profileID: activeProfileID,
+                            listed: listedOwnerIDs, directory: cacheDirectory)
     }
 
     public var totalBytes: Int64 { records.values.reduce(0) { $0 + $1.bytes } }

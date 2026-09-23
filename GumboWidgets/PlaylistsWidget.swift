@@ -24,7 +24,7 @@ private struct PlaylistsView: View {
 
     var body: some View {
         if snapshot.playlists.isEmpty {
-            EmptyFace(symbol: "music.note.list", title: "Playlists", message: "Your lists show up here once the library is in.")
+            EmptyFace(symbol: "music.note.list", title: "Playlists", message: "Your lists show up here once the library is in.", isLocked: snapshot.isLocked)
                 .widgetURL(WidgetLink.tab("playlists"))
         } else {
             switch family {

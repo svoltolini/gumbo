@@ -245,6 +245,12 @@ public nonisolated struct Artist: Identifiable, Hashable, Sendable {
     }
 
     public var topTracks: [Track] { Array(albums.flatMap(\.tracks).prefix(5)) }
+
+    /// How artist names are matched: "Pink Floyd", "PINK FLOYD" and "Pínk Floyd" are one artist,
+    /// as they already are for album ids and Siri.
+    public static func key(for name: String) -> String {
+        name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
 }
 
 public nonisolated struct Genre: Identifiable, Hashable, Sendable {

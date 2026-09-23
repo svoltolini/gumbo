@@ -27,7 +27,7 @@ private struct HomeView: View {
             default: MediumLayout(snapshot: snapshot, album: album, lead: lead)
             }
         } else {
-            EmptyFace()
+            EmptyFace(isLocked: snapshot.isLocked)
         }
     }
 }

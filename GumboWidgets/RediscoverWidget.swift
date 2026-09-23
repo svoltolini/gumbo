@@ -31,12 +31,12 @@ nonisolated struct RediscoverProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (RediscoverEntry) -> Void) {
-        let snapshot = context.isPreview ? WidgetSnapshot.sample : (WidgetStore.load() ?? .empty)
+        let snapshot = context.isPreview ? WidgetSnapshot.sample : WidgetStore.loadForDisplay()
         completion(RediscoverEntry(date: .now, snapshot: snapshot, offset: Self.offset(for: .now, count: snapshot.rediscover.count)))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<RediscoverEntry>) -> Void) {
-        let snapshot = WidgetStore.load() ?? .empty
+        let snapshot = WidgetStore.loadForDisplay()
         let count = snapshot.rediscover.count
         guard count > 1 else {
             completion(Timeline(entries: [RediscoverEntry(date: .now, snapshot: snapshot, offset: 0)], policy: .never))
@@ -81,7 +81,7 @@ private struct RediscoverView: View {
             default: medium(pick)
             }
         } else {
-            EmptyFace(symbol: "sparkles", title: "Rediscover", message: "Once your library is in, an album you haven't played in a while appears here.")
+            EmptyFace(symbol: "sparkles", title: "Rediscover", message: "Once your library is in, an album you haven't played in a while appears here.", isLocked: snapshot.isLocked)
                 .widgetURL(WidgetLink.tab("library"))
         }
     }

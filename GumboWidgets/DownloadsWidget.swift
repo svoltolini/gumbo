@@ -26,7 +26,7 @@ private struct DownloadsView: View {
             default: MediumLayout(snapshot: snapshot, lead: lead)
             }
         } else {
-            EmptyFace(symbol: "arrow.down.circle", title: "Downloads", message: "Tap the arrow on an album to keep it on this iPhone.")
+            EmptyFace(symbol: "arrow.down.circle", title: "Downloads", message: "Tap the arrow on an album to keep it on this iPhone.", isLocked: snapshot.isLocked)
                 .widgetURL(WidgetLink.tab("downloads"))
         }
     }

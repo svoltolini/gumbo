@@ -369,11 +369,11 @@ nonisolated struct SnapshotProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SnapshotEntry) -> Void) {
-        completion(SnapshotEntry(date: .now, snapshot: context.isPreview ? .sample : (WidgetStore.load() ?? .empty)))
+        completion(SnapshotEntry(date: .now, snapshot: context.isPreview ? .sample : WidgetStore.loadForDisplay()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
-        let snapshot = WidgetStore.load() ?? .empty
+        let snapshot = WidgetStore.loadForDisplay()
         var entries = [SnapshotEntry(date: .now, snapshot: snapshot)]
         if snapshot.isPlaying {
             var later = snapshot
@@ -384,21 +384,23 @@ nonisolated struct SnapshotProvider: TimelineProvider {
     }
 }
 
-/// Nothing to show yet: the app's colours and a nudge.
+/// Nothing to show yet: the app's colours and a nudge. While no profile is open the library is
+/// not empty, only hidden, so the nudge is to open the app instead.
 struct EmptyFace: View {
     var symbol = "music.note"
     var title = "Gumbo Music"
     var message = "Play something and it shows up here."
+    var isLocked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: symbol)
+            Image(systemName: isLocked ? "lock.fill" : symbol)
                 .font(.title2.weight(.semibold))
                 .padding(.bottom, 4)
             Spacer(minLength: 0)
             Text(title)
                 .font(.headline)
-            Text(message)
+            Text(isLocked ? "Open Gumbo to show your music." : message)
                 .font(.caption)
                 .opacity(0.8)
         }

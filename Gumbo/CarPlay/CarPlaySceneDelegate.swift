@@ -4,7 +4,7 @@ import GumboCore
 import UIKit
 
 /// The car's screen. CarPlay hands the app an interface controller when the phone connects; the
-/// controller below fills it with the library, the playlists and the artists as lists, and hands
+/// controller below fills it with the library, the playlists, the albums and the artists as lists, and hands
 /// playback to the system's Now Playing screen, driven by the same player as the phone.
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var controller: CarPlayController?
@@ -36,6 +36,7 @@ final class CarPlayController {
 
     private var libraryTemplate: CPListTemplate?
     private var playlistsTemplate: CPListTemplate?
+    private var albumsTemplate: CPListTemplate?
     private var artistsTemplate: CPListTemplate?
     /// What the root currently shows, so a change in readiness swaps it and a change in content only updates it.
     private var rootKind: RootKind?
@@ -89,6 +90,7 @@ final class CarPlayController {
             playbackRequest = UUID()
             libraryTemplate = nil
             playlistsTemplate = nil
+            albumsTemplate = nil
             artistsTemplate = nil
             let root: CPTemplate
             switch kind {
@@ -104,13 +106,17 @@ final class CarPlayController {
                 let playlistsList = CPListTemplate(title: "Playlists", sections: playlistSections())
                 playlistsList.tabTitle = "Playlists"
                 playlistsList.tabImage = UIImage(systemName: "music.note.list")
+                let albumsList = CPListTemplate(title: "Albums", sections: albumSections())
+                albumsList.tabTitle = "Albums"
+                albumsList.tabImage = UIImage(systemName: "square.grid.2x2.fill")
                 let artistsList = CPListTemplate(title: "Artists", sections: artistSections())
                 artistsList.tabTitle = "Artists"
                 artistsList.tabImage = UIImage(systemName: "music.mic")
                 libraryTemplate = libraryList
                 playlistsTemplate = playlistsList
+                albumsTemplate = albumsList
                 artistsTemplate = artistsList
-                root = CPTabBarTemplate(templates: [libraryList, playlistsList, artistsList])
+                root = CPTabBarTemplate(templates: [libraryList, playlistsList, albumsList, artistsList])
             }
             interface.setRootTemplate(root, animated: false) { [weak self] success, error in
                 guard !success else { return }
@@ -120,6 +126,7 @@ final class CarPlayController {
         } else if kind == .tabs {
             libraryTemplate?.updateSections(librarySections())
             playlistsTemplate?.updateSections(playlistSections())
+            albumsTemplate?.updateSections(albumSections())
             artistsTemplate?.updateSections(artistSections())
         }
     }
@@ -189,25 +196,86 @@ final class CarPlayController {
     private func playlistSections() -> [CPListSection] {
         let smart = [library.favouritesPlaylist, library.favouritesMixPlaylist, library.recentlyPlayedPlaylist, library.libraryShufflePlaylist]
             .filter { !$0.tracks.isEmpty }
-        var sections = [CPListSection(items: smart.map(playlistItem), header: "Made for you", sectionIndexTitle: nil)]
-        let own = library.playlists.prefix(max(0, Self.listLimit - smart.count)).map(playlistItem)
-        if !own.isEmpty {
-            sections.append(CPListSection(items: Array(own), header: "Your playlists", sectionIndexTitle: nil))
+        var sections: [CPListSection] = []
+        if !smart.isEmpty {
+            sections.append(CPListSection(items: smart.map(playlistItem), header: "Made for you", sectionIndexTitle: nil))
+        }
+        let room = max(0, Self.listLimit - smart.count)
+        if library.playlists.count <= room {
+            if !library.playlists.isEmpty {
+                sections.append(CPListSection(items: library.playlists.map(playlistItem), header: "Your playlists", sectionIndexTitle: nil))
+            }
+        } else if room > 0 {
+            // The rest stay reachable a page at a time.
+            let all = CPListItem(text: "All playlists", detailText: "\(library.playlists.count) playlists", image: UIImage(systemName: "music.note.list"))
+            all.accessoryType = .disclosureIndicator
+            handle(all) { controller in
+                await controller.showPages(title: "Your playlists", controller.library.playlists) { $0.playlistItem($1) }
+            }
+            let own = library.playlists.prefix(room - 1).map(playlistItem)
+            sections.append(CPListSection(items: [all] + own, header: "Your playlists", sectionIndexTitle: nil))
         }
         return sections
     }
 
+    private func albumSections() -> [CPListSection] {
+        alphabetical(Self.byTitle(library.albums), noun: "albums", name: { $0.title },
+                     current: { Self.byTitle($0.library.albums) }, row: { $0.albumItem($1) })
+    }
+
     private func artistSections() -> [CPListSection] {
-        let items = library.artists.prefix(Self.listLimit).map { artist -> CPListItem in
-            let item = CPListItem(text: artist.name, detailText: artist.summary, image: artist.albums.first.map(cover(for:)))
+        alphabetical(library.artists, noun: "artists", name: { $0.name },
+                     current: { $0.library.artists }, row: { $0.artistItem($1) })
+    }
+
+    private static func byTitle(_ albums: [Album]) -> [Album] {
+        albums.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    /// A–Z browsing within the car's row limit: a list with a section per letter when everything
+    /// fits, otherwise a row per letter that opens that letter's page, read afresh when tapped.
+    private func alphabetical<Element: Sendable>(
+        _ elements: [Element], noun: String, name: @escaping @Sendable (Element) -> String,
+        current: @escaping @MainActor (CarPlayController) -> [Element],
+        row: @escaping @MainActor (CarPlayController, Element) -> CPListItem
+    ) -> [CPListSection] {
+        let groups = AlphabeticalIndex.groups(elements, name: name)
+        if elements.count <= Self.listLimit, groups.count <= CPListTemplate.maximumSectionCount {
+            return groups.map { group in
+                CPListSection(items: group.elements.map { row(self, $0) }, header: group.letter, sectionIndexTitle: group.letter)
+            }
+        }
+        let letters = groups.prefix(Self.listLimit).map { group -> CPListItem in
+            let count = group.elements.count
+            let item = CPListItem(text: group.letter, detailText: "\(count) \(noun)")
             item.accessoryType = .disclosureIndicator
             handle(item) { controller in
-                guard let current = controller.library.artists.first(where: { $0.id == artist.id }) else { return }
-                await controller.showArtist(current)
+                let now = AlphabeticalIndex.groups(current(controller), name: name).first { $0.letter == group.letter }?.elements ?? []
+                await controller.showPages(title: group.letter, now, row: row)
             }
             return item
         }
-        return [CPListSection(items: items)]
+        return [CPListSection(items: letters)]
+    }
+
+    /// Pushes a list of the elements; more than a list holds are split into numbered pages.
+    private func showPages<Element: Sendable>(
+        title: String, _ elements: [Element], row: @escaping @MainActor (CarPlayController, Element) -> CPListItem
+    ) async {
+        let pages = AlphabeticalIndex.pages(count: elements.count, size: Self.listLimit)
+        let items: [CPListItem]
+        if pages.count <= 1 {
+            items = elements.map { row(self, $0) }
+        } else {
+            items = pages.prefix(Self.listLimit).map { range -> CPListItem in
+                let page = Array(elements[range])
+                let item = CPListItem(text: "\(title) \(range.lowerBound + 1)–\(range.upperBound)", detailText: nil)
+                item.accessoryType = .disclosureIndicator
+                handle(item) { controller in await controller.showPages(title: title, page, row: row) }
+                return item
+            }
+        }
+        await push(CPListTemplate(title: title, sections: [CPListSection(items: items)]))
     }
 
     // MARK: Items
@@ -230,6 +298,18 @@ final class CarPlayController {
             guard let current = controller.library.playlist(id: playlist.id) else { return }
             await controller.showPlaylist(current)
         }
+        if let first = playlist.covers.first { loadCover(for: first, into: item) }
+        return item
+    }
+
+    private func artistItem(_ artist: Artist) -> CPListItem {
+        let item = CPListItem(text: artist.name, detailText: artist.summary, image: artist.albums.first.map(cover(for:)))
+        item.accessoryType = .disclosureIndicator
+        handle(item) { controller in
+            guard let current = controller.library.artists.first(where: { $0.id == artist.id }) else { return }
+            await controller.showArtist(current)
+        }
+        if let first = artist.albums.first { loadCover(for: first, into: item) }
         return item
     }
 
@@ -292,9 +372,7 @@ final class CarPlayController {
     }
 
     private func showArtist(_ artist: Artist) async {
-        let albums = artist.albums.prefix(Self.listLimit).map(albumItem)
-        let template = CPListTemplate(title: artist.name, sections: [CPListSection(items: albums)])
-        await push(template)
+        await showPages(title: artist.name, artist.albums) { $0.albumItem($1) }
     }
 
     /// Starts playback and brings up the system's Now Playing screen. Without a song to start at, the
